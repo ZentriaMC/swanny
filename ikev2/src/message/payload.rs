@@ -1,35 +1,12 @@
-#![allow(non_camel_case_types)]
-
 use crate::message::{
-    Num, proposal,
+    num::{ContentType, DhId, IdType, Num},
+    proposal,
     serialize::{self, Deserialize, Serialize},
-    transform,
 };
 use anyhow::Result;
 use bytes::{Buf, BufMut};
 
 pub const HEADER_SIZE: usize = 4;
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum ContentType {
-    SA = 33,
-    KE = 34,
-    IDi = 35,
-    IDr = 36,
-    CERT = 37,
-    CERTREQ = 38,
-    AUTH = 39,
-    NONCE = 40,
-    NOTIFY = 41,
-    DELETE = 42,
-    VENDOR = 43,
-    TSi = 44,
-    TSr = 45,
-    SK = 46,
-    CP = 47,
-    EAP = 48,
-}
 
 impl From<ContentType> for u8 {
     fn from(value: ContentType) -> Self {
@@ -186,19 +163,19 @@ impl serialize::Deserialize for SA {
 
 #[derive(Debug, PartialEq)]
 pub struct KE {
-    dh_group: Num<u16, transform::DhId>,
+    dh_group: Num<u16, DhId>,
     ke_data: Vec<u8>,
 }
 
 impl KE {
-    pub fn new(dh_group: Num<u16, transform::DhId>, ke_data: impl AsRef<[u8]>) -> Self {
+    pub fn new(dh_group: Num<u16, DhId>, ke_data: impl AsRef<[u8]>) -> Self {
         Self {
             dh_group,
             ke_data: ke_data.as_ref().to_vec(),
         }
     }
 
-    pub fn dh_group(&self) -> Num<u16, transform::DhId> {
+    pub fn dh_group(&self) -> Num<u16, DhId> {
         self.dh_group
     }
 
@@ -232,19 +209,6 @@ impl serialize::Deserialize for KE {
         let dh_group = buf.try_get_u16()?;
         let _ = buf.try_get_u16()?;
         Ok(Box::new(Self::new(dh_group.into(), buf.chunk())))
-    }
-}
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum IdType {
-    ID_IPV4_ADDR = 1,
-    ID_FQDN = 2,
-}
-
-impl From<IdType> for u8 {
-    fn from(value: IdType) -> Self {
-        value as Self
     }
 }
 
@@ -314,7 +278,7 @@ pub(crate) mod tests {
 
     pub(crate) fn create_ke() -> KE {
         const DATA: &'static [u8] = b"key exchange data";
-        KE::new(Num::Assigned(transform::DhId::MODP4096), DATA)
+        KE::new(Num::Assigned(DhId::MODP4096), DATA)
     }
 
     #[test]

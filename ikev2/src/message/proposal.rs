@@ -1,22 +1,11 @@
-use crate::message::{Num, serialize, transform};
+use crate::message::{
+    num::{Num, Protocol},
+    serialize, transform,
+};
 use anyhow::Result;
 use bytes::{Buf, BufMut};
 
 pub const HEADER_SIZE: usize = 4;
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum Protocol {
-    IKE = 1,
-    AH = 2,
-    ESP = 3,
-}
-
-impl From<Protocol> for u8 {
-    fn from(value: Protocol) -> Self {
-        value as Self
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Proposal {

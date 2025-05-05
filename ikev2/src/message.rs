@@ -1,9 +1,8 @@
 use anyhow::Result;
-use bitflags::bitflags;
 use bytes::{Buf, BufMut};
 
 pub mod num;
-use num::Num;
+use num::{ContentType, Exchange, MessageFlags, Num};
 
 pub mod payload;
 pub mod proposal;
@@ -12,42 +11,23 @@ pub mod transform;
 
 pub type SPI = [u8; 8];
 
-#[allow(non_camel_case_types)]
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum Exchange {
-    IKE_SA_INIT = 34,
-    IKE_AUTH = 35,
-    CREATE_CHILD_SA = 36,
-    INFORMATIONAL = 37,
-}
-
-impl From<Exchange> for u8 {
-    fn from(value: Exchange) -> Self {
-        value as Self
-    }
-}
-
-bitflags! {
-    #[derive(Debug, PartialEq)]
-    pub struct Flags: u8 {
-        const R = 1u8 << 5;
-        const V = 1u8 << 4;
-        const I = 1u8 << 3;
-    }
-}
-
 pub struct Message {
     spi_i: SPI,
     spi_r: SPI,
     exchange: Num<u8, Exchange>,
-    flags: Flags,
+    flags: MessageFlags,
     id: u32,
     payloads: Vec<payload::Payload>,
 }
 
 impl Message {
-    pub fn new(spi_i: SPI, spi_r: SPI, exchange: Num<u8, Exchange>, flags: Flags, id: u32) -> Self {
+    pub fn new(
+        spi_i: SPI,
+        spi_r: SPI,
+        exchange: Num<u8, Exchange>,
+        flags: MessageFlags,
+        id: u32,
+    ) -> Self {
         Self {
             spi_i,
             spi_r,
@@ -70,7 +50,7 @@ impl Message {
         self.exchange
     }
 
-    pub fn flags(&self) -> &Flags {
+    pub fn flags(&self) -> &MessageFlags {
         &self.flags
     }
 
@@ -91,7 +71,7 @@ const HEADER_SIZE: usize = 28;
 
 impl serialize::Serialize for Message {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        let trailer: Vec<Num<u8, payload::ContentType>> = vec![Num::Unassigned(0); 1];
+        let trailer: Vec<Num<u8, ContentType>> = vec![Num::Unassigned(0); 1];
         let mut types_iter = self
             .payloads
             .iter()
@@ -141,11 +121,11 @@ impl serialize::Deserialize for Message {
         buf.try_copy_to_slice(&mut spi_i[..])?;
         let mut spi_r: SPI = Default::default();
         buf.try_copy_to_slice(&mut spi_r[..])?;
-        let mut content_type: Num<u8, payload::ContentType> = buf.try_get_u8()?.into();
+        let mut content_type: Num<u8, ContentType> = buf.try_get_u8()?.into();
         let _version = buf.try_get_u8()?;
         let exchange: Num<u8, Exchange> = buf.try_get_u8()?.into();
-        let flags =
-            Flags::from_bits(buf.try_get_u8()?).ok_or_else(|| anyhow::anyhow!("unknown flags"))?;
+        let flags = MessageFlags::from_bits(buf.try_get_u8()?)
+            .ok_or_else(|| anyhow::anyhow!("unknown flags"))?;
         let id = buf.try_get_u32()?;
         let _length = buf.try_get_u32()?;
         let mut payloads = Vec::new();
@@ -179,7 +159,7 @@ mod tests {
             SPI_I.clone(),
             SPI_R.clone(),
             Num::Assigned(Exchange::IKE_SA_INIT),
-            Flags::I,
+            MessageFlags::I,
             0,
         )
     }
@@ -211,12 +191,12 @@ mod tests {
 
         message.add_payload(payload::Payload::new(
             true,
-            Num::Assigned(payload::ContentType::SA),
+            Num::Assigned(ContentType::SA),
             Box::new(sa),
         ));
         message.add_payload(payload::Payload::new(
             true,
-            Num::Assigned(payload::ContentType::KE),
+            Num::Assigned(ContentType::KE),
             Box::new(ke),
         ));
 

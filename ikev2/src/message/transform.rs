@@ -1,113 +1,11 @@
-#![allow(non_camel_case_types)]
-
-use crate::message::{Num, serialize};
+use crate::message::{
+    num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, TransformType},
+    serialize,
+};
 use anyhow::Result;
 use bytes::{Buf, BufMut};
 
 pub const HEADER_SIZE: usize = 4;
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum TransformType {
-    ENCR = 1,
-    PRF = 2,
-    INTEG = 3,
-    DH = 4,
-    ESN = 5,
-}
-
-impl From<TransformType> for u8 {
-    fn from(value: TransformType) -> Self {
-        value as Self
-    }
-}
-
-#[repr(u16)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum EncrId {
-    ENCR_DES_IV64 = 1,
-    ENCR_DES = 2,
-    ENCR_3DES = 3,
-    ENCR_RC5 = 4,
-    ENCR_IDEA = 5,
-    ENCR_CAST = 6,
-    ENCR_BLOWFISH = 7,
-    ENCR_3IDEA = 8,
-    ENCR_DES_IV32 = 9,
-    ENCR_NULL = 11,
-    ENCR_AES_CBC = 12,
-    ENCR_AES_CTR = 13,
-}
-
-impl From<EncrId> for u16 {
-    fn from(value: EncrId) -> Self {
-        value as Self
-    }
-}
-
-#[repr(u16)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum PrfId {
-    PRF_HMAC_MD5 = 1,
-    PRF_HMAC_SHA1 = 2,
-    PRF_HMAC_TIGER = 3,
-}
-
-impl From<PrfId> for u16 {
-    fn from(value: PrfId) -> Self {
-        value as Self
-    }
-}
-
-#[repr(u16)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum IntegId {
-    NONE = 0,
-    AUTH_HMAC_MD5_96 = 1,
-    AUTH_HMAC_SHA1_96 = 2,
-    AUTH_DES_MAC = 3,
-    AUTH_KPDK_MD5 = 4,
-    AUTH_AES_XCBC_96 = 5,
-}
-
-impl From<IntegId> for u16 {
-    fn from(value: IntegId) -> Self {
-        value as Self
-    }
-}
-
-#[repr(u16)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum DhId {
-    NONE = 0,
-    MODP768 = 1,
-    MODP1024 = 2,
-    MODP1536 = 5,
-    MODP2048 = 14,
-    MODP3072 = 15,
-    MODP4096 = 16,
-    MODP6144 = 17,
-    MODP8192 = 18,
-}
-
-impl From<DhId> for u16 {
-    fn from(value: DhId) -> Self {
-        value as Self
-    }
-}
-
-#[repr(u16)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum EsnId {
-    NoEsn = 0,
-    Esn = 1,
-}
-
-impl From<EsnId> for u16 {
-    fn from(value: EsnId) -> Self {
-        value as Self
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TransformId {
@@ -147,17 +45,6 @@ impl Num<u16, TransformId> {
 pub enum AttributeFormat {
     TV = 0,
     TLV = 1,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum AttributeType {
-    KeyLength = 14,
-}
-
-impl From<AttributeType> for u16 {
-    fn from(value: AttributeType) -> Self {
-        value as Self
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
