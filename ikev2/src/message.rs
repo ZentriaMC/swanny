@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytes::{Buf, BufMut};
 
 pub mod num;
-use num::{ContentType, Exchange, MessageFlags, Num};
+use num::{ExchangeType, MessageFlags, Num, PayloadType};
 
 pub mod payload;
 pub mod proposal;
@@ -14,7 +14,7 @@ pub type SPI = [u8; 8];
 pub struct Message {
     spi_i: SPI,
     spi_r: SPI,
-    exchange: Num<u8, Exchange>,
+    exchange: Num<u8, ExchangeType>,
     flags: MessageFlags,
     id: u32,
     payloads: Vec<payload::Payload>,
@@ -24,7 +24,7 @@ impl Message {
     pub fn new(
         spi_i: SPI,
         spi_r: SPI,
-        exchange: Num<u8, Exchange>,
+        exchange: Num<u8, ExchangeType>,
         flags: MessageFlags,
         id: u32,
     ) -> Self {
@@ -46,7 +46,7 @@ impl Message {
         &self.spi_r
     }
 
-    pub fn exchange(&self) -> Num<u8, Exchange> {
+    pub fn exchange(&self) -> Num<u8, ExchangeType> {
         self.exchange
     }
 
@@ -71,11 +71,11 @@ const HEADER_SIZE: usize = 28;
 
 impl serialize::Serialize for Message {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        let trailer: Vec<Num<u8, ContentType>> = vec![Num::Unassigned(0); 1];
+        let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
         let mut types_iter = self
             .payloads
             .iter()
-            .map(|p| p.content_type())
+            .map(|p| p.r#type())
             .chain(trailer.into_iter());
 
         buf.put_slice(&self.spi_i[..]);
@@ -87,8 +87,8 @@ impl serialize::Serialize for Message {
         buf.put_u32(self.id);
         buf.put_u32(self.size()?.try_into()?);
 
-        for (payload, next_content_type) in self.payloads.iter().zip(types_iter) {
-            payload.serialize(next_content_type, buf)?;
+        for (payload, next_payload_type) in self.payloads.iter().zip(types_iter) {
+            payload.serialize(next_payload_type, buf)?;
         }
         Ok(())
     }
@@ -113,7 +113,7 @@ impl serialize::Serialize for Message {
 }
 
 impl serialize::Deserialize for Message {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {
@@ -121,27 +121,27 @@ impl serialize::Deserialize for Message {
         buf.try_copy_to_slice(&mut spi_i[..])?;
         let mut spi_r: SPI = Default::default();
         buf.try_copy_to_slice(&mut spi_r[..])?;
-        let mut content_type: Num<u8, ContentType> = buf.try_get_u8()?.into();
+        let mut payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
         let _version = buf.try_get_u8()?;
-        let exchange: Num<u8, Exchange> = buf.try_get_u8()?.into();
+        let exchange: Num<u8, ExchangeType> = buf.try_get_u8()?.into();
         let flags = MessageFlags::from_bits(buf.try_get_u8()?)
             .ok_or_else(|| anyhow::anyhow!("unknown flags"))?;
         let id = buf.try_get_u32()?;
         let _length = buf.try_get_u32()?;
         let mut payloads = Vec::new();
         while buf.has_remaining() {
-            let (payload, next_content_type) = payload::Payload::deserialize(content_type, buf)?;
+            let (payload, next_payload_type) = payload::Payload::deserialize(payload_type, buf)?;
             payloads.push(payload);
-            content_type = next_content_type;
+            payload_type = next_payload_type;
         }
-        Ok(Box::new(Self {
+        Ok(Self {
             spi_i,
             spi_r,
             exchange,
             flags,
             id,
             payloads,
-        }))
+        })
     }
 }
 
@@ -158,7 +158,7 @@ mod tests {
         Message::new(
             SPI_I.clone(),
             SPI_R.clone(),
-            Num::Assigned(Exchange::IKE_SA_INIT),
+            Num::Assigned(ExchangeType::IKE_SA_INIT),
             MessageFlags::I,
             0,
         )
@@ -190,14 +190,14 @@ mod tests {
         let ke = payload::tests::create_ke();
 
         message.add_payload(payload::Payload::new(
-            true,
-            Num::Assigned(ContentType::SA),
+            Num::Assigned(PayloadType::SA),
             Box::new(sa),
+            true,
         ));
         message.add_payload(payload::Payload::new(
-            true,
-            Num::Assigned(ContentType::KE),
+            Num::Assigned(PayloadType::KE),
             Box::new(ke),
+            true,
         ));
 
         let len = message.size().expect("unable to determine serialized size");

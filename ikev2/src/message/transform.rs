@@ -109,7 +109,7 @@ impl serialize::Serialize for Attribute {
 }
 
 impl serialize::Deserialize for Attribute {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {
@@ -123,11 +123,11 @@ impl serialize::Deserialize for Attribute {
         let type_: Num<u16, AttributeType> = type_.into();
         let mut value = vec![0; len as usize];
         buf.try_copy_to_slice(&mut value)?;
-        Ok(Box::new(Self {
+        Ok(Self {
             type_,
             value,
             format,
-        }))
+        })
     }
 }
 
@@ -185,7 +185,7 @@ impl serialize::Serialize for Transform {
 }
 
 impl serialize::Deserialize for Transform {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {
@@ -194,13 +194,13 @@ impl serialize::Deserialize for Transform {
         let id = Num::<u16, TransformId>::from_u16(type_, buf.try_get_u16()?);
         let mut attributes = Vec::new();
         while buf.has_remaining() {
-            attributes.push(*Attribute::deserialize(buf)?);
+            attributes.push(Attribute::deserialize(buf)?);
         }
-        Ok(Box::new(Self {
+        Ok(Self {
             type_,
             id,
             attributes,
-        }))
+        })
     }
 }
 
@@ -238,7 +238,7 @@ pub(crate) mod tests {
 
         let attr2 = Attribute::deserialize(&mut &buf[..]).expect("unable to deserialize attribute");
 
-        assert_eq!(*attr2, attr);
+        assert_eq!(attr2, attr);
     }
 
     #[test]

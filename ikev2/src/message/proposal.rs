@@ -86,7 +86,7 @@ impl serialize::Serialize for Proposal {
 }
 
 impl serialize::Deserialize for Proposal {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {
@@ -104,20 +104,18 @@ impl serialize::Deserialize for Proposal {
             let len = len
                 .checked_sub(transform::HEADER_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("invalid transform length"))?;
-            transforms.push(*transform::Transform::deserialize(
-                &mut &buf.chunk()[..len],
-            )?);
+            transforms.push(transform::Transform::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
         if buf.has_remaining() {
             return Err(anyhow::anyhow!("proposal with extra data"));
         }
-        Ok(Box::new(Self {
+        Ok(Self {
             number,
             protocol,
             spi,
             transforms,
-        }))
+        })
     }
 }
 

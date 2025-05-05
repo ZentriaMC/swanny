@@ -7,7 +7,7 @@ pub trait Serialize {
 }
 
 pub trait Deserialize {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized;
 }

@@ -65,15 +65,15 @@ where
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum Exchange {
+pub enum ExchangeType {
     IKE_SA_INIT = 34,
     IKE_AUTH = 35,
     CREATE_CHILD_SA = 36,
     INFORMATIONAL = 37,
 }
 
-impl From<Exchange> for u8 {
-    fn from(value: Exchange) -> Self {
+impl From<ExchangeType> for u8 {
+    fn from(value: ExchangeType) -> Self {
         value as Self
     }
 }
@@ -89,7 +89,7 @@ bitflags! {
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum ContentType {
+pub enum PayloadType {
     SA = 33,
     KE = 34,
     IDi = 35,

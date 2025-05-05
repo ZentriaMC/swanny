@@ -1,5 +1,5 @@
 use crate::message::{
-    num::{ContentType, DhId, IdType, Num},
+    num::{DhId, IdType, Num, PayloadType},
     proposal,
     serialize::{self, Deserialize, Serialize},
 };
@@ -8,8 +8,8 @@ use bytes::{Buf, BufMut};
 
 pub const HEADER_SIZE: usize = 4;
 
-impl From<ContentType> for u8 {
-    fn from(value: ContentType) -> Self {
+impl From<PayloadType> for u8 {
+    fn from(value: PayloadType) -> Self {
         value as Self
     }
 }
@@ -18,33 +18,29 @@ pub trait Content: Serialize + Deserialize {}
 
 pub struct Payload {
     critical: bool,
-    content_type: Num<u8, ContentType>,
+    type_: Num<u8, PayloadType>,
     content: Box<dyn Content>,
 }
 
 impl Payload {
-    pub fn new(
-        critical: bool,
-        content_type: Num<u8, ContentType>,
-        content: Box<dyn Content>,
-    ) -> Self {
+    pub fn new(type_: Num<u8, PayloadType>, content: Box<dyn Content>, critical: bool) -> Self {
         Self {
-            critical,
-            content_type,
+            type_,
             content,
+            critical,
         }
     }
 
-    pub fn content_type(&self) -> Num<u8, ContentType> {
-        self.content_type
+    pub fn r#type(&self) -> Num<u8, PayloadType> {
+        self.type_
     }
 
     pub fn serialize(
         &self,
-        next_content_type: Num<u8, ContentType>,
+        next_payload_type: Num<u8, PayloadType>,
         buf: &mut dyn BufMut,
     ) -> Result<()> {
-        buf.put_u8(next_content_type.into());
+        buf.put_u8(next_payload_type.into());
         buf.put_u8(u8::from(self.critical) * 0x80);
         buf.put_u16(self.size()?.try_into()?);
         self.content.serialize(buf)
@@ -57,36 +53,36 @@ impl Payload {
     }
 
     pub fn deserialize(
-        content_type: Num<u8, ContentType>,
+        payload_type: Num<u8, PayloadType>,
         buf: &mut dyn Buf,
-    ) -> Result<(Self, Num<u8, ContentType>)>
+    ) -> Result<(Self, Num<u8, PayloadType>)>
     where
         Self: Sized,
     {
-        let next_content_type: Num<u8, ContentType> = buf.try_get_u8()?.into();
+        let next_payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
         let critical = (buf.try_get_u8()? & 0x80) != 0;
         let len: usize = buf.try_get_u16()?.try_into()?;
         let len = len
             .checked_sub(HEADER_SIZE)
             .ok_or_else(|| anyhow::anyhow!("invalid payload length"))?;
 
-        let content = match content_type {
-            Num::Assigned(ContentType::SA) => {
-                SA::deserialize(&mut &buf.chunk()[..len])? as Box<dyn Content>
+        let content = match payload_type {
+            Num::Assigned(PayloadType::SA) => {
+                Box::new(SA::deserialize(&mut &buf.chunk()[..len])?) as Box<dyn Content>
             }
-            Num::Assigned(ContentType::KE) => {
-                KE::deserialize(&mut &buf.chunk()[..len])? as Box<dyn Content>
+            Num::Assigned(PayloadType::KE) => {
+                Box::new(KE::deserialize(&mut &buf.chunk()[..len])?) as Box<dyn Content>
             }
-            Num::Assigned(ContentType::IDi) | Num::Assigned(ContentType::IDr) => {
-                ID::deserialize(&mut &buf.chunk()[..len])? as Box<dyn Content>
+            Num::Assigned(PayloadType::IDi) | Num::Assigned(PayloadType::IDr) => {
+                Box::new(ID::deserialize(&mut &buf.chunk()[..len])?) as Box<dyn Content>
             }
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
         };
         buf.advance(len);
 
         Ok((
-            Self::new(critical, content_type, content),
-            next_content_type,
+            Self::new(payload_type, content, critical),
+            next_payload_type,
         ))
     }
 }
@@ -142,7 +138,7 @@ impl serialize::Serialize for SA {
 }
 
 impl serialize::Deserialize for SA {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {
@@ -154,10 +150,10 @@ impl serialize::Deserialize for SA {
             let len = len
                 .checked_sub(proposal::HEADER_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("invalid proposal length"))?;
-            proposals.push(*proposal::Proposal::deserialize(&mut &buf.chunk()[..len])?);
+            proposals.push(proposal::Proposal::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
-        Ok(Box::new(Self::new(proposals)))
+        Ok(Self::new(proposals))
     }
 }
 
@@ -202,13 +198,13 @@ impl serialize::Serialize for KE {
 }
 
 impl serialize::Deserialize for KE {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {
         let dh_group = buf.try_get_u16()?;
         let _ = buf.try_get_u16()?;
-        Ok(Box::new(Self::new(dh_group.into(), buf.chunk())))
+        Ok(Self::new(dh_group.into(), buf.chunk()))
     }
 }
 
@@ -254,14 +250,14 @@ impl serialize::Serialize for ID {
 }
 
 impl serialize::Deserialize for ID {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Box<Self>>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {
         let type_ = buf.try_get_u8()?;
         let _ = buf.try_get_u8()?;
         let _ = buf.try_get_u16()?;
-        Ok(Box::new(Self::new(type_.into(), buf.chunk())))
+        Ok(Self::new(type_.into(), buf.chunk()))
     }
 }
 
@@ -291,7 +287,7 @@ pub(crate) mod tests {
 
         let sa2 = SA::deserialize(&mut &buf[..]).expect("unable to deserialize SA");
 
-        assert_eq!(*sa2, sa);
+        assert_eq!(sa2, sa);
     }
 
     #[test]
@@ -304,6 +300,6 @@ pub(crate) mod tests {
 
         let ke2 = KE::deserialize(&mut &buf[..]).expect("unable to deserialize KE");
 
-        assert_eq!(*ke2, ke);
+        assert_eq!(ke2, ke);
     }
 }
