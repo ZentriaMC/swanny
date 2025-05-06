@@ -14,16 +14,39 @@ impl From<PayloadType> for u8 {
     }
 }
 
-pub trait Content: Serialize + Deserialize {}
+#[derive(Debug)]
+pub enum Content {
+    SA(SA),
+    KE(KE),
+    ID(ID),
+}
+
+impl Serialize for Content {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        match self {
+            Content::SA(sa) => sa.serialize(buf),
+            Content::KE(ke) => ke.serialize(buf),
+            Content::ID(id) => id.serialize(buf),
+        }
+    }
+
+    fn size(&self) -> Result<usize> {
+        match self {
+            Content::SA(sa) => sa.size(),
+            Content::KE(ke) => ke.size(),
+            Content::ID(id) => id.size(),
+        }
+    }
+}
 
 pub struct Payload {
     critical: bool,
     type_: Num<u8, PayloadType>,
-    content: Box<dyn Content>,
+    content: Content,
 }
 
 impl Payload {
-    pub fn new(type_: Num<u8, PayloadType>, content: Box<dyn Content>, critical: bool) -> Self {
+    pub fn new(type_: Num<u8, PayloadType>, content: Content, critical: bool) -> Self {
         Self {
             type_,
             content,
@@ -68,13 +91,13 @@ impl Payload {
 
         let content = match payload_type {
             Num::Assigned(PayloadType::SA) => {
-                Box::new(SA::deserialize(&mut &buf.chunk()[..len])?) as Box<dyn Content>
+                Content::SA(SA::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::KE) => {
-                Box::new(KE::deserialize(&mut &buf.chunk()[..len])?) as Box<dyn Content>
+                Content::KE(KE::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::IDi) | Num::Assigned(PayloadType::IDr) => {
-                Box::new(ID::deserialize(&mut &buf.chunk()[..len])?) as Box<dyn Content>
+                Content::ID(ID::deserialize(&mut &buf.chunk()[..len])?)
             }
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
         };
@@ -103,8 +126,6 @@ impl SA {
         self.proposals.iter()
     }
 }
-
-impl Content for SA {}
 
 impl serialize::Serialize for SA {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
@@ -180,8 +201,6 @@ impl KE {
     }
 }
 
-impl Content for KE {}
-
 impl serialize::Serialize for KE {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         buf.put_u16(self.dh_group.into());
@@ -230,8 +249,6 @@ impl ID {
         &self.id_data
     }
 }
-
-impl Content for ID {}
 
 impl serialize::Serialize for ID {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {

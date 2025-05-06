@@ -187,12 +187,12 @@ mod tests {
 
         message.add_payload(payload::Payload::new(
             Num::Assigned(PayloadType::SA),
-            Box::new(sa),
+            payload::Content::SA(sa),
             true,
         ));
         message.add_payload(payload::Payload::new(
             Num::Assigned(PayloadType::KE),
-            Box::new(ke),
+            payload::Content::KE(ke),
             true,
         ));
 
