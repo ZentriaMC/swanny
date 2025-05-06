@@ -1,5 +1,5 @@
 use crate::message::{
-    num::{DhId, IdType, Num, PayloadType},
+    num::{DhId, IdType, Num, PayloadType, AuthType},
     proposal,
     serialize::{self, Deserialize, Serialize},
 };
@@ -19,6 +19,7 @@ pub enum Content {
     SA(SA),
     KE(KE),
     ID(ID),
+    Auth(Auth),
 }
 
 impl Serialize for Content {
@@ -27,6 +28,7 @@ impl Serialize for Content {
             Content::SA(sa) => sa.serialize(buf),
             Content::KE(ke) => ke.serialize(buf),
             Content::ID(id) => id.serialize(buf),
+            Content::Auth(auth) => auth.serialize(buf),
         }
     }
 
@@ -35,6 +37,7 @@ impl Serialize for Content {
             Content::SA(sa) => sa.size(),
             Content::KE(ke) => ke.size(),
             Content::ID(id) => id.size(),
+            Content::Auth(auth) => auth.size(),
         }
     }
 }
@@ -275,6 +278,57 @@ impl serialize::Deserialize for ID {
         let _ = buf.try_get_u8()?;
         let _ = buf.try_get_u16()?;
         Ok(Self::new(type_.into(), buf.chunk()))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Auth {
+    method: Num<u8, AuthType>,
+    auth_data: Vec<u8>,
+}
+
+impl Auth {
+    pub fn new(method: Num<u8, AuthType>, auth_data: impl AsRef<[u8]>) -> Self {
+        Self {
+            method,
+            auth_data: auth_data.as_ref().to_vec(),
+        }
+    }
+
+    pub fn method(&self) -> Num<u8, AuthType> {
+        self.method
+    }
+
+    pub fn auth_data(&self) -> &[u8] {
+        &self.auth_data
+    }
+}
+
+impl serialize::Serialize for Auth {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        buf.put_u8(self.method.into());
+        buf.put_u8(0);
+        buf.put_u16(0);
+        buf.put_slice(&self.auth_data[..]);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize> {
+        4usize
+            .checked_add(self.auth_data.len())
+            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+    }
+}
+
+impl serialize::Deserialize for Auth {
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let method = buf.try_get_u8()?;
+        let _ = buf.try_get_u8()?;
+        let _ = buf.try_get_u16()?;
+        Ok(Self::new(method.into(), buf.chunk()))
     }
 }
 

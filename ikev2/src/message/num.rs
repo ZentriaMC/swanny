@@ -254,3 +254,17 @@ impl From<IdType> for u8 {
         value as Self
     }
 }
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
+pub enum AuthType {
+    RSA = 1,
+    PSK = 2,
+    DSS = 3,
+}
+
+impl From<AuthType> for u8 {
+    fn from(value: AuthType) -> Self {
+        value as Self
+    }
+}
