@@ -57,7 +57,7 @@ where
 {
     fn from(value: P) -> Self {
         match E::from_u64(value.into()) {
-            Some(n) => Num::Assigned(n.into()),
+            Some(n) => Num::Assigned(n),
             None => Num::Unassigned(value),
         }
     }

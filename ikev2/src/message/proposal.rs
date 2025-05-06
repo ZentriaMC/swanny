@@ -100,7 +100,7 @@ impl serialize::Deserialize for Proposal {
         for _ in 0..num_transforms {
             let _last_substruc = buf.try_get_u8()?;
             let _ = buf.try_get_u8()?;
-            let len: usize = buf.try_get_u16()?.try_into()?;
+            let len: usize = buf.try_get_u16()?.into();
             let len = len
                 .checked_sub(transform::HEADER_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("invalid transform length"))?;

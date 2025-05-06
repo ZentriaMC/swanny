@@ -61,7 +61,7 @@ impl Payload {
     {
         let next_payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
         let critical = (buf.try_get_u8()? & 0x80) != 0;
-        let len: usize = buf.try_get_u16()?.try_into()?;
+        let len: usize = buf.try_get_u16()?.into();
         let len = len
             .checked_sub(HEADER_SIZE)
             .ok_or_else(|| anyhow::anyhow!("invalid payload length"))?;
@@ -146,7 +146,7 @@ impl serialize::Deserialize for SA {
         while buf.has_remaining() {
             let _last_substruc = buf.try_get_u8()?;
             let _ = buf.try_get_u8()?;
-            let len: usize = buf.try_get_u16()?.try_into()?;
+            let len: usize = buf.try_get_u16()?.into();
             let len = len
                 .checked_sub(proposal::HEADER_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("invalid proposal length"))?;
