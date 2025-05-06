@@ -1,5 +1,5 @@
 use crate::message::{
-    num::{DhId, IdType, Num, PayloadType, AuthType},
+    num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
     proposal,
     serialize::{self, Deserialize, Serialize},
 };
@@ -21,6 +21,7 @@ pub enum Content {
     ID(ID),
     Auth(Auth),
     Nonce(Nonce),
+    Notify(Notify),
 }
 
 impl Serialize for Content {
@@ -31,6 +32,7 @@ impl Serialize for Content {
             Content::ID(id) => id.serialize(buf),
             Content::Auth(auth) => auth.serialize(buf),
             Content::Nonce(nonce) => nonce.serialize(buf),
+            Content::Notify(notify) => notify.serialize(buf),
         }
     }
 
@@ -41,6 +43,7 @@ impl Serialize for Content {
             Content::ID(id) => id.size(),
             Content::Auth(auth) => auth.size(),
             Content::Nonce(nonce) => nonce.size(),
+            Content::Notify(notify) => notify.size(),
         }
     }
 }
@@ -369,6 +372,93 @@ impl serialize::Deserialize for Nonce {
         Self: Sized,
     {
         Ok(Self::new(buf.chunk()))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Notify {
+    protocol: Num<u8, Protocol>,
+    spi: Option<Vec<u8>>,
+    type_: Num<u16, NotifyType>,
+    notify_data: Vec<u8>,
+}
+
+impl Notify {
+    pub fn new(
+        protocol: Num<u8, Protocol>,
+        spi: Option<&[u8]>,
+        type_: Num<u16, NotifyType>,
+        notify_data: impl AsRef<[u8]>,
+    ) -> Self {
+        Self {
+            protocol,
+            spi: spi.map(|spi| spi.as_ref().to_vec()),
+            type_,
+            notify_data: notify_data.as_ref().to_vec(),
+        }
+    }
+
+    pub fn protocol(&self) -> Num<u8, Protocol> {
+        self.protocol
+    }
+
+    pub fn spi(&self) -> Option<&[u8]> {
+        self.spi.as_deref()
+    }
+
+    pub fn r#type(&self) -> Num<u16, NotifyType> {
+        self.type_
+    }
+
+    pub fn notify_data(&self) -> &[u8] {
+        &self.notify_data
+    }
+}
+
+impl serialize::Serialize for Notify {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        buf.put_u8(self.protocol.into());
+        if let Some(ref spi) = self.spi {
+            buf.put_u8(spi.len().try_into()?);
+        } else {
+            buf.put_u8(0);
+        }
+        buf.put_u16(self.type_.into());
+        if let Some(ref spi) = self.spi {
+            buf.put_slice(spi);
+        }
+        buf.put_slice(&self.notify_data[..]);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize> {
+        4usize
+            .checked_add(self.spi.as_ref().map(|spi| spi.len()).unwrap_or(0))
+            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))?
+            .checked_add(self.notify_data.len())
+            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+    }
+}
+
+impl serialize::Deserialize for Notify {
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let protocol = buf.try_get_u8()?;
+        let spi_len: usize = buf.try_get_u8()?.into();
+        let type_ = buf.try_get_u16()?;
+        let spi = if spi_len > 0 {
+            Some(&buf.chunk()[..spi_len])
+        } else {
+            None
+        };
+        Ok(Self::new(
+            protocol.into(),
+            spi,
+            type_.into(),
+            &buf.chunk()[spi_len..],
+        ))
     }
 }
 
