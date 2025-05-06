@@ -20,6 +20,7 @@ pub enum Content {
     KE(KE),
     ID(ID),
     Auth(Auth),
+    Nonce(Nonce),
 }
 
 impl Serialize for Content {
@@ -29,6 +30,7 @@ impl Serialize for Content {
             Content::KE(ke) => ke.serialize(buf),
             Content::ID(id) => id.serialize(buf),
             Content::Auth(auth) => auth.serialize(buf),
+            Content::Nonce(nonce) => nonce.serialize(buf),
         }
     }
 
@@ -38,6 +40,7 @@ impl Serialize for Content {
             Content::KE(ke) => ke.size(),
             Content::ID(id) => id.size(),
             Content::Auth(auth) => auth.size(),
+            Content::Nonce(nonce) => nonce.size(),
         }
     }
 }
@@ -329,6 +332,43 @@ impl serialize::Deserialize for Auth {
         let _ = buf.try_get_u8()?;
         let _ = buf.try_get_u16()?;
         Ok(Self::new(method.into(), buf.chunk()))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Nonce {
+    nonce: Vec<u8>,
+}
+
+impl Nonce {
+    pub fn new(nonce: impl AsRef<[u8]>) -> Self {
+        Self {
+            nonce: nonce.as_ref().to_vec(),
+        }
+    }
+
+    pub fn nonce(&self) -> &[u8] {
+        &self.nonce
+    }
+}
+
+impl serialize::Serialize for Nonce {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        buf.put_slice(&self.nonce[..]);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize> {
+        Ok(self.nonce.len())
+    }
+}
+
+impl serialize::Deserialize for Nonce {
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self::new(buf.chunk()))
     }
 }
 
