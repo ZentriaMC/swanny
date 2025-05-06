@@ -242,6 +242,11 @@ impl From<AttributeType> for u16 {
 pub enum IdType {
     ID_IPV4_ADDR = 1,
     ID_FQDN = 2,
+    ID_RFC822_ADDR = 3,
+    ID_IPV6_ADDR = 5,
+    ID_DER_ASN1_DN = 9,
+    ID_DER_ASN1_GN = 10,
+    ID_KEY_ID = 11,
 }
 
 impl From<IdType> for u8 {
