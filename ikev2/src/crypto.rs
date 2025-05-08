@@ -3,7 +3,9 @@ use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 
 use openssl::{
-    bn, dh, ec,
+    bn,
+    derive::Deriver,
+    dh, ec,
     hash::{Hasher, MessageDigest, hash},
     nid::Nid,
     pkey::{self, PKey},
@@ -167,5 +169,71 @@ impl Group {
                 )?)
             }
         }
+    }
+
+    pub fn compute_key(&self, public_key: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        let public_key = match self.type_ {
+            GroupType::Ffdh(ref params) => {
+                let public_key = bn::BigNum::from_slice(public_key.as_ref())?;
+                let dh = dh::Dh::from_pqg(
+                    params.prime_p().to_owned().unwrap(),
+                    None,
+                    params.generator().to_owned().unwrap(),
+                )?;
+                let dh = dh.set_public_key(public_key)?;
+                PKey::<pkey::Public>::from_dh(dh)?
+            }
+            GroupType::Ecdh(ref group) => {
+                let mut bn_ctx = bn::BigNumContext::new()?;
+                let point = ec::EcPoint::from_bytes(group, public_key.as_ref(), &mut bn_ctx)?;
+                let key = ec::EcKey::from_public_key(group, &point)?;
+                PKey::<pkey::Public>::from_ec_key(key)?
+            }
+        };
+        let mut deriver = Deriver::new(&self.pkey)?;
+        deriver.set_peer(&public_key)?;
+        Ok(deriver.derive_to_vec()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prf() {
+        let prf = Prf::new(PrfId::PRF_HMAC_SHA1).expect("unable to create PRF");
+        prf.prf(&vec![0u8; 20], b"foo")
+            .expect("unable to calculate PRF");
+    }
+
+    #[test]
+    fn test_ffdh() {
+        let group1 = Group::new(DhId::MODP4096).expect("unable to create group");
+        let group2 = Group::new(DhId::MODP4096).expect("unable to create group");
+        let public_key1 = group1.public_key().expect("unable to extract public key");
+        let public_key2 = group2.public_key().expect("unable to extract public key");
+        let secret1 = group1
+            .compute_key(&public_key2)
+            .expect("unable to compute shared secret");
+        let secret2 = group2
+            .compute_key(&public_key1)
+            .expect("unable to compute shared secret");
+        assert_eq!(secret1, secret2);
+    }
+
+    #[test]
+    fn test_ecdh() {
+        let group1 = Group::new(DhId::SECP256R1).expect("unable to create group");
+        let group2 = Group::new(DhId::SECP256R1).expect("unable to create group");
+        let public_key1 = group1.public_key().expect("unable to extract public key");
+        let public_key2 = group2.public_key().expect("unable to extract public key");
+        let secret1 = group1
+            .compute_key(&public_key2)
+            .expect("unable to compute shared secret");
+        let secret2 = group2
+            .compute_key(&public_key1)
+            .expect("unable to compute shared secret");
+        assert_eq!(secret1, secret2);
     }
 }
