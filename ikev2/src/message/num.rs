@@ -204,6 +204,7 @@ pub enum DhId {
     MODP4096 = 16,
     MODP6144 = 17,
     MODP8192 = 18,
+    SECP256R1 = 19,
 }
 
 impl From<DhId> for u16 {
