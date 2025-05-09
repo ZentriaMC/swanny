@@ -1,4 +1,4 @@
-use crate::message::num::{DhId, PrfId};
+use crate::message::num::{DhId, EncrId, PrfId};
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 
@@ -10,8 +10,9 @@ use openssl::{
     nid::Nid,
     pkey::{self, PKey},
     pkey_ctx::PkeyCtx,
+    rand,
     sign::Signer,
-    symm::{Cipher, Crypter, Mode},
+    symm,
 };
 
 pub struct Prf {
@@ -196,6 +197,72 @@ impl Group {
     }
 }
 
+pub struct Cipher {
+    cipher: symm::Cipher,
+    iv: Vec<u8>,
+}
+
+impl Cipher {
+    pub fn new(id: EncrId, key_size: Option<u16>) -> Result<Self> {
+        let cipher = match (id, key_size) {
+            (EncrId::ENCR_AES_CBC, Some(128)) => symm::Cipher::aes_128_cbc(),
+            (EncrId::ENCR_AES_CBC, Some(256)) => symm::Cipher::aes_256_cbc(),
+            _ => return Err(anyhow::anyhow!("unsupported cipher")),
+        };
+        let mut iv = vec![0; cipher.iv_len().unwrap()];
+        rand::rand_bytes(&mut iv)?;
+        Ok(Self { cipher, iv })
+    }
+
+    pub fn encrypt(&self, key: impl AsRef<[u8]>, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        let mut encrypter = symm::Crypter::new(
+            self.cipher.clone(),
+            symm::Mode::Encrypt,
+            key.as_ref(),
+            Some(&self.iv),
+        )?;
+        encrypter.pad(false);
+        let block_size = self.cipher.block_size();
+        let blocks = (plaintext.as_ref().len() + 1 + block_size - 1) / block_size;
+        let mut ciphertext = vec![0; block_size * blocks + block_size];
+
+        let mut count = encrypter.update(plaintext.as_ref(), &mut ciphertext)?;
+        let buf = vec![0; block_size * blocks - plaintext.as_ref().len() - 1];
+        count += encrypter.update(&buf, &mut ciphertext[count..])?;
+        let pad_len: u8 = buf.len().try_into()?;
+        count += encrypter.update(&[pad_len], &mut ciphertext[count..])?;
+        count += encrypter.finalize(&mut ciphertext[count..])?;
+        ciphertext.truncate(count);
+
+        Ok(ciphertext)
+    }
+
+    pub fn decrypt(&self, key: impl AsRef<[u8]>, ciphertext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        let mut decrypter = symm::Crypter::new(
+            self.cipher.clone(),
+            symm::Mode::Decrypt,
+            key.as_ref(),
+            Some(&self.iv),
+        )?;
+        decrypter.pad(false);
+        let block_size = self.cipher.block_size();
+        let mut plaintext = vec![0; ciphertext.as_ref().len() + block_size];
+
+        let mut count = decrypter.update(ciphertext.as_ref(), &mut plaintext)?;
+        count += decrypter.finalize(&mut plaintext[count..])?;
+        plaintext.truncate(count);
+
+        let pad_len: usize = plaintext[plaintext.len() - 1].into();
+        plaintext.truncate(plaintext.len() - pad_len - 1);
+
+        Ok(plaintext)
+    }
+
+    pub fn iv(&self) -> &[u8] {
+        &self.iv
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +302,19 @@ mod tests {
             .compute_key(&public_key1)
             .expect("unable to compute shared secret");
         assert_eq!(secret1, secret2);
+    }
+
+    #[test]
+    fn test_cipher() {
+        let cipher = Cipher::new(EncrId::ENCR_AES_CBC, Some(128)).expect("");
+        assert_eq!(cipher.iv().len(), 32);
+
+        let key = vec![1; 16];
+        let plaintext = b"hello world";
+        let ciphertext = cipher.encrypt(&key, &plaintext).expect("");
+        assert_eq!(ciphertext.len(), ((plaintext.len() + 15) / 16) * 16);
+
+        let plaintext2 = cipher.decrypt(&key, &ciphertext).expect("");
+        assert_eq!(plaintext2, plaintext);
     }
 }
