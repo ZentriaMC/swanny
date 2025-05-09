@@ -2,6 +2,7 @@ use crate::message::{
     num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
     proposal,
     serialize::{self, Deserialize, Serialize},
+    traffic_selector,
 };
 use anyhow::Result;
 use bytes::{Buf, BufMut};
@@ -22,6 +23,7 @@ pub enum Content {
     Auth(Auth),
     Nonce(Nonce),
     Notify(Notify),
+    TS(TS),
 }
 
 impl Serialize for Content {
@@ -33,6 +35,7 @@ impl Serialize for Content {
             Content::Auth(auth) => auth.serialize(buf),
             Content::Nonce(nonce) => nonce.serialize(buf),
             Content::Notify(notify) => notify.serialize(buf),
+            Content::TS(ts) => ts.serialize(buf),
         }
     }
 
@@ -44,6 +47,7 @@ impl Serialize for Content {
             Content::Auth(auth) => auth.size(),
             Content::Nonce(nonce) => nonce.size(),
             Content::Notify(notify) => notify.size(),
+            Content::TS(ts) => ts.size(),
         }
     }
 }
@@ -107,6 +111,9 @@ impl Payload {
             }
             Num::Assigned(PayloadType::IDi) | Num::Assigned(PayloadType::IDr) => {
                 Content::ID(ID::deserialize(&mut &buf.chunk()[..len])?)
+            }
+            Num::Assigned(PayloadType::TSi) | Num::Assigned(PayloadType::TSr) => {
+                Content::TS(TS::deserialize(&mut &buf.chunk()[..len])?)
             }
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
         };
@@ -459,6 +466,68 @@ impl serialize::Deserialize for Notify {
             type_.into(),
             &buf.chunk()[spi_len..],
         ))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TS {
+    traffic_selectors: Vec<traffic_selector::TrafficSelector>,
+}
+
+impl TS {
+    pub fn new(traffic_selectors: impl AsRef<[traffic_selector::TrafficSelector]>) -> Self {
+        Self {
+            traffic_selectors: traffic_selectors.as_ref().to_vec(),
+        }
+    }
+
+    pub fn traffic_selectors(&self) -> impl Iterator<Item = &traffic_selector::TrafficSelector> {
+        self.traffic_selectors.iter()
+    }
+}
+
+impl serialize::Serialize for TS {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        buf.put_u8(self.traffic_selectors.len().try_into()?);
+        buf.put_u8(0);
+        buf.put_u16(0);
+        for traffic_selector in &self.traffic_selectors {
+            traffic_selector.serialize(buf)?;
+        }
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize> {
+        let mut len = 0usize;
+        for traffic_selector in &self.traffic_selectors {
+            len = len
+                .checked_add(traffic_selector.size()?)
+                .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))?;
+        }
+        Ok(len)
+    }
+}
+
+impl serialize::Deserialize for TS {
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let count = buf.try_get_u8()?;
+        let _ = buf.try_get_u8()?;
+        let _ = buf.try_get_u16()?;
+
+        let mut traffic_selectors = Vec::new();
+        for _ in 0..count {
+            let traffic_selector =
+                traffic_selector::TrafficSelector::deserialize(&mut buf.chunk())?;
+            buf.advance(traffic_selector.size()?);
+            traffic_selectors.push(traffic_selector);
+        }
+        if buf.has_remaining() {
+            return Err(anyhow::anyhow!("payload with extra data"));
+        }
+        Ok(Self::new(traffic_selectors))
     }
 }
 

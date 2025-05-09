@@ -7,6 +7,7 @@ use num::{ExchangeType, MessageFlags, Num, PayloadType};
 pub mod payload;
 pub mod proposal;
 pub mod serialize;
+pub mod traffic_selector;
 pub mod transform;
 
 pub type SPI = [u8; 8];

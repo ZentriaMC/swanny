@@ -309,3 +309,16 @@ impl From<NotifyType> for u16 {
         value as Self
     }
 }
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
+pub enum TrafficSelectorType {
+    TS_IPV4_ADDR_RANGE = 7,
+    TS_IPV6_ADDR_RANGE = 8,
+}
+
+impl From<TrafficSelectorType> for u8 {
+    fn from(value: TrafficSelectorType) -> Self {
+        value as Self
+    }
+}
