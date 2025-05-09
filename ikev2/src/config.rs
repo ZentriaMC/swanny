@@ -5,7 +5,7 @@ use crate::message::{
 };
 use anyhow::Result;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ProposalBuilder {
     encryption: Vec<(EncrId, Option<u16>)>,
     prf: Vec<PrfId>,
@@ -163,6 +163,7 @@ impl ConfigBuilder {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Config {
     ike_proposals: Vec<ProposalBuilder>,
     ipsec_protocol: Protocol,

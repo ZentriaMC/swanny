@@ -15,6 +15,10 @@ use openssl::{
     symm,
 };
 
+pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<()> {
+    Ok(rand::rand_bytes(buf)?)
+}
+
 pub struct Prf {
     md: MessageDigest,
 }
