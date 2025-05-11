@@ -82,9 +82,9 @@ impl serialize::Deserialize for TrafficSelector {
         }
 
         let mut start_address = vec![0; address_size];
-        buf.try_copy_to_slice(&mut start_address);
+        buf.try_copy_to_slice(&mut start_address)?;
         let mut end_address = vec![0; address_size];
-        buf.try_copy_to_slice(&mut end_address);
+        buf.try_copy_to_slice(&mut end_address)?;
         Ok(Self {
             type_,
             ip_proto,
