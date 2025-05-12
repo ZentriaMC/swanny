@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn test_cipher() {
         let cipher = Cipher::new(EncrId::ENCR_AES_CBC, Some(128)).expect("");
-        assert_eq!(cipher.iv().len(), 32);
+        assert_eq!(cipher.iv().len(), 16);
 
         let key = vec![1; 16];
         let plaintext = b"hello world";
