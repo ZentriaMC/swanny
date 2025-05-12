@@ -3,7 +3,6 @@ use crate::{
         Message, SPI,
         num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol},
         payload::{self, Payload},
-        serialize::Serialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ControlMessage, IkeSaInner},
@@ -40,7 +39,42 @@ impl State for Initial {
         ike_sa: Arc<RwLock<IkeSaInner>>,
         message: &Message,
     ) -> Result<Box<dyn State>> {
-        Ok(self)
+        match message.exchange() {
+            Num::Assigned(ExchangeType::IKE_SA_INIT) => {
+                let inner = ike_sa.read().await;
+
+                let mut message = Message::new(
+                    &inner.spi,
+                    &SPI::default(),
+                    Num::Assigned(ExchangeType::IKE_SA_INIT),
+                    MessageFlags::R,
+                    inner.message_id,
+                );
+                let proposals: Result<Vec<_>> = inner
+                    .config
+                    .ike_proposals()
+                    .enumerate()
+                    .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, &inner.spi)))
+                    .collect();
+                message.add_payload(Payload::new(
+                    Num::Assigned(PayloadType::SA),
+                    payload::Content::SA(payload::SA::new(&proposals?)),
+                    true,
+                ));
+
+                inner
+                    .sender
+                    .unbounded_send(ControlMessage::IkeMessage(message))?;
+
+                let mut inner = ike_sa.write().await;
+                inner.initiator = Some(false);
+
+                Ok(Box::new(IkeSaInitResponseSent {}))
+            }
+            exchange => {
+                return Err(anyhow::anyhow!("unknown exchange {:?}", exchange));
+            }
+        }
     }
 
     async fn handle_acquire(

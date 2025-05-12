@@ -1,6 +1,7 @@
 use crate::message::{
     num::{Num, Protocol},
-    serialize, transform,
+    serialize,
+    transform::{self, Transform},
 };
 use anyhow::Result;
 use bytes::{Buf, BufMut};
@@ -12,7 +13,7 @@ pub struct Proposal {
     number: u8,
     protocol: Num<u8, Protocol>,
     spi: Vec<u8>,
-    transforms: Vec<transform::Transform>,
+    transforms: Vec<Transform>,
 }
 
 impl Proposal {
@@ -28,7 +29,7 @@ impl Proposal {
         &self.spi
     }
 
-    pub fn transforms(&self) -> impl Iterator<Item = &transform::Transform> {
+    pub fn transforms(&self) -> impl Iterator<Item = &Transform> {
         self.transforms.iter()
     }
 
@@ -36,7 +37,7 @@ impl Proposal {
         number: u8,
         protocol: Num<u8, Protocol>,
         spi: impl AsRef<[u8]>,
-        transforms: impl AsRef<[transform::Transform]>,
+        transforms: impl AsRef<[Transform]>,
     ) -> Self {
         Self {
             number,
@@ -104,7 +105,7 @@ impl serialize::Deserialize for Proposal {
             let len = len
                 .checked_sub(transform::HEADER_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("invalid transform length"))?;
-            transforms.push(transform::Transform::deserialize(&mut &buf.chunk()[..len])?);
+            transforms.push(Transform::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
         if buf.has_remaining() {
@@ -154,12 +155,8 @@ pub(crate) mod tests {
         assert!(matches!(proposal2.protocol(), Num::Assigned(Protocol::IKE),));
         assert_eq!(proposal2.spi(), &[1, 2, 3, 4, 5, 6, 7, 8][..]);
         assert_eq!(
-            proposal2
-                .transforms()
-                .collect::<Vec<&transform::Transform>>(),
-            proposal
-                .transforms()
-                .collect::<Vec<&transform::Transform>>()
+            proposal2.transforms().collect::<Vec<&Transform>>(),
+            proposal.transforms().collect::<Vec<&Transform>>()
         );
     }
 }

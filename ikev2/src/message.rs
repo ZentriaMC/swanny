@@ -5,6 +5,8 @@ pub mod num;
 use num::{ExchangeType, MessageFlags, Num, PayloadType};
 
 pub mod payload;
+use payload::Payload;
+
 pub mod proposal;
 pub mod serialize;
 pub mod traffic_selector;
@@ -19,7 +21,7 @@ pub struct Message {
     exchange: Num<u8, ExchangeType>,
     flags: MessageFlags,
     id: u32,
-    payloads: Vec<payload::Payload>,
+    payloads: Vec<Payload>,
 }
 
 impl Message {
@@ -60,11 +62,11 @@ impl Message {
         self.id
     }
 
-    pub fn payloads(&self) -> impl Iterator<Item = &payload::Payload> {
+    pub fn payloads(&self) -> impl Iterator<Item = &Payload> {
         self.payloads.iter()
     }
 
-    pub fn add_payload(&mut self, payload: payload::Payload) {
+    pub fn add_payload(&mut self, payload: Payload) {
         self.payloads.push(payload);
     }
 }
@@ -128,7 +130,7 @@ impl serialize::Deserialize for Message {
         let _length = buf.try_get_u32()?;
         let mut payloads = Vec::new();
         while buf.has_remaining() {
-            let (payload, next_payload_type) = payload::Payload::deserialize(payload_type, buf)?;
+            let (payload, next_payload_type) = Payload::deserialize(payload_type, buf)?;
             payloads.push(payload);
             payload_type = next_payload_type;
         }
@@ -187,12 +189,12 @@ mod tests {
         let sa = payload::tests::create_sa();
         let ke = payload::tests::create_ke();
 
-        message.add_payload(payload::Payload::new(
+        message.add_payload(Payload::new(
             Num::Assigned(PayloadType::SA),
             payload::Content::SA(sa),
             true,
         ));
-        message.add_payload(payload::Payload::new(
+        message.add_payload(Payload::new(
             Num::Assigned(PayloadType::KE),
             payload::Content::KE(ke),
             true,

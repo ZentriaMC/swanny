@@ -1,6 +1,6 @@
 use crate::message::{
     num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
-    proposal,
+    proposal::{self, Proposal},
     serialize::{self, Deserialize, Serialize},
     traffic_selector,
 };
@@ -129,17 +129,17 @@ impl Payload {
 
 #[derive(Debug, PartialEq)]
 pub struct SA {
-    proposals: Vec<proposal::Proposal>,
+    proposals: Vec<Proposal>,
 }
 
 impl SA {
-    pub fn new(proposals: impl AsRef<[proposal::Proposal]>) -> Self {
+    pub fn new(proposals: impl AsRef<[Proposal]>) -> Self {
         Self {
             proposals: proposals.as_ref().to_vec(),
         }
     }
 
-    pub fn proposals(&self) -> impl Iterator<Item = &proposal::Proposal> {
+    pub fn proposals(&self) -> impl Iterator<Item = &Proposal> {
         self.proposals.iter()
     }
 }
@@ -188,7 +188,7 @@ impl serialize::Deserialize for SA {
             let len = len
                 .checked_sub(proposal::HEADER_SIZE)
                 .ok_or_else(|| anyhow::anyhow!("invalid proposal length"))?;
-            proposals.push(proposal::Proposal::deserialize(&mut &buf.chunk()[..len])?);
+            proposals.push(Proposal::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
         Ok(Self::new(proposals))
