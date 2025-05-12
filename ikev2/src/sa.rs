@@ -4,26 +4,32 @@ use crate::{
     message::{Message, SPI, traffic_selector::TrafficSelector},
 };
 use anyhow::Result;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, RwLock};
 
 mod state;
 use state::{State, StateData};
 
+pub enum ControlMessage {
+    Ike(Message),
+}
+
 #[derive(Clone)]
 pub struct IkeSa {
     inner: Arc<RwLock<StateData>>,
     state: Arc<Mutex<Option<Box<dyn State>>>>,
+    sender: UnboundedSender<ControlMessage>,
 }
 
 impl IkeSa {
     fn new(
-        initiator: bool,
         config: &Config,
+        initiator: bool,
         address: &SocketAddr,
         peer_address: &SocketAddr,
         peer_spi: Option<&SPI>,
-    ) -> Result<Self> {
+    ) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
         let mut spi = SPI::default();
         rand_bytes(&mut spi)?;
 
@@ -36,18 +42,23 @@ impl IkeSa {
             peer_spi: peer_spi.map(ToOwned::to_owned),
         };
 
-        Ok(Self {
-            inner: Arc::new(RwLock::new(inner)),
-            state: Arc::new(Mutex::new(Some(Box::new(state::Initial {})))),
-        })
+        let (sender, receiver) = unbounded();
+        Ok((
+            Self {
+                inner: Arc::new(RwLock::new(inner)),
+                state: Arc::new(Mutex::new(Some(Box::new(state::Initial {})))),
+                sender,
+            },
+            receiver,
+        ))
     }
 
     pub fn initiator(
         config: &Config,
         address: &SocketAddr,
         peer_address: &SocketAddr,
-    ) -> Result<Self> {
-        Self::new(true, config, address, peer_address, None)
+    ) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
+        Self::new(config, true, address, peer_address, None)
     }
 
     pub fn responder(
@@ -55,16 +66,16 @@ impl IkeSa {
         address: &SocketAddr,
         peer_address: &SocketAddr,
         peer_spi: &SPI,
-    ) -> Result<Self> {
-        Self::new(false, config, address, peer_address, Some(peer_spi))
+    ) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
+        Self::new(config, false, address, peer_address, Some(peer_spi))
     }
 
-    pub async fn handle_message(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn handle_message(&mut self, message: &[u8]) -> Result<()> {
         let mut state = self.state.lock().unwrap();
         if let Some(s) = state.take() {
             drop(state);
 
-            let s = s.handle_message(data).await?;
+            let s = s.handle_message(self.inner.clone(), message).await?;
             let mut state = self.state.lock().unwrap();
             *state = Some(s);
         }
@@ -81,7 +92,9 @@ impl IkeSa {
         if let Some(s) = state.take() {
             drop(state);
 
-            let s = s.handle_acquire(ts_i, ts_r, index).await?;
+            let s = s
+                .handle_acquire(self.inner.clone(), ts_i, ts_r, index)
+                .await?;
             let mut state = self.state.lock().unwrap();
             *state = Some(s);
         }

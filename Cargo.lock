@@ -561,6 +561,7 @@ dependencies = [
  "async-trait",
  "bitflags",
  "bytes",
+ "futures",
  "num-derive",
  "num-traits",
  "openssl",
