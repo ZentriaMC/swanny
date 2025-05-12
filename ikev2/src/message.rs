@@ -23,15 +23,15 @@ pub struct Message {
 
 impl Message {
     pub fn new(
-        spi_i: SPI,
-        spi_r: SPI,
+        spi_i: &SPI,
+        spi_r: &SPI,
         exchange: Num<u8, ExchangeType>,
         flags: MessageFlags,
         id: u32,
     ) -> Self {
         Self {
-            spi_i,
-            spi_r,
+            spi_i: spi_i.to_owned(),
+            spi_r: spi_r.to_owned(),
             exchange,
             flags,
             id,
@@ -153,8 +153,8 @@ mod tests {
 
     fn create_empty() -> Message {
         Message::new(
-            SPI_I.clone(),
-            SPI_R.clone(),
+            &SPI_I,
+            &SPI_R,
             Num::Assigned(ExchangeType::IKE_SA_INIT),
             MessageFlags::I,
             0,

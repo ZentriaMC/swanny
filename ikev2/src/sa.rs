@@ -9,17 +9,27 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, RwLock};
 
 mod state;
-use state::{State, StateData};
+use state::State;
 
 pub enum ControlMessage {
-    Ike(Message),
+    Ike(Vec<u8>),
+}
+
+struct IkeSaInner {
+    config: Config,
+    initiator: bool,
+    address: SocketAddr,
+    spi: SPI,
+    peer_address: SocketAddr,
+    peer_spi: Option<SPI>,
+    message_id: u32,
+    sender: UnboundedSender<ControlMessage>,
 }
 
 #[derive(Clone)]
 pub struct IkeSa {
-    inner: Arc<RwLock<StateData>>,
+    inner: Arc<RwLock<IkeSaInner>>,
     state: Arc<Mutex<Option<Box<dyn State>>>>,
-    sender: UnboundedSender<ControlMessage>,
 }
 
 impl IkeSa {
@@ -33,21 +43,23 @@ impl IkeSa {
         let mut spi = SPI::default();
         rand_bytes(&mut spi)?;
 
-        let inner = StateData {
+        let (sender, receiver) = unbounded();
+
+        let inner = IkeSaInner {
             initiator: true,
             config: config.to_owned(),
             address: address.to_owned(),
             peer_address: address.to_owned(),
             spi,
             peer_spi: peer_spi.map(ToOwned::to_owned),
+            message_id: 1,
+            sender,
         };
 
-        let (sender, receiver) = unbounded();
         Ok((
             Self {
                 inner: Arc::new(RwLock::new(inner)),
                 state: Arc::new(Mutex::new(Some(Box::new(state::Initial {})))),
-                sender,
             },
             receiver,
         ))
@@ -99,5 +111,14 @@ impl IkeSa {
             *state = Some(s);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_state() {
     }
 }

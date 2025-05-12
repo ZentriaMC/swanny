@@ -565,6 +565,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "openssl",
+ "tokio",
 ]
 
 [[package]]
