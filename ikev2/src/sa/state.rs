@@ -27,7 +27,7 @@ pub(in crate::sa) trait State: Send + Sync {
         ike_sa: Arc<RwLock<IkeSaInner>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        index: usize,
+        index: u32,
     ) -> Result<Box<dyn State>>;
 }
 
@@ -48,7 +48,7 @@ impl State for Initial {
         ike_sa: Arc<RwLock<IkeSaInner>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        index: usize,
+        index: u32,
     ) -> Result<Box<dyn State>> {
         let inner = ike_sa.read().await;
 
@@ -99,7 +99,7 @@ impl State for IkeSaInitRequestSent {
         ike_sa: Arc<RwLock<IkeSaInner>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        index: usize,
+        index: u32,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }
@@ -122,7 +122,7 @@ impl State for IkeSaInitResponseSent {
         ike_sa: Arc<RwLock<IkeSaInner>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        index: usize,
+        index: u32,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }

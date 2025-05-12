@@ -65,17 +65,12 @@ impl IkeSa {
         ))
     }
 
-    pub async fn set_peer_spi(&mut self, spi: &SPI) {
-        let mut inner = self.inner.write().await;
-        let _ = inner.peer_spi.replace(spi.to_owned());
-    }
-
-    pub async fn handle_message(&mut self, message: &Message) -> Result<()> {
+    pub async fn handle_message(&self, message: Message) -> Result<()> {
         let mut state = self.state.lock().await;
         if let Some(s) = state.take() {
             drop(state);
 
-            let s = s.handle_message(self.inner.clone(), message).await?;
+            let s = s.handle_message(self.inner.clone(), &message).await?;
             let mut state = self.state.lock().await;
             *state = Some(s);
         }
@@ -83,17 +78,17 @@ impl IkeSa {
     }
 
     pub async fn handle_acquire(
-        &mut self,
-        ts_i: &TrafficSelector,
-        ts_r: &TrafficSelector,
-        index: usize,
+        &self,
+        ts_i: TrafficSelector,
+        ts_r: TrafficSelector,
+        index: u32,
     ) -> Result<()> {
         let mut state = self.state.lock().await;
         if let Some(s) = state.take() {
             drop(state);
 
             let s = s
-                .handle_acquire(self.inner.clone(), ts_i, ts_r, index)
+                .handle_acquire(self.inner.clone(), &ts_i, &ts_r, index)
                 .await?;
             let mut state = self.state.lock().await;
             *state = Some(s);
@@ -110,7 +105,6 @@ mod tests {
         message::{
             Message,
             num::{Num, TrafficSelectorType},
-            serialize::Deserialize,
             traffic_selector::TrafficSelector,
         },
     };
@@ -127,7 +121,7 @@ mod tests {
         tokio::spawn(async move {
             ike_sa
                 .handle_acquire(
-                    &TrafficSelector::new(
+                    TrafficSelector::new(
                         Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
                         0,
                         &address,
@@ -135,7 +129,7 @@ mod tests {
                         0,
                         0,
                     ),
-                    &TrafficSelector::new(
+                    TrafficSelector::new(
                         Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
                         0,
                         &peer_address,

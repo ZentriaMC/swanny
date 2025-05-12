@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "ikev2", "server",
+    "ikev2", "swannyd",
 ]
 resolver = "2"
 
@@ -11,14 +11,16 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 anyhow = "1"
+async-trait = "0.1"
 bitflags = "2"
 bytes = "1"
 futures = "0.3"
-netlink-packet-core = { version = "0.7.0" }
-netlink-packet-xfrm = { version = "0.3.1" }
+netlink-packet-core = "0.7.0"
+netlink-packet-xfrm = "0.3.1"
 netlink-proto = "0.11.2"
 num-traits = "0.2"
 num-derive = "0.4"
+openssl = "0.10"
 swanny-ikev2 = { version = "=0.1.0", path = "ikev2" }
 tokio = "1.23"
 toml = "0.7"

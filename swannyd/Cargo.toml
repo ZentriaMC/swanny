@@ -1,0 +1,18 @@
+[package]
+name = "swannyd"
+description = "Experimental IKEv2 server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+netlink-packet-core.workspace = true
+netlink-packet-xfrm.workspace = true
+netlink-proto.workspace = true
+swanny-ikev2.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

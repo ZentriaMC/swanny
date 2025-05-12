@@ -569,10 +569,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "swanny-server"
+name = "swannyd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "futures",
  "netlink-packet-core",
  "netlink-packet-xfrm",
