@@ -1,4 +1,5 @@
 use crate::{
+    config::Config,
     message::{
         Message, SPI,
         num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol},
@@ -32,6 +33,54 @@ pub(in crate::sa) trait State: Send + Sync {
 
 pub(in crate::sa) struct Initial {}
 
+impl Initial {
+    fn generate_ike_sa_init_request(config: &Config, spi: &SPI) -> Result<Message> {
+        let mut message = Message::new(
+            spi,
+            &SPI::default(),
+            Num::Assigned(ExchangeType::IKE_SA_INIT),
+            MessageFlags::I,
+            1,
+        );
+        let proposals: Result<Vec<_>> = config
+            .ike_proposals()
+            .enumerate()
+            .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, spi)))
+            .collect();
+        message.add_payload(Payload::new(
+            Num::Assigned(PayloadType::SA),
+            payload::Content::SA(payload::SA::new(&proposals?)),
+            true,
+        ));
+        Ok(message)
+    }
+
+    fn generate_ike_sa_init_response(
+        config: &Config,
+        spi: &SPI,
+        request: &Message,
+    ) -> Result<Message> {
+        let mut message = Message::new(
+            request.spi_i(),
+            spi,
+            Num::Assigned(ExchangeType::IKE_SA_INIT),
+            MessageFlags::R,
+            request.id(),
+        );
+        let proposals: Result<Vec<_>> = config
+            .ike_proposals()
+            .enumerate()
+            .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, spi)))
+            .collect();
+        message.add_payload(Payload::new(
+            Num::Assigned(PayloadType::SA),
+            payload::Content::SA(payload::SA::new(&proposals?)),
+            true,
+        ));
+        Ok(message)
+    }
+}
+
 #[async_trait]
 impl State for Initial {
     async fn handle_message(
@@ -43,24 +92,8 @@ impl State for Initial {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = ike_sa.read().await;
 
-                let mut message = Message::new(
-                    &inner.spi,
-                    &SPI::default(),
-                    Num::Assigned(ExchangeType::IKE_SA_INIT),
-                    MessageFlags::R,
-                    inner.message_id,
-                );
-                let proposals: Result<Vec<_>> = inner
-                    .config
-                    .ike_proposals()
-                    .enumerate()
-                    .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, &inner.spi)))
-                    .collect();
-                message.add_payload(Payload::new(
-                    Num::Assigned(PayloadType::SA),
-                    payload::Content::SA(payload::SA::new(&proposals?)),
-                    true,
-                ));
+                let message =
+                    Self::generate_ike_sa_init_response(&inner.config, &inner.spi, message)?;
 
                 inner
                     .sender
@@ -86,24 +119,7 @@ impl State for Initial {
     ) -> Result<Box<dyn State>> {
         let inner = ike_sa.read().await;
 
-        let mut message = Message::new(
-            &inner.spi,
-            &SPI::default(),
-            Num::Assigned(ExchangeType::IKE_SA_INIT),
-            MessageFlags::I,
-            inner.message_id,
-        );
-        let proposals: Result<Vec<_>> = inner
-            .config
-            .ike_proposals()
-            .enumerate()
-            .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, &inner.spi)))
-            .collect();
-        message.add_payload(Payload::new(
-            Num::Assigned(PayloadType::SA),
-            payload::Content::SA(payload::SA::new(&proposals?)),
-            true,
-        ));
+        let message = Self::generate_ike_sa_init_request(&inner.config, &inner.spi)?;
 
         inner
             .sender
