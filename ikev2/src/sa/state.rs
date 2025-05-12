@@ -1,6 +1,4 @@
 use crate::{
-    config::Config,
-    crypto::rand_bytes,
     message::{
         Message, SPI,
         num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol},
@@ -13,16 +11,15 @@ use crate::{
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
-use futures::channel::mpsc::UnboundedSender;
-use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[async_trait]
-pub(in crate::sa) trait State {
+pub(in crate::sa) trait State: Send + Sync {
     async fn handle_message(
         self: Box<Self>,
         ike_sa: Arc<RwLock<IkeSaInner>>,
-        data: &[u8],
+        message: &Message,
     ) -> Result<Box<dyn State>>;
 
     async fn handle_acquire(
@@ -41,7 +38,7 @@ impl State for Initial {
     async fn handle_message(
         self: Box<Self>,
         ike_sa: Arc<RwLock<IkeSaInner>>,
-        data: &[u8],
+        message: &Message,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }
@@ -53,7 +50,7 @@ impl State for Initial {
         ts_r: &TrafficSelector,
         index: usize,
     ) -> Result<Box<dyn State>> {
-        let inner = ike_sa.read().unwrap();
+        let inner = ike_sa.read().await;
 
         let mut message = Message::new(
             &inner.spi,
@@ -74,16 +71,12 @@ impl State for Initial {
             true,
         ));
 
-        let len = message.size()?;
-        let mut buf = BytesMut::with_capacity(len);
-        message.serialize(&mut buf)?;
-
         inner
             .sender
-            .unbounded_send(ControlMessage::Ike(buf.to_vec()))?;
+            .unbounded_send(ControlMessage::IkeMessage(message))?;
 
-        let mut inner = ike_sa.write().unwrap();
-        inner.initiator = true;
+        let mut inner = ike_sa.write().await;
+        inner.initiator = Some(true);
 
         Ok(Box::new(IkeSaInitRequestSent {}))
     }
@@ -96,7 +89,7 @@ impl State for IkeSaInitRequestSent {
     async fn handle_message(
         self: Box<Self>,
         ike_sa: Arc<RwLock<IkeSaInner>>,
-        data: &[u8],
+        message: &Message,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }
@@ -119,7 +112,7 @@ impl State for IkeSaInitResponseSent {
     async fn handle_message(
         self: Box<Self>,
         ike_sa: Arc<RwLock<IkeSaInner>>,
-        data: &[u8],
+        message: &Message,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }

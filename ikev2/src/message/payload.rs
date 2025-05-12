@@ -52,6 +52,7 @@ impl Serialize for Content {
     }
 }
 
+#[derive(Debug)]
 pub struct Payload {
     critical: bool,
     type_: Num<u8, PayloadType>,

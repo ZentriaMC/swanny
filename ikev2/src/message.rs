@@ -12,6 +12,7 @@ pub mod transform;
 
 pub type SPI = [u8; 8];
 
+#[derive(Debug)]
 pub struct Message {
     spi_i: SPI,
     spi_r: SPI,

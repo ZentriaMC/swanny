@@ -3,7 +3,6 @@ use crate::message::{
     proposal::Proposal,
     transform::{Attribute, AttributeFormat, Transform, TransformId},
 };
-use anyhow::Result;
 
 #[derive(Clone, Debug, Default)]
 pub struct ProposalBuilder {
@@ -185,13 +184,12 @@ impl Config {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    #[test]
-    fn test_config_builder() {
+    pub(crate) fn create_config() -> Config {
         let mut builder = ConfigBuilder::default();
-        let config = builder
+        builder
             .ike_proposal(|pc| {
                 pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
                     .encryption(EncrId::ENCR_AES_CBC, Some(256))
@@ -216,7 +214,12 @@ mod tests {
                     .integrity(IntegId::AUTH_HMAC_SHA1_96)
                     .dh(DhId::MODP2048)
             })
-            .build();
+            .build()
+    }
+
+    #[test]
+    fn test_config_builder() {
+        let config = create_config();
 
         assert_eq!(config.ike_proposals().collect::<Vec<_>>().len(), 2);
         assert_eq!(config.ipsec_protocol(), Protocol::ESP);
