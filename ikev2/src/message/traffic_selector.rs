@@ -103,6 +103,10 @@ impl serialize::Deserialize for TrafficSelector {
         let type_ = buf.try_get_u8()?.into();
         let ip_proto = buf.try_get_u8()?;
         let size: usize = buf.try_get_u16()?.into();
+        if size != buf.remaining() + 4usize {
+            return Err(anyhow::anyhow!("invalid TS length"));
+        }
+
         let start_port = buf.try_get_u16()?;
         let end_port = buf.try_get_u16()?;
         let (start_address, end_address): (IpAddr, IpAddr) = match type_ {

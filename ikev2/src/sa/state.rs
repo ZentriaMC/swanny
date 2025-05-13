@@ -1,16 +1,17 @@
 use crate::{
     config::Config,
+    crypto::{Group, rand_bytes},
     message::{
         Message, SPI,
-        num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol},
+        num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol, TransformType},
         payload::{self, Payload},
         traffic_selector::TrafficSelector,
+        transform::TransformId,
     },
-    sa::{ControlMessage, IkeSaInner},
+    sa::{ChildSa, ControlMessage, IkeSaInner},
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use bytes::BytesMut;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -34,7 +35,7 @@ pub(in crate::sa) trait State: Send + Sync {
 pub(in crate::sa) struct Initial {}
 
 impl Initial {
-    fn generate_ike_sa_init_request(config: &Config, spi: &SPI) -> Result<Message> {
+    fn generate_ike_sa_init_request(config: &Config, spi: &SPI) -> Result<(Message, Group)> {
         let mut message = Message::new(
             spi,
             &SPI::default(),
@@ -42,17 +43,48 @@ impl Initial {
             MessageFlags::I,
             1,
         );
+
         let proposals: Result<Vec<_>> = config
             .ike_proposals()
             .enumerate()
             .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, spi)))
             .collect();
+        let proposals = proposals?;
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::SA),
-            payload::Content::SA(payload::SA::new(&proposals?)),
+            payload::Content::SA(payload::SA::new(&proposals)),
             true,
         ));
-        Ok(message)
+
+        let mut nonce = [0u8; 32];
+        rand_bytes(&mut nonce[..])?;
+        message.add_payload(Payload::new(
+            Num::Assigned(PayloadType::NONCE),
+            payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
+            true,
+        ));
+
+        let proposal = proposals
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("no proposal"))?;
+        let transform = proposal
+            .transforms()
+            .find(|t| t.r#type() == Num::Assigned(TransformType::DH))
+            .ok_or_else(|| anyhow::anyhow!("DH transform not found"))?;
+        let dh_id = match transform.id() {
+            Num::Assigned(TransformId::Dh(Num::Assigned(dh_id))) => dh_id,
+            _ => return Err(anyhow::anyhow!("invalid DH transform")),
+        };
+        let group = Group::new(dh_id)?;
+        let public_key = group.public_key()?;
+        message.add_payload(Payload::new(
+            Num::Assigned(PayloadType::KE),
+            payload::Content::KE(payload::KE::new(Num::Assigned(dh_id), &public_key)),
+            true,
+        ));
+
+        Ok((message, group))
     }
 
     fn generate_ike_sa_init_response(
@@ -115,11 +147,12 @@ impl State for Initial {
         ike_sa: Arc<RwLock<IkeSaInner>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        index: u32,
+        _index: u32,
     ) -> Result<Box<dyn State>> {
         let inner = ike_sa.read().await;
 
-        let message = Self::generate_ike_sa_init_request(&inner.config, &inner.spi)?;
+        let (message, group) = Self::generate_ike_sa_init_request(&inner.config, &inner.spi)?;
+        let message_id = message.id();
 
         inner
             .sender
@@ -127,6 +160,12 @@ impl State for Initial {
 
         let mut inner = ike_sa.write().await;
         inner.initiator = Some(true);
+        inner.group = Some(group);
+        inner.message_id = message_id;
+        inner.larval_sa = Some(ChildSa {
+            ts_i: ts_i.to_owned(),
+            ts_r: ts_r.to_owned(),
+        });
 
         Ok(Box::new(IkeSaInitRequestSent {}))
     }
@@ -138,18 +177,18 @@ pub(in crate::sa) struct IkeSaInitRequestSent {}
 impl State for IkeSaInitRequestSent {
     async fn handle_message(
         self: Box<Self>,
-        ike_sa: Arc<RwLock<IkeSaInner>>,
-        message: &Message,
+        _ike_sa: Arc<RwLock<IkeSaInner>>,
+        _message: &Message,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }
 
     async fn handle_acquire(
         self: Box<Self>,
-        ike_sa: Arc<RwLock<IkeSaInner>>,
-        ts_i: &TrafficSelector,
-        ts_r: &TrafficSelector,
-        index: u32,
+        _ike_sa: Arc<RwLock<IkeSaInner>>,
+        _ts_i: &TrafficSelector,
+        _ts_r: &TrafficSelector,
+        _index: u32,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }
@@ -161,18 +200,18 @@ pub(in crate::sa) struct IkeSaInitResponseSent {}
 impl State for IkeSaInitResponseSent {
     async fn handle_message(
         self: Box<Self>,
-        ike_sa: Arc<RwLock<IkeSaInner>>,
-        message: &Message,
+        _ike_sa: Arc<RwLock<IkeSaInner>>,
+        _message: &Message,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }
 
     async fn handle_acquire(
         self: Box<Self>,
-        ike_sa: Arc<RwLock<IkeSaInner>>,
-        ts_i: &TrafficSelector,
-        ts_r: &TrafficSelector,
-        index: u32,
+        _ike_sa: Arc<RwLock<IkeSaInner>>,
+        _ts_i: &TrafficSelector,
+        _ts_r: &TrafficSelector,
+        _index: u32,
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }

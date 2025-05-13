@@ -1,14 +1,11 @@
 use anyhow::Result;
-use bytes::BytesMut;
-use futures::channel::mpsc::UnboundedReceiver;
 use futures::stream::{FuturesUnordered, StreamExt};
-use netlink_packet_core::{NetlinkMessage, NetlinkPayload};
+use netlink_packet_core::NetlinkPayload;
 use netlink_packet_xfrm::{
-    address::Address, selector::Selector, XfrmMessage, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE,
+    address::Address, XfrmMessage, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE,
 };
 use netlink_proto::{
     sys::{protocols::NETLINK_XFRM, AsyncSocket, SocketAddr},
-    ConnectionHandle,
 };
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -16,7 +13,6 @@ use swanny_ikev2::{
     config::Config,
     message::{
         num::{Num, TrafficSelectorType},
-        serialize::Serialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ControlMessage, IkeSa},
@@ -26,10 +22,9 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 fn create_config() -> Config {
     use swanny_ikev2::config::ConfigBuilder;
-    use swanny_ikev2::message::num::{DhId, EncrId, EsnId, IntegId, PrfId, Protocol};
+    use swanny_ikev2::message::num::{DhId, EncrId, IntegId, PrfId, Protocol};
 
-    let mut builder = ConfigBuilder::default();
-    builder
+    ConfigBuilder::default()
         .ike_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
                 .prf(PrfId::PRF_HMAC_SHA1)
@@ -80,7 +75,7 @@ async fn main() -> Result<()> {
         .with(EnvFilter::from_default_env())
         .try_init()?;
 
-    let (mut connection, handle, mut xfrm_messages) =
+    let (mut connection, _handle, mut xfrm_messages) =
         netlink_proto::new_connection::<XfrmMessage>(NETLINK_XFRM)?;
 
     let addr = SocketAddr::new(0, XFRMNLGRP_ACQUIRE | XFRMNLGRP_EXPIRE);
@@ -123,28 +118,24 @@ async fn main() -> Result<()> {
                             )?;
                             pending_operations.push(ike_sa.handle_acquire(ts_i, ts_r, acquire.acquire.policy.index));
                         },
-                        XfrmMessage::Expire(expire) => {
+                        XfrmMessage::Expire(_expire) => {
                         },
-                        _ => println!("Other XFRM event message - {:?}", xfrm_message),
+                        _ => info!("Other XFRM event message - {:?}", xfrm_message),
                     };
                 } else {
-                    println!("Other netlink message - {:?}", payload);
+                    info!("Other netlink message - {:?}", payload);
                 }
             }
             ike_sa_message = ike_sa_messages.select_next_some() => {
                 match ike_sa_message {
                     ControlMessage::IkeMessage(message) => {
-                        println!("IKE SA message - {:?}", message);
+                        info!("IKE SA message - {:?}", message);
                     },
-                    _ => {
-                    }
                 }
             },
             result = pending_operations.select_next_some() => {
-                println!("result: {:?}", result);
+                debug!("result: {:?}", result);
             }
         }
     }
-
-    Ok(())
 }

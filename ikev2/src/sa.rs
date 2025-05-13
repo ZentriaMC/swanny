@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    crypto::rand_bytes,
+    crypto::{Group, rand_bytes},
     message::{Message, SPI, traffic_selector::TrafficSelector},
 };
 use anyhow::Result;
@@ -25,6 +25,8 @@ struct IkeSaInner {
     peer_address: IpAddr,
     peer_spi: Option<SPI>,
     message_id: u32,
+    group: Option<Group>,
+    larval_sa: Option<ChildSa>,
     sender: UnboundedSender<ControlMessage>,
 }
 
@@ -49,11 +51,13 @@ impl IkeSa {
             initiator: None,
             config: config.to_owned(),
             address: address.to_owned(),
-            peer_address: address.to_owned(),
+            peer_address: peer_address.to_owned(),
             spi,
             peer_spi: None,
             message_id: 1,
             sender,
+            group: None,
+            larval_sa: None,
         };
 
         Ok((
@@ -95,6 +99,12 @@ impl IkeSa {
         }
         Ok(())
     }
+}
+
+#[derive(Clone)]
+pub struct ChildSa {
+    ts_i: TrafficSelector,
+    ts_r: TrafficSelector,
 }
 
 #[cfg(test)]
