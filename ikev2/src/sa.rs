@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     crypto::{Group, rand_bytes},
-    message::{Message, SPI, traffic_selector::TrafficSelector},
+    message::{Message, SPI, proposal::Proposal, traffic_selector::TrafficSelector},
 };
 use anyhow::Result;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -67,6 +67,13 @@ impl IkeSa {
             },
             receiver,
         ))
+    }
+
+    fn choose_proposal<'a, 'b>(
+        mut this: impl Iterator<Item = &'a Proposal>,
+        mut other: impl Iterator<Item = &'b Proposal>,
+    ) -> Option<Proposal> {
+        this.find_map(|px| other.find_map(|py| px.intersection(py)))
     }
 
     pub async fn handle_message(&self, message: Message) -> Result<()> {

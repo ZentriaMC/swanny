@@ -1,5 +1,5 @@
 use crate::message::{
-    num::{Num, Protocol},
+    num::{Num, Protocol, TransformType},
     serialize,
     transform::{self, Transform},
 };
@@ -44,6 +44,25 @@ impl Proposal {
             protocol,
             spi: spi.as_ref().to_vec(),
             transforms: transforms.as_ref().to_vec(),
+        }
+    }
+
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        let transforms: Vec<_> = self
+            .transforms()
+            .filter_map(|tx| other.transforms().find(|&ty| *tx == *ty))
+            .map(ToOwned::to_owned)
+            .collect();
+
+        if transforms.is_empty() {
+            None
+        } else {
+            Some(Self {
+                number: self.number,
+                protocol: self.protocol,
+                spi: self.spi.clone(),
+                transforms,
+            })
         }
     }
 }
@@ -158,5 +177,20 @@ pub(crate) mod tests {
             proposal2.transforms().collect::<Vec<&Transform>>(),
             proposal.transforms().collect::<Vec<&Transform>>()
         );
+    }
+
+    #[test]
+    fn test_intersection() {
+        let proposal = create_proposal();
+        let proposal2 = create_proposal();
+
+        let intersection = proposal
+            .intersection(&proposal2)
+            .expect("intersection is none");
+        let intersection2 = proposal2
+            .intersection(&proposal)
+            .expect("intersection is none");
+
+        assert!(intersection.transforms().eq(intersection2.transforms()));
     }
 }
