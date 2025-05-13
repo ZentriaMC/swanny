@@ -41,6 +41,61 @@ impl Num<u16, TransformId> {
     }
 }
 
+impl TryFrom<TransformId> for EncrId {
+    type Error = anyhow::Error;
+
+    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
+        match other {
+            TransformId::Encr(Num::Assigned(encr_id)) => Ok(encr_id),
+            _ => Err(anyhow::anyhow!("no matching EncrId")),
+        }
+    }
+}
+
+impl TryFrom<TransformId> for PrfId {
+    type Error = anyhow::Error;
+
+    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
+        match other {
+            TransformId::Prf(Num::Assigned(prf_id)) => Ok(prf_id),
+            _ => Err(anyhow::anyhow!("no matching PrfId")),
+        }
+    }
+}
+
+impl TryFrom<TransformId> for IntegId {
+    type Error = anyhow::Error;
+
+    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
+        match other {
+            TransformId::Integ(Num::Assigned(integ_id)) => Ok(integ_id),
+            _ => Err(anyhow::anyhow!("no matching IntegId")),
+        }
+    }
+}
+
+impl TryFrom<TransformId> for DhId {
+    type Error = anyhow::Error;
+
+    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
+        match other {
+            TransformId::Dh(Num::Assigned(dh_id)) => Ok(dh_id),
+            _ => Err(anyhow::anyhow!("no matching DhId")),
+        }
+    }
+}
+
+impl TryFrom<TransformId> for EsnId {
+    type Error = anyhow::Error;
+
+    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
+        match other {
+            TransformId::Esn(Num::Assigned(esn_id)) => Ok(esn_id),
+            _ => Err(anyhow::anyhow!("no matching EsnId")),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AttributeFormat {
     TV = 0,
