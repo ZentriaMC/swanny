@@ -1,12 +1,8 @@
 use anyhow::Result;
 use futures::stream::{FuturesUnordered, StreamExt};
 use netlink_packet_core::NetlinkPayload;
-use netlink_packet_xfrm::{
-    address::Address, XfrmMessage, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE,
-};
-use netlink_proto::{
-    sys::{protocols::NETLINK_XFRM, AsyncSocket, SocketAddr},
-};
+use netlink_packet_xfrm::{address::Address, XfrmMessage, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE};
+use netlink_proto::sys::{protocols::NETLINK_XFRM, AsyncSocket, SocketAddr};
 use std::net::IpAddr;
 use std::str::FromStr;
 use swanny_ikev2::{
