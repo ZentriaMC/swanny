@@ -49,7 +49,7 @@ impl Prf {
         let pkey = PKey::hmac(key.as_ref())?;
         let mut signer = Signer::new(self.md, &pkey)?;
         let mut buf = BytesMut::with_capacity(size);
-        let blocks = (size + (self.md.size() - 1)) / self.md.size();
+        let blocks = size.div_ceil(self.md.size());
         let mut block = Vec::with_capacity(self.md.size());
         for i in 0..blocks {
             signer.update(&block)?;
@@ -219,14 +219,14 @@ impl Cipher {
 
     pub fn encrypt(&self, key: impl AsRef<[u8]>, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
         let mut encrypter = symm::Crypter::new(
-            self.cipher.clone(),
+            self.cipher,
             symm::Mode::Encrypt,
             key.as_ref(),
             Some(&self.iv),
         )?;
         encrypter.pad(false);
         let block_size = self.cipher.block_size();
-        let blocks = (plaintext.as_ref().len() + 1 + block_size - 1) / block_size;
+        let blocks = (plaintext.as_ref().len() + 1).div_ceil(block_size);
         let mut ciphertext = vec![0; block_size * blocks + block_size];
 
         let mut count = encrypter.update(plaintext.as_ref(), &mut ciphertext)?;
@@ -242,7 +242,7 @@ impl Cipher {
 
     pub fn decrypt(&self, key: impl AsRef<[u8]>, ciphertext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
         let mut decrypter = symm::Crypter::new(
-            self.cipher.clone(),
+            self.cipher,
             symm::Mode::Decrypt,
             key.as_ref(),
             Some(&self.iv),

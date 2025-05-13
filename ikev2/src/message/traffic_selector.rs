@@ -114,18 +114,18 @@ impl serialize::Deserialize for TrafficSelector {
                 let mut address = [0; 4];
 
                 buf.try_copy_to_slice(&mut address)?;
-                let start_address = address.try_into()?;
+                let start_address = address.into();
                 buf.try_copy_to_slice(&mut address)?;
-                let end_address = address.try_into()?;
+                let end_address = address.into();
                 (start_address, end_address)
             }
             Num::Assigned(TrafficSelectorType::TS_IPV6_ADDR_RANGE) => {
                 let mut address = [0; 16];
 
                 buf.try_copy_to_slice(&mut address)?;
-                let start_address = address.try_into()?;
+                let start_address = address.into();
                 buf.try_copy_to_slice(&mut address)?;
-                let end_address = address.try_into()?;
+                let end_address = address.into();
                 (start_address, end_address)
             }
             _ => return Err(anyhow::anyhow!("unknown TS type")),
