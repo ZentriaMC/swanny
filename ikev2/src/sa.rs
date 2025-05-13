@@ -34,9 +34,7 @@ pub struct IkeSa {
 }
 
 impl IkeSa {
-    pub fn new(
-        config: &Config,
-    ) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
+    pub fn new(config: &Config) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
         let mut spi = SPI::default();
         rand_bytes(&mut spi)?;
 
@@ -115,38 +113,20 @@ mod tests {
         message::{
             Message,
             num::{Num, TrafficSelectorType},
-            traffic_selector::TrafficSelector,
+            traffic_selector,
         },
     };
     use futures::stream::StreamExt;
-    use std::str::FromStr;
 
     #[tokio::test]
     async fn test_state() {
         let config = config::tests::create_config();
-        let src_address = IpAddr::from_str("192.168.1.2").unwrap();
-        let dst_address = IpAddr::from_str("192.168.1.3").unwrap();
-        let (mut ike_sa, mut messages) =
-            IkeSa::new(&config).expect("unable to create IKE SA");
+        let (mut ike_sa, mut messages) = IkeSa::new(&config).expect("unable to create IKE SA");
         tokio::spawn(async move {
             ike_sa
                 .handle_acquire(
-                    TrafficSelector::new(
-                        Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
-                        0,
-                        &src_address,
-                        &src_address,
-                        0,
-                        0,
-                    ),
-                    TrafficSelector::new(
-                        Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
-                        0,
-                        &dst_address,
-                        &dst_address,
-                        0,
-                        0,
-                    ),
+                    traffic_selector::tests::create_traffic_selector(),
+                    traffic_selector::tests::create_traffic_selector(),
                     1,
                 )
                 .await

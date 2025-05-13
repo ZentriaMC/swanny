@@ -144,3 +144,42 @@ impl serialize::Deserialize for TrafficSelector {
         })
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::message::serialize::{Deserialize, Serialize};
+    use bytes::BytesMut;
+    use std::net::IpAddr;
+    use std::str::FromStr;
+
+    pub(crate) fn create_traffic_selector() -> TrafficSelector {
+        let src_address = IpAddr::from_str("192.168.1.2").unwrap();
+        TrafficSelector::new(
+            Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
+            0,
+            &src_address,
+            &src_address,
+            0,
+            0,
+        )
+    }
+
+    #[test]
+    fn test_traffic_selector() {
+        let traffic_selector = create_traffic_selector();
+
+        let len = traffic_selector
+            .size()
+            .expect("unable to determine serialized size");
+        let mut buf = BytesMut::with_capacity(len);
+        traffic_selector
+            .serialize(&mut buf)
+            .expect("unable to serialize traffic selector");
+
+        let traffic_selector2 = TrafficSelector::deserialize(&mut &buf[..])
+            .expect("unable to deserialize traffic selector");
+
+        assert_eq!(traffic_selector, traffic_selector2);
+    }
+}
