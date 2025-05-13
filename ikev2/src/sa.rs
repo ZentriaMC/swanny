@@ -60,7 +60,7 @@ impl IkeSa {
         ))
     }
 
-    fn choose_proposal<'a, 'b>(
+    pub(crate) fn choose_proposal<'a, 'b>(
         mut this: impl Iterator<Item = &'a Proposal>,
         mut other: impl Iterator<Item = &'b Proposal>,
     ) -> Option<Proposal> {
@@ -76,6 +76,7 @@ impl IkeSa {
             let mut state = self.state.lock().await;
             *state = Some(s);
         }
+
         Ok(())
     }
 
@@ -95,6 +96,7 @@ impl IkeSa {
             let mut state = self.state.lock().await;
             *state = Some(s);
         }
+
         Ok(())
     }
 }
@@ -116,27 +118,57 @@ mod tests {
             traffic_selector,
         },
     };
-    use futures::stream::StreamExt;
+    use futures::{
+        SinkExt,
+        channel::mpsc,
+        stream::{FuturesUnordered, StreamExt},
+    };
 
     #[tokio::test]
     async fn test_state() {
         let config = config::tests::create_config();
-        let (mut ike_sa, mut messages) = IkeSa::new(&config).expect("unable to create IKE SA");
-        tokio::spawn(async move {
-            ike_sa
-                .handle_acquire(
-                    traffic_selector::tests::create_traffic_selector(),
-                    traffic_selector::tests::create_traffic_selector(),
-                    1,
-                )
-                .await
-                .expect("unable to handle acquire");
+        let (mut initiator, mut messages_i) = IkeSa::new(&config).expect("unable to create IKE SA");
+        let (mut responder, mut messages_r) = IkeSa::new(&config).expect("unable to create IKE SA");
+        let mut initiator2 = initiator.clone();
+        let mut responder2 = responder.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut pending_operations = FuturesUnordered::new();
+
+            loop {
+                let res = futures::select! {
+                    message = messages_i.select_next_some() => {
+                        match message {
+                            ControlMessage::IkeMessage(message) => {
+                                eprintln!("INITIATOR: {:?}", message);
+                                pending_operations.push(responder2.handle_message(message));
+                            },
+                            _ => {},
+                        }
+                    },
+                    message = messages_r.select_next_some() => {
+                        match message {
+                            ControlMessage::IkeMessage(message) => {
+                                eprintln!("RESPONDER: {:?}", message);
+                                pending_operations.push(initiator2.handle_message(message));
+                            },
+                            _ => {},
+                        }
+                    },
+                    _ = pending_operations.select_next_some() => {},
+                };
+            }
         });
 
-        tokio::select! {
-            Some(ControlMessage::IkeMessage(message)) = messages.next() => {
-                println!("{:?}", message);
-            },
-        }
+        initiator
+            .handle_acquire(
+                traffic_selector::tests::create_traffic_selector(),
+                traffic_selector::tests::create_traffic_selector(),
+                1,
+            )
+            .await
+            .expect("unable to handle acquire");
+
+        handle.await.unwrap();
     }
 }

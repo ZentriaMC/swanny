@@ -72,6 +72,10 @@ impl Payload {
         self.type_
     }
 
+    pub fn content(&self) -> &Content {
+        &self.content
+    }
+
     pub fn serialize(
         &self,
         next_payload_type: Num<u8, PayloadType>,
