@@ -85,10 +85,8 @@ async fn main() -> Result<()> {
     tokio::spawn(connection);
 
     let config = create_config();
-    let address = IpAddr::from_str("192.168.1.1").unwrap();
-    let peer_address = IpAddr::from_str("192.168.1.2").unwrap();
 
-    let (ike_sa, mut ike_sa_messages) = IkeSa::new(&config, &address, &peer_address)?;
+    let (ike_sa, mut ike_sa_messages) = IkeSa::new(&config)?;
 
     let mut pending_operations = FuturesUnordered::new();
 

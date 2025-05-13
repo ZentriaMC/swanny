@@ -5,7 +5,6 @@ use crate::{
 };
 use anyhow::Result;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -20,9 +19,7 @@ pub enum ControlMessage {
 struct IkeSaInner {
     config: Config,
     initiator: Option<bool>,
-    address: IpAddr,
     spi: SPI,
-    peer_address: IpAddr,
     peer_spi: Option<SPI>,
     message_id: u32,
     group: Option<Group>,
@@ -39,8 +36,6 @@ pub struct IkeSa {
 impl IkeSa {
     pub fn new(
         config: &Config,
-        address: &IpAddr,
-        peer_address: &IpAddr,
     ) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
         let mut spi = SPI::default();
         rand_bytes(&mut spi)?;
@@ -50,8 +45,6 @@ impl IkeSa {
         let inner = IkeSaInner {
             initiator: None,
             config: config.to_owned(),
-            address: address.to_owned(),
-            peer_address: peer_address.to_owned(),
             spi,
             peer_spi: None,
             message_id: 1,
@@ -131,26 +124,26 @@ mod tests {
     #[tokio::test]
     async fn test_state() {
         let config = config::tests::create_config();
-        let address = IpAddr::from_str("192.168.1.2").unwrap();
-        let peer_address = IpAddr::from_str("192.168.1.3").unwrap();
+        let src_address = IpAddr::from_str("192.168.1.2").unwrap();
+        let dst_address = IpAddr::from_str("192.168.1.3").unwrap();
         let (mut ike_sa, mut messages) =
-            IkeSa::new(&config, &address, &peer_address).expect("unable to create IKE SA");
+            IkeSa::new(&config).expect("unable to create IKE SA");
         tokio::spawn(async move {
             ike_sa
                 .handle_acquire(
                     TrafficSelector::new(
                         Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
                         0,
-                        &address,
-                        &address,
+                        &src_address,
+                        &src_address,
                         0,
                         0,
                     ),
                     TrafficSelector::new(
                         Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
                         0,
-                        &peer_address,
-                        &peer_address,
+                        &dst_address,
+                        &dst_address,
                         0,
                         0,
                     ),
