@@ -14,6 +14,8 @@ use openssl::{
     symm,
 };
 
+use std::sync::Arc;
+
 pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<()> {
     Ok(rand::rand_bytes(buf)?)
 }
@@ -165,43 +167,19 @@ impl GroupVariant {
     }
 }
 
-pub struct Group {
-    id: DhId,
-    variant: GroupVariant,
+#[derive(Clone)]
+pub struct GroupPrivateKey {
+    group: Group,
     pkey: PKey<pkey::Private>,
 }
 
-impl Group {
-    pub fn new(id: DhId) -> Result<Self> {
-        let variant = GroupVariant::new(id)?;
-        let pkey = Self::generate_key(&variant)?;
-        Ok(Self { id, variant, pkey })
-    }
-
-    pub fn id(&self) -> DhId {
-        self.id
-    }
-
-    fn generate_key(variant: &GroupVariant) -> Result<PKey<pkey::Private>> {
-        match variant {
-            GroupVariant::Ffdh(params) => {
-                let dh = dh::Dh::from_pqg(
-                    params.prime_p().to_owned().unwrap(),
-                    None,
-                    params.generator().to_owned().unwrap(),
-                )?;
-                let dh = dh.generate_key()?;
-                Ok(PKey::<pkey::Private>::from_dh(dh)?)
-            }
-            GroupVariant::Ecdh(group) => {
-                let ec = ec::EcKey::generate(group)?;
-                Ok(PKey::<pkey::Private>::from_ec_key(ec)?)
-            }
-        }
+impl GroupPrivateKey {
+    pub fn group(&self) -> &Group {
+        &self.group
     }
 
     pub fn public_key(&self) -> Result<Vec<u8>> {
-        match self.variant {
+        match *self.group.variant {
             GroupVariant::Ffdh(_) => Ok(self.pkey.dh()?.public_key().to_vec()),
             GroupVariant::Ecdh(ref group) => {
                 let mut bn_ctx = bn::BigNumContext::new()?;
@@ -215,7 +193,7 @@ impl Group {
     }
 
     pub fn compute_key(&self, public_key: impl AsRef<[u8]>) -> Result<Vec<u8>> {
-        let public_key = match self.variant {
+        let public_key = match *self.group.variant {
             GroupVariant::Ffdh(ref params) => {
                 let public_key = bn::BigNum::from_slice(public_key.as_ref())?;
                 let dh = dh::Dh::from_pqg(
@@ -236,6 +214,51 @@ impl Group {
         let mut deriver = Deriver::new(&self.pkey)?;
         deriver.set_peer(&public_key)?;
         Ok(deriver.derive_to_vec()?)
+    }
+}
+
+#[derive(Clone)]
+pub struct Group {
+    id: DhId,
+    variant: Arc<GroupVariant>,
+}
+
+impl Group {
+    pub fn new(id: DhId) -> Result<Self> {
+        let variant = GroupVariant::new(id)?;
+        Ok(Self {
+            id,
+            variant: Arc::new(variant),
+        })
+    }
+
+    pub fn id(&self) -> DhId {
+        self.id
+    }
+
+    pub fn generate_key(&self) -> Result<GroupPrivateKey> {
+        Ok(GroupPrivateKey {
+            group: self.clone(),
+            pkey: Self::generate_pkey(&self.variant)?,
+        })
+    }
+
+    fn generate_pkey(variant: &GroupVariant) -> Result<PKey<pkey::Private>> {
+        match variant {
+            GroupVariant::Ffdh(params) => {
+                let dh = dh::Dh::from_pqg(
+                    params.prime_p().to_owned().unwrap(),
+                    None,
+                    params.generator().to_owned().unwrap(),
+                )?;
+                let dh = dh.generate_key()?;
+                Ok(PKey::<pkey::Private>::from_dh(dh)?)
+            }
+            GroupVariant::Ecdh(group) => {
+                let ec = ec::EcKey::generate(group)?;
+                Ok(PKey::<pkey::Private>::from_ec_key(ec)?)
+            }
+        }
     }
 }
 
@@ -322,10 +345,10 @@ pub(crate) fn generate_skeyseed(
     prf: &Prf,
     n_i: impl AsRef<[u8]>,
     n_r: impl AsRef<[u8]>,
-    group: &Group,
+    private_key: &GroupPrivateKey,
     peer_public_key: impl AsRef<[u8]>,
 ) -> Result<Vec<u8>> {
-    let g_ir = group.compute_key(peer_public_key)?;
+    let g_ir = private_key.compute_key(peer_public_key)?;
     let mut n_i_n_r = n_i.as_ref().to_vec();
     n_i_n_r.extend_from_slice(n_r.as_ref());
     prf.prf(n_i_n_r, g_ir)
@@ -342,34 +365,38 @@ mod tests {
             .expect("unable to calculate PRF");
     }
 
-    #[test]
-    fn test_ffdh() {
-        let group1 = Group::new(DhId::MODP4096).expect("unable to create group");
-        let group2 = Group::new(DhId::MODP4096).expect("unable to create group");
-        let public_key1 = group1.public_key().expect("unable to extract public key");
-        let public_key2 = group2.public_key().expect("unable to extract public key");
-        let secret1 = group1
+    fn test_shared_secret(id: DhId) {
+        let group1 = Group::new(id).expect("unable to create group");
+        let group2 = Group::new(id).expect("unable to create group");
+        let private_key1 = group1
+            .generate_key()
+            .expect("unable to generate private key");
+        let private_key2 = group2
+            .generate_key()
+            .expect("unable to generate private key");
+        let public_key1 = private_key1
+            .public_key()
+            .expect("unable to extract public key");
+        let public_key2 = private_key2
+            .public_key()
+            .expect("unable to extract public key");
+        let secret1 = private_key1
             .compute_key(&public_key2)
             .expect("unable to compute shared secret");
-        let secret2 = group2
+        let secret2 = private_key2
             .compute_key(&public_key1)
             .expect("unable to compute shared secret");
         assert_eq!(secret1, secret2);
     }
 
     #[test]
+    fn test_ffdh() {
+        test_shared_secret(DhId::MODP4096);
+    }
+
+    #[test]
     fn test_ecdh() {
-        let group1 = Group::new(DhId::SECP256R1).expect("unable to create group");
-        let group2 = Group::new(DhId::SECP256R1).expect("unable to create group");
-        let public_key1 = group1.public_key().expect("unable to extract public key");
-        let public_key2 = group2.public_key().expect("unable to extract public key");
-        let secret1 = group1
-            .compute_key(&public_key2)
-            .expect("unable to compute shared secret");
-        let secret2 = group2
-            .compute_key(&public_key1)
-            .expect("unable to compute shared secret");
-        assert_eq!(secret1, secret2);
+        test_shared_secret(DhId::SECP256R1);
     }
 
     #[test]

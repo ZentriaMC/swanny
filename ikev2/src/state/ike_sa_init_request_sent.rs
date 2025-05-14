@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    crypto::{self, Group},
+    crypto::{self, GroupPrivateKey},
     message::{
         Message, SPI,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
@@ -20,7 +20,7 @@ pub(crate) struct IkeSaInitRequestSent {}
 impl IkeSaInitRequestSent {
     fn generate_skeyseed(
         response: &Message,
-        group: &Group,
+        private_key: &GroupPrivateKey,
         n_i: impl AsRef<[u8]>,
     ) -> Result<Vec<u8>> {
         let sa = response
@@ -41,7 +41,7 @@ impl IkeSaInitRequestSent {
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
         let nonce: &payload::Nonce = nonce.try_into()?;
 
-        if ke.dh_group() != Num::Assigned(group.id()) {
+        if ke.dh_group() != Num::Assigned(private_key.group().id()) {
             return Err(anyhow::anyhow!("unmatched DH group"));
         }
 
@@ -53,13 +53,7 @@ impl IkeSaInitRequestSent {
         let chosen_proposal = ChosenProposal::new(&proposal)?;
         let n_r = nonce.nonce();
 
-        crypto::generate_skeyseed(
-            chosen_proposal.prf(),
-            n_i,
-            n_r,
-            chosen_proposal.group(),
-            ke.ke_data(),
-        )
+        crypto::generate_skeyseed(chosen_proposal.prf(), n_i, n_r, private_key, ke.ke_data())
     }
 
     fn generate_ike_auth_request(config: &Config, spi: &SPI, peer_spi: &SPI) -> Result<Message> {
@@ -88,7 +82,7 @@ impl State for IkeSaInitRequestSent {
 
                 let skeyseed = Self::generate_skeyseed(
                     message,
-                    inner.chosen_proposal.as_ref().unwrap().group(),
+                    inner.private_key.as_ref().unwrap(),
                     inner.nonce.as_ref().unwrap(),
                 )?;
                 eprintln!("SKEYSEED generated: {:?}", &skeyseed);

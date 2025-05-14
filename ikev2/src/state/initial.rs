@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    crypto,
+    crypto::{self, GroupPrivateKey},
     message::{
         Message, SPI,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
@@ -21,7 +21,7 @@ impl Initial {
     fn generate_ike_sa_init_request(
         config: &Config,
         spi: &SPI,
-    ) -> Result<(Message, ChosenProposal, Vec<u8>)> {
+    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
         let mut message = Message::new(
             spi,
             &SPI::default(),
@@ -51,7 +51,8 @@ impl Initial {
         }
 
         let chosen_proposal = ChosenProposal::new(&proposals[0])?;
-        let public_key = chosen_proposal.group().public_key()?;
+        let private_key = chosen_proposal.group().generate_key()?;
+        let public_key = private_key.public_key()?;
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::KE),
             payload::Content::KE(payload::KE::new(
@@ -61,14 +62,14 @@ impl Initial {
             true,
         ));
 
-        Ok((message, chosen_proposal, nonce))
+        Ok((message, chosen_proposal, private_key, nonce))
     }
 
     fn generate_ike_sa_init_response(
         config: &Config,
         spi: &SPI,
         request: &Message,
-    ) -> Result<Message> {
+    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
         let mut message = Message::new(
             request.spi_i(),
             spi,
@@ -101,8 +102,8 @@ impl Initial {
                 .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
 
         let chosen_proposal = ChosenProposal::new(&proposal)?;
-
-        let public_key = chosen_proposal.group().public_key()?;
+        let private_key = chosen_proposal.group().generate_key()?;
+        let public_key = private_key.public_key()?;
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::KE),
             payload::Content::KE(payload::KE::new(
@@ -120,7 +121,7 @@ impl Initial {
             chosen_proposal.prf(),
             n_i,
             &n_r[..],
-            chosen_proposal.group(),
+            &private_key,
             ke.ke_data(),
         )?;
         eprintln!("SKEYSEED generated: {:?}", &skeyseed);
@@ -137,7 +138,7 @@ impl Initial {
             true,
         ));
 
-        Ok(message)
+        Ok((message, chosen_proposal, private_key, n_r.to_vec()))
     }
 }
 
@@ -152,7 +153,7 @@ impl State for Initial {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let message =
+                let (message, chosen_proposal, private_key, nonce) =
                     Self::generate_ike_sa_init_response(&inner.config, &inner.spi, message)?;
                 inner
                     .sender
@@ -161,6 +162,9 @@ impl State for Initial {
 
                 let mut inner = data.write().await;
                 inner.initiator = Some(false);
+                inner.chosen_proposal = Some(chosen_proposal);
+                inner.private_key = Some(private_key);
+                inner.nonce = Some(nonce);
                 drop(inner);
 
                 Ok(Box::new(state::IkeSaInitResponseSent {}))
@@ -180,7 +184,7 @@ impl State for Initial {
     ) -> Result<Box<dyn State>> {
         let inner = data.read().await;
 
-        let (message, chosen_proposal, nonce) =
+        let (message, chosen_proposal, private_key, nonce) =
             Self::generate_ike_sa_init_request(&inner.config, &inner.spi)?;
         let message_id = message.id();
 
@@ -192,6 +196,7 @@ impl State for Initial {
         let mut inner = data.write().await;
         inner.initiator = Some(true);
         inner.chosen_proposal = Some(chosen_proposal);
+        inner.private_key = Some(private_key);
         inner.nonce = Some(nonce);
         inner.message_id = message_id;
         inner.larval_sa = Some(ChildSa::new(ts_i, ts_r));

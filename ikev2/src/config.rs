@@ -228,8 +228,20 @@ pub(crate) mod tests {
     fn test_config_builder() {
         let config = create_config();
 
-        assert_eq!(config.ike_proposals(&SPI::default()).collect::<Vec<_>>().len(), 2);
+        assert_eq!(
+            config
+                .ike_proposals(&SPI::default())
+                .collect::<Vec<_>>()
+                .len(),
+            2
+        );
         assert_eq!(config.ipsec_protocol(), Protocol::ESP);
-        assert_eq!(config.ipsec_proposals(&SPI::default()).collect::<Vec<_>>().len(), 1);
+        assert_eq!(
+            config
+                .ipsec_proposals(&SPI::default())
+                .collect::<Vec<_>>()
+                .len(),
+            1
+        );
     }
 }

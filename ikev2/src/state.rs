@@ -1,5 +1,6 @@
 use crate::{
     config::Config,
+    crypto::GroupPrivateKey,
     message::{Message, SPI, traffic_selector::TrafficSelector},
     sa::{ChildSa, ChosenProposal, ControlMessage},
 };
@@ -45,6 +46,7 @@ pub(crate) struct StateData {
     peer_spi: Option<SPI>,
     message_id: u32,
     chosen_proposal: Option<ChosenProposal>,
+    private_key: Option<GroupPrivateKey>,
     nonce: Option<Vec<u8>>,
     larval_sa: Option<ChildSa>,
     sender: UnboundedSender<ControlMessage>,
@@ -59,6 +61,7 @@ impl StateData {
             peer_spi: None,
             message_id: 0,
             chosen_proposal: None,
+            private_key: None,
             nonce: None,
             larval_sa: None,
             sender,

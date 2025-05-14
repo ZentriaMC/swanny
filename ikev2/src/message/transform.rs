@@ -165,11 +165,7 @@ impl serialize::Deserialize for Attribute {
         let ty: Num<u16, AttributeType> = ty.into();
         let mut value = vec![0; len as usize];
         buf.try_copy_to_slice(&mut value)?;
-        Ok(Self {
-            ty,
-            value,
-            format,
-        })
+        Ok(Self { ty, value, format })
     }
 }
 
@@ -238,11 +234,7 @@ impl serialize::Deserialize for Transform {
         while buf.has_remaining() {
             attributes.push(Attribute::deserialize(buf)?);
         }
-        Ok(Self {
-            ty,
-            id,
-            attributes,
-        })
+        Ok(Self { ty, id, attributes })
     }
 }
 
