@@ -114,10 +114,19 @@ impl Payload {
             Num::Assigned(PayloadType::KE) => {
                 Content::KE(KE::deserialize(&mut &buf.chunk()[..len])?)
             }
-            Num::Assigned(PayloadType::IDi) | Num::Assigned(PayloadType::IDr) => {
+            Num::Assigned(PayloadType::AUTH) => {
+                Content::Auth(Auth::deserialize(&mut &buf.chunk()[..len])?)
+            }
+            Num::Assigned(PayloadType::NONCE) => {
+                Content::Nonce(Nonce::deserialize(&mut &buf.chunk()[..len])?)
+            }
+            Num::Assigned(PayloadType::NOTIFY) => {
+                Content::Notify(Notify::deserialize(&mut &buf.chunk()[..len])?)
+            }
+            Num::Assigned(PayloadType::IDi | PayloadType::IDr) => {
                 Content::ID(ID::deserialize(&mut &buf.chunk()[..len])?)
             }
-            Num::Assigned(PayloadType::TSi) | Num::Assigned(PayloadType::TSr) => {
+            Num::Assigned(PayloadType::TSi | PayloadType::TSr) => {
                 Content::TS(TS::deserialize(&mut &buf.chunk()[..len])?)
             }
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
@@ -147,6 +156,30 @@ impl SA {
         self.proposals.iter()
     }
 }
+
+macro_rules! create_try_from {
+    ( $pe:pat, $ce:ident ) => {
+        impl<'a> TryFrom<&'a Payload> for &'a $ce {
+            type Error = anyhow::Error;
+
+            fn try_from(other: &'a Payload) -> std::result::Result<Self, Self::Error> {
+                match (other.r#type(), other.content()) {
+                    (Num::Assigned($pe),
+                     Content::$ce(content)) => Ok(content),
+                    _ => Err(anyhow::anyhow!("unable to convert payload")),
+                }
+            }
+        }
+    }
+}
+
+create_try_from!(PayloadType::SA, SA);
+create_try_from!(PayloadType::KE, KE);
+create_try_from!(PayloadType::IDi | PayloadType::IDr, ID);
+create_try_from!(PayloadType::AUTH, Auth);
+create_try_from!(PayloadType::NONCE, Nonce);
+create_try_from!(PayloadType::NOTIFY, Notify);
+create_try_from!(PayloadType::TSi | PayloadType::TSr, TS);
 
 impl serialize::Serialize for SA {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {

@@ -1,4 +1,4 @@
-use crate::message::num::{DhId, EncrId, PrfId};
+use crate::message::num::{DhId, EncrId, IntegId, PrfId};
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 
@@ -33,6 +33,10 @@ impl Prf {
         Ok(Self { md })
     }
 
+    pub fn size(&self) -> usize {
+        self.md.size()
+    }
+
     pub fn prf(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Vec<u8>> {
         let pkey = PKey::hmac(key.as_ref())?;
         let mut signer = Signer::new(self.md, &pkey)?;
@@ -60,6 +64,27 @@ impl Prf {
             buf.put_slice(&block[..buf.remaining_mut().min(block.len())]);
         }
         Ok(buf.to_vec())
+    }
+}
+
+pub struct Integ {
+    md: MessageDigest,
+    output_size: usize,
+}
+
+impl Integ {
+    pub fn new(id: IntegId) -> Result<Self> {
+        let (md, output_size) = match id {
+            IntegId::AUTH_HMAC_MD5_96 => (MessageDigest::md5(), 12),
+            IntegId::AUTH_HMAC_SHA1_96 => (MessageDigest::sha1(), 12),
+            _ => return Err(anyhow::anyhow!("unsupported integrity checking")),
+        };
+
+        Ok(Self { md, output_size })
+    }
+
+    pub fn key_size(&self) -> usize {
+        self.md.size()
     }
 }
 
@@ -215,6 +240,10 @@ impl Cipher {
         let mut iv = vec![0; cipher.iv_len().unwrap()];
         rand::rand_bytes(&mut iv)?;
         Ok(Self { cipher, iv })
+    }
+
+    pub fn key_size(&self) -> usize {
+        self.cipher.key_len()
     }
 
     pub fn encrypt(&self, key: impl AsRef<[u8]>, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>> {

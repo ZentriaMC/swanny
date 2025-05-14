@@ -22,7 +22,9 @@ struct IkeSaInner {
     spi: SPI,
     peer_spi: Option<SPI>,
     message_id: u32,
+    proposals: Option<Vec<Proposal>>,
     group: Option<Group>,
+    nonce: Option<Vec<u8>>,
     larval_sa: Option<ChildSa>,
     sender: UnboundedSender<ControlMessage>,
 }
@@ -48,6 +50,8 @@ impl IkeSa {
             message_id: 1,
             sender,
             group: None,
+            nonce: None,
+            proposals: None,
             larval_sa: None,
         };
 
