@@ -97,12 +97,12 @@ impl Integ {
     }
 }
 
-enum GroupType {
+enum GroupVariant {
     Ffdh(dh::Dh<pkey::Params>),
     Ecdh(ec::EcGroup),
 }
 
-impl GroupType {
+impl GroupVariant {
     fn ffdh(id: DhId) -> Result<Self> {
         let (prime, generator) = match id {
             DhId::MODP768 => (
@@ -167,24 +167,24 @@ impl GroupType {
 
 pub struct Group {
     id: DhId,
-    type_: GroupType,
+    variant: GroupVariant,
     pkey: PKey<pkey::Private>,
 }
 
 impl Group {
     pub fn new(id: DhId) -> Result<Self> {
-        let type_ = GroupType::new(id)?;
-        let pkey = Self::generate_key(&type_)?;
-        Ok(Self { id, type_, pkey })
+        let variant = GroupVariant::new(id)?;
+        let pkey = Self::generate_key(&variant)?;
+        Ok(Self { id, variant, pkey })
     }
 
     pub fn id(&self) -> DhId {
         self.id
     }
 
-    fn generate_key(type_: &GroupType) -> Result<PKey<pkey::Private>> {
-        match type_ {
-            GroupType::Ffdh(params) => {
+    fn generate_key(variant: &GroupVariant) -> Result<PKey<pkey::Private>> {
+        match variant {
+            GroupVariant::Ffdh(params) => {
                 let dh = dh::Dh::from_pqg(
                     params.prime_p().to_owned().unwrap(),
                     None,
@@ -193,7 +193,7 @@ impl Group {
                 let dh = dh.generate_key()?;
                 Ok(PKey::<pkey::Private>::from_dh(dh)?)
             }
-            GroupType::Ecdh(group) => {
+            GroupVariant::Ecdh(group) => {
                 let ec = ec::EcKey::generate(group)?;
                 Ok(PKey::<pkey::Private>::from_ec_key(ec)?)
             }
@@ -201,9 +201,9 @@ impl Group {
     }
 
     pub fn public_key(&self) -> Result<Vec<u8>> {
-        match self.type_ {
-            GroupType::Ffdh(_) => Ok(self.pkey.dh()?.public_key().to_vec()),
-            GroupType::Ecdh(ref group) => {
+        match self.variant {
+            GroupVariant::Ffdh(_) => Ok(self.pkey.dh()?.public_key().to_vec()),
+            GroupVariant::Ecdh(ref group) => {
                 let mut bn_ctx = bn::BigNumContext::new()?;
                 Ok(self.pkey.ec_key()?.public_key().to_bytes(
                     group,
@@ -215,8 +215,8 @@ impl Group {
     }
 
     pub fn compute_key(&self, public_key: impl AsRef<[u8]>) -> Result<Vec<u8>> {
-        let public_key = match self.type_ {
-            GroupType::Ffdh(ref params) => {
+        let public_key = match self.variant {
+            GroupVariant::Ffdh(ref params) => {
                 let public_key = bn::BigNum::from_slice(public_key.as_ref())?;
                 let dh = dh::Dh::from_pqg(
                     params.prime_p().to_owned().unwrap(),
@@ -226,7 +226,7 @@ impl Group {
                 let dh = dh.set_public_key(public_key)?;
                 PKey::<pkey::Public>::from_dh(dh)?
             }
-            GroupType::Ecdh(ref group) => {
+            GroupVariant::Ecdh(ref group) => {
                 let mut bn_ctx = bn::BigNumContext::new()?;
                 let point = ec::EcPoint::from_bytes(group, public_key.as_ref(), &mut bn_ctx)?;
                 let key = ec::EcKey::from_public_key(group, &point)?;
