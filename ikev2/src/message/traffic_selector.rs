@@ -8,7 +8,7 @@ use std::net::IpAddr;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrafficSelector {
-    type_: Num<u8, TrafficSelectorType>,
+    ty: Num<u8, TrafficSelectorType>,
     ip_proto: u8,
     start_port: u16,
     end_port: u16,
@@ -18,7 +18,7 @@ pub struct TrafficSelector {
 
 impl TrafficSelector {
     pub fn new(
-        type_: Num<u8, TrafficSelectorType>,
+        ty: Num<u8, TrafficSelectorType>,
         ip_proto: u8,
         start_address: &IpAddr,
         end_address: &IpAddr,
@@ -26,7 +26,7 @@ impl TrafficSelector {
         end_port: u16,
     ) -> Self {
         Self {
-            type_,
+            ty,
             ip_proto,
             start_port,
             end_port,
@@ -35,8 +35,8 @@ impl TrafficSelector {
         }
     }
 
-    pub fn r#type(&self) -> Num<u8, TrafficSelectorType> {
-        self.type_
+    pub fn ty(&self) -> Num<u8, TrafficSelectorType> {
+        self.ty
     }
 
     pub fn ip_proto(&self) -> u8 {
@@ -62,7 +62,7 @@ impl TrafficSelector {
 
 impl serialize::Serialize for TrafficSelector {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        buf.put_u8(self.type_.into());
+        buf.put_u8(self.ty.into());
         buf.put_u8(self.ip_proto);
         buf.put_u16(self.size()?.try_into()?);
         buf.put_u16(self.start_port);
@@ -83,7 +83,7 @@ impl serialize::Serialize for TrafficSelector {
     }
 
     fn size(&self) -> Result<usize> {
-        let address_size = match self.type_ {
+        let address_size = match self.ty {
             Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE) => 4usize,
             Num::Assigned(TrafficSelectorType::TS_IPV6_ADDR_RANGE) => 16usize,
             _ => return Err(anyhow::anyhow!("unknown TS type")),
@@ -100,7 +100,7 @@ impl serialize::Deserialize for TrafficSelector {
     where
         Self: Sized,
     {
-        let type_ = buf.try_get_u8()?.into();
+        let ty = buf.try_get_u8()?.into();
         let ip_proto = buf.try_get_u8()?;
         let size: usize = buf.try_get_u16()?.into();
         if size != buf.remaining() + 4usize {
@@ -109,7 +109,7 @@ impl serialize::Deserialize for TrafficSelector {
 
         let start_port = buf.try_get_u16()?;
         let end_port = buf.try_get_u16()?;
-        let (start_address, end_address): (IpAddr, IpAddr) = match type_ {
+        let (start_address, end_address): (IpAddr, IpAddr) = match ty {
             Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE) => {
                 let mut address = [0; 4];
 
@@ -135,7 +135,7 @@ impl serialize::Deserialize for TrafficSelector {
         }
 
         Ok(Self {
-            type_,
+            ty,
             ip_proto,
             start_port,
             end_port,

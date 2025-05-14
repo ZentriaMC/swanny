@@ -80,19 +80,19 @@ impl Initial {
 
         let sa = request
             .payloads()
-            .find(|payload| payload.r#type() == Num::Assigned(PayloadType::SA))
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
         let sa: &payload::SA = sa.try_into()?;
 
         let ke = request
             .payloads()
-            .find(|payload| payload.r#type() == Num::Assigned(PayloadType::KE))
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::KE))
             .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
         let ke: &payload::KE = ke.try_into()?;
 
         let nonce = request
             .payloads()
-            .find(|payload| payload.r#type() == Num::Assigned(PayloadType::NONCE))
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::NONCE))
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
         let nonce: &payload::Nonce = nonce.try_into()?;
 

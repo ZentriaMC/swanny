@@ -55,21 +55,21 @@ impl Serialize for Content {
 #[derive(Debug)]
 pub struct Payload {
     critical: bool,
-    type_: Num<u8, PayloadType>,
+    ty: Num<u8, PayloadType>,
     content: Content,
 }
 
 impl Payload {
-    pub fn new(type_: Num<u8, PayloadType>, content: Content, critical: bool) -> Self {
+    pub fn new(ty: Num<u8, PayloadType>, content: Content, critical: bool) -> Self {
         Self {
-            type_,
+            ty,
             content,
             critical,
         }
     }
 
-    pub fn r#type(&self) -> Num<u8, PayloadType> {
-        self.type_
+    pub fn ty(&self) -> Num<u8, PayloadType> {
+        self.ty
     }
 
     pub fn content(&self) -> &Content {
@@ -163,7 +163,7 @@ macro_rules! create_try_from {
             type Error = anyhow::Error;
 
             fn try_from(other: &'a Payload) -> std::result::Result<Self, Self::Error> {
-                match (other.r#type(), other.content()) {
+                match (other.ty(), other.content()) {
                     (Num::Assigned($pe), Content::$ce(content)) => Ok(content),
                     _ => Err(anyhow::anyhow!("unable to convert payload")),
                 }
@@ -282,20 +282,20 @@ impl serialize::Deserialize for KE {
 
 #[derive(Debug, PartialEq)]
 pub struct ID {
-    type_: Num<u8, IdType>,
+    ty: Num<u8, IdType>,
     id_data: Vec<u8>,
 }
 
 impl ID {
-    pub fn new(type_: Num<u8, IdType>, id_data: impl AsRef<[u8]>) -> Self {
+    pub fn new(ty: Num<u8, IdType>, id_data: impl AsRef<[u8]>) -> Self {
         Self {
-            type_,
+            ty,
             id_data: id_data.as_ref().to_vec(),
         }
     }
 
-    pub fn r#type(&self) -> Num<u8, IdType> {
-        self.type_
+    pub fn ty(&self) -> Num<u8, IdType> {
+        self.ty
     }
 
     pub fn id_data(&self) -> &[u8] {
@@ -305,7 +305,7 @@ impl ID {
 
 impl serialize::Serialize for ID {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        buf.put_u8(self.type_.into());
+        buf.put_u8(self.ty.into());
         buf.put_u8(0);
         buf.put_u16(0);
         buf.put_slice(&self.id_data[..]);
@@ -324,10 +324,10 @@ impl serialize::Deserialize for ID {
     where
         Self: Sized,
     {
-        let type_ = buf.try_get_u8()?;
+        let ty = buf.try_get_u8()?;
         let _ = buf.try_get_u8()?;
         let _ = buf.try_get_u16()?;
-        Ok(Self::new(type_.into(), buf.chunk()))
+        Ok(Self::new(ty.into(), buf.chunk()))
     }
 }
 
@@ -423,7 +423,7 @@ impl serialize::Deserialize for Nonce {
 pub struct Notify {
     protocol: Num<u8, Protocol>,
     spi: Option<Vec<u8>>,
-    type_: Num<u16, NotifyType>,
+    ty: Num<u16, NotifyType>,
     notify_data: Vec<u8>,
 }
 
@@ -431,13 +431,13 @@ impl Notify {
     pub fn new(
         protocol: Num<u8, Protocol>,
         spi: Option<&[u8]>,
-        type_: Num<u16, NotifyType>,
+        ty: Num<u16, NotifyType>,
         notify_data: impl AsRef<[u8]>,
     ) -> Self {
         Self {
             protocol,
             spi: spi.map(|spi| spi.as_ref().to_vec()),
-            type_,
+            ty,
             notify_data: notify_data.as_ref().to_vec(),
         }
     }
@@ -450,8 +450,8 @@ impl Notify {
         self.spi.as_deref()
     }
 
-    pub fn r#type(&self) -> Num<u16, NotifyType> {
-        self.type_
+    pub fn ty(&self) -> Num<u16, NotifyType> {
+        self.ty
     }
 
     pub fn notify_data(&self) -> &[u8] {
@@ -467,7 +467,7 @@ impl serialize::Serialize for Notify {
         } else {
             buf.put_u8(0);
         }
-        buf.put_u16(self.type_.into());
+        buf.put_u16(self.ty.into());
         if let Some(ref spi) = self.spi {
             buf.put_slice(spi);
         }
@@ -491,7 +491,7 @@ impl serialize::Deserialize for Notify {
     {
         let protocol = buf.try_get_u8()?;
         let spi_len: usize = buf.try_get_u8()?.into();
-        let type_ = buf.try_get_u16()?;
+        let ty = buf.try_get_u16()?;
         let spi = if spi_len > 0 {
             Some(&buf.chunk()[..spi_len])
         } else {
@@ -500,7 +500,7 @@ impl serialize::Deserialize for Notify {
         Ok(Self::new(
             protocol.into(),
             spi,
-            type_.into(),
+            ty.into(),
             &buf.chunk()[spi_len..],
         ))
     }

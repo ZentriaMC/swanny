@@ -76,7 +76,7 @@ const HEADER_SIZE: usize = 28;
 impl serialize::Serialize for Message {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
-        let mut types_iter = self.payloads.iter().map(|p| p.r#type()).chain(trailer);
+        let mut types_iter = self.payloads.iter().map(|p| p.ty()).chain(trailer);
 
         buf.put_slice(&self.spi_i[..]);
         buf.put_slice(&self.spi_r[..]);

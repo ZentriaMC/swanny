@@ -29,8 +29,8 @@ impl From<TransformId> for u16 {
 }
 
 impl Num<u16, TransformId> {
-    pub fn from_u16(type_: Num<u8, TransformType>, value: u16) -> Self {
-        match type_ {
+    pub fn from_u16(ty: Num<u8, TransformType>, value: u16) -> Self {
+        match ty {
             Num::Assigned(TransformType::ENCR) => Num::Assigned(TransformId::Encr(value.into())),
             Num::Assigned(TransformType::PRF) => Num::Assigned(TransformId::Prf(value.into())),
             Num::Assigned(TransformType::INTEG) => Num::Assigned(TransformId::Integ(value.into())),
@@ -91,14 +91,14 @@ pub enum AttributeFormat {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attribute {
-    type_: Num<u16, AttributeType>,
+    ty: Num<u16, AttributeType>,
     value: Vec<u8>,
     format: AttributeFormat,
 }
 
 impl Attribute {
-    pub fn r#type(&self) -> Num<u16, AttributeType> {
-        self.type_
+    pub fn ty(&self) -> Num<u16, AttributeType> {
+        self.ty
     }
 
     pub fn value(&self) -> &[u8] {
@@ -110,12 +110,12 @@ impl Attribute {
     }
 
     pub fn new(
-        type_: Num<u16, AttributeType>,
+        ty: Num<u16, AttributeType>,
         value: impl AsRef<[u8]>,
         format: AttributeFormat,
     ) -> Self {
         Self {
-            type_,
+            ty,
             value: value.as_ref().to_vec(),
             format,
         }
@@ -124,15 +124,15 @@ impl Attribute {
 
 impl serialize::Serialize for Attribute {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        let type_: u16 = self.type_.into();
+        let ty: u16 = self.ty.into();
         match self.format {
             AttributeFormat::TLV => {
-                buf.put_u16(type_ | 0x8000);
+                buf.put_u16(ty | 0x8000);
                 buf.put_u16(self.value.len().try_into()?);
                 buf.put_slice(&self.value);
             }
             AttributeFormat::TV => {
-                buf.put_u16(type_);
+                buf.put_u16(ty);
                 buf.put_u8(self.value[0]);
                 buf.put_u8(self.value[1]);
             }
@@ -155,18 +155,18 @@ impl serialize::Deserialize for Attribute {
     where
         Self: Sized,
     {
-        let mut type_ = buf.try_get_u16()?;
-        let (format, len) = if (type_ & 0x8000) == 0 {
+        let mut ty = buf.try_get_u16()?;
+        let (format, len) = if (ty & 0x8000) == 0 {
             (AttributeFormat::TV, 2)
         } else {
             (AttributeFormat::TLV, buf.try_get_u16()?)
         };
-        type_ &= !0x8000;
-        let type_: Num<u16, AttributeType> = type_.into();
+        ty &= !0x8000;
+        let ty: Num<u16, AttributeType> = ty.into();
         let mut value = vec![0; len as usize];
         buf.try_copy_to_slice(&mut value)?;
         Ok(Self {
-            type_,
+            ty,
             value,
             format,
         })
@@ -175,14 +175,14 @@ impl serialize::Deserialize for Attribute {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Transform {
-    type_: Num<u8, TransformType>,
+    ty: Num<u8, TransformType>,
     id: Num<u16, TransformId>,
     attributes: Vec<Attribute>,
 }
 
 impl Transform {
-    pub fn r#type(&self) -> Num<u8, TransformType> {
-        self.type_
+    pub fn ty(&self) -> Num<u8, TransformType> {
+        self.ty
     }
 
     pub fn id(&self) -> Num<u16, TransformId> {
@@ -194,12 +194,12 @@ impl Transform {
     }
 
     pub fn new(
-        type_: Num<u8, TransformType>,
+        ty: Num<u8, TransformType>,
         id: Num<u16, TransformId>,
         attributes: impl AsRef<[Attribute]>,
     ) -> Self {
         Self {
-            type_,
+            ty,
             id,
             attributes: attributes.as_ref().to_vec(),
         }
@@ -208,7 +208,7 @@ impl Transform {
 
 impl serialize::Serialize for Transform {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        buf.put_u8(self.type_.into());
+        buf.put_u8(self.ty.into());
         buf.put_u8(0);
         buf.put_u16(self.id.into());
         for attribute in &self.attributes {
@@ -231,15 +231,15 @@ impl serialize::Deserialize for Transform {
     where
         Self: Sized,
     {
-        let type_ = buf.try_get_u8()?.into();
+        let ty = buf.try_get_u8()?.into();
         let _ = buf.try_get_u8();
-        let id = Num::<u16, TransformId>::from_u16(type_, buf.try_get_u16()?);
+        let id = Num::<u16, TransformId>::from_u16(ty, buf.try_get_u16()?);
         let mut attributes = Vec::new();
         while buf.has_remaining() {
             attributes.push(Attribute::deserialize(buf)?);
         }
         Ok(Self {
-            type_,
+            ty,
             id,
             attributes,
         })
@@ -299,7 +299,7 @@ pub(crate) mod tests {
             Transform::deserialize(&mut &buf[..]).expect("unable to deserialize transform");
 
         assert!(matches!(
-            transform2.r#type(),
+            transform2.ty(),
             Num::Assigned(TransformType::ENCR)
         ));
         assert!(matches!(
