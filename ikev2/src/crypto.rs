@@ -19,6 +19,7 @@ pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<()> {
 }
 
 pub struct Prf {
+    id: PrfId,
     md: MessageDigest,
 }
 
@@ -30,7 +31,11 @@ impl Prf {
             _ => return Err(anyhow::anyhow!("unsupported PRF")),
         };
 
-        Ok(Self { md })
+        Ok(Self { id, md })
+    }
+
+    pub fn id(&self) -> PrfId {
+        self.id
     }
 
     pub fn size(&self) -> usize {
@@ -85,6 +90,10 @@ impl Integ {
 
     pub fn key_size(&self) -> usize {
         self.md.size()
+    }
+
+    pub fn output_size(&self) -> usize {
+        self.output_size
     }
 }
 
@@ -157,6 +166,7 @@ impl GroupType {
 }
 
 pub struct Group {
+    id: DhId,
     type_: GroupType,
     pkey: PKey<pkey::Private>,
 }
@@ -165,7 +175,11 @@ impl Group {
     pub fn new(id: DhId) -> Result<Self> {
         let type_ = GroupType::new(id)?;
         let pkey = Self::generate_key(&type_)?;
-        Ok(Self { type_, pkey })
+        Ok(Self { id, type_, pkey })
+    }
+
+    pub fn id(&self) -> DhId {
+        self.id
     }
 
     fn generate_key(type_: &GroupType) -> Result<PKey<pkey::Private>> {
@@ -228,22 +242,31 @@ impl Group {
 pub struct Cipher {
     cipher: symm::Cipher,
     iv: Vec<u8>,
+    is_aead: bool,
 }
 
 impl Cipher {
     pub fn new(id: EncrId, key_size: Option<u16>) -> Result<Self> {
-        let cipher = match (id, key_size) {
-            (EncrId::ENCR_AES_CBC, Some(128)) => symm::Cipher::aes_128_cbc(),
-            (EncrId::ENCR_AES_CBC, Some(256)) => symm::Cipher::aes_256_cbc(),
+        let (cipher, is_aead) = match (id, key_size) {
+            (EncrId::ENCR_AES_CBC, Some(128)) => (symm::Cipher::aes_128_cbc(), false),
+            (EncrId::ENCR_AES_CBC, Some(256)) => (symm::Cipher::aes_256_cbc(), false),
             _ => return Err(anyhow::anyhow!("unsupported cipher")),
         };
         let mut iv = vec![0; cipher.iv_len().unwrap()];
         rand::rand_bytes(&mut iv)?;
-        Ok(Self { cipher, iv })
+        Ok(Self {
+            cipher,
+            iv,
+            is_aead,
+        })
     }
 
     pub fn key_size(&self) -> usize {
         self.cipher.key_len()
+    }
+
+    pub fn is_aead(&self) -> bool {
+        self.is_aead
     }
 
     pub fn encrypt(&self, key: impl AsRef<[u8]>, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
@@ -306,16 +329,6 @@ pub(crate) fn generate_skeyseed(
     let mut n_i_n_r = n_i.as_ref().to_vec();
     n_i_n_r.extend_from_slice(n_r.as_ref());
     prf.prf(n_i_n_r, g_ir)
-}
-
-struct Keys {
-    s_d: Vec<u8>,
-    s_ei: Vec<u8>,
-    s_er: Vec<u8>,
-    s_ai: Vec<u8>,
-    s_ar: Vec<u8>,
-    s_pi: Vec<u8>,
-    s_pr: Vec<u8>,
 }
 
 #[cfg(test)]

@@ -1,8 +1,7 @@
 use crate::{
     config::Config,
-    crypto::Group,
-    message::{Message, SPI, proposal::Proposal, traffic_selector::TrafficSelector},
-    sa::{ChildSa, ControlMessage},
+    message::{Message, SPI, traffic_selector::TrafficSelector},
+    sa::{ChildSa, ChosenProposal, ControlMessage},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -45,8 +44,7 @@ pub(crate) struct StateData {
     spi: SPI,
     peer_spi: Option<SPI>,
     message_id: u32,
-    proposals: Option<Vec<Proposal>>,
-    group: Option<Group>,
+    chosen_proposal: Option<ChosenProposal>,
     nonce: Option<Vec<u8>>,
     larval_sa: Option<ChildSa>,
     sender: UnboundedSender<ControlMessage>,
@@ -60,8 +58,7 @@ impl StateData {
             spi: spi.to_owned(),
             peer_spi: None,
             message_id: 0,
-            proposals: None,
-            group: None,
+            chosen_proposal: None,
             nonce: None,
             larval_sa: None,
             sender,

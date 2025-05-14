@@ -1,11 +1,16 @@
 use crate::{
     config::Config,
-    crypto::{self, Group},
-    message::{Message, SPI, proposal::Proposal, traffic_selector::TrafficSelector},
+    crypto::{self, Cipher, Group, Integ, Prf},
+    message::{
+        Message, SPI,
+        num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
+        proposal::Proposal,
+        traffic_selector::TrafficSelector,
+    },
     state::{self, State, StateData},
 };
 use anyhow::Result;
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use futures::channel::mpsc::{UnboundedReceiver, unbounded};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -75,6 +80,76 @@ impl IkeSa {
         }
 
         Ok(())
+    }
+}
+
+pub(crate) struct ChosenProposal {
+    cipher: Cipher,
+    prf: Prf,
+    integ: Option<Integ>,
+    group: Group,
+}
+
+impl ChosenProposal {
+    pub fn new(proposal: &Proposal) -> Result<Self> {
+        let transform = proposal
+            .transforms()
+            .find(|t| t.r#type() == Num::Assigned(TransformType::ENCR))
+            .ok_or_else(|| anyhow::anyhow!("ENCR transform not found"))?;
+        let id: EncrId = transform.id().try_into()?;
+        let attribute = transform
+            .attributes()
+            .find(|a| a.r#type() == Num::Assigned(AttributeType::KeyLength))
+            .ok_or_else(|| anyhow::anyhow!("KeyLength attribute not found"))?;
+        let cipher = Cipher::new(id, Some(u16::from_be_bytes(attribute.value().try_into()?)))?;
+
+        let transform = proposal
+            .transforms()
+            .find(|t| t.r#type() == Num::Assigned(TransformType::PRF))
+            .ok_or_else(|| anyhow::anyhow!("PRF transform not found"))?;
+        let id: PrfId = transform.id().try_into()?;
+        let prf = Prf::new(id)?;
+
+        let integ = if cipher.is_aead() {
+            None
+        } else {
+            let transform = proposal
+                .transforms()
+                .find(|t| t.r#type() == Num::Assigned(TransformType::INTEG))
+                .ok_or_else(|| anyhow::anyhow!("INTEG transform not found"))?;
+            let id: IntegId = transform.id().try_into()?;
+            Some(Integ::new(id)?)
+        };
+
+        let transform = proposal
+            .transforms()
+            .find(|t| t.r#type() == Num::Assigned(TransformType::DH))
+            .ok_or_else(|| anyhow::anyhow!("DH transform not found"))?;
+        let id: DhId = transform.id().try_into()?;
+        let group = Group::new(id)?;
+
+        Ok(Self {
+            cipher,
+            prf,
+            integ,
+            group,
+        })
+    }
+
+    pub fn cipher(&self) -> &Cipher {
+        &self.cipher
+    }
+
+    pub fn prf(&self) -> &Prf {
+        &self.prf
+    }
+
+    pub fn integ(&self) -> Option<&Integ> {
+        self.integ.as_ref()
+    }
+
+    pub fn group(&self) -> &Group {
+        &self.group
     }
 }
 

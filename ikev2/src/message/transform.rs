@@ -41,49 +41,36 @@ impl Num<u16, TransformId> {
     }
 }
 
-impl TryFrom<TransformId> for EncrId {
-    type Error = anyhow::Error;
+macro_rules! create_try_from {
+    ( $id:ident, $ce:ident ) => {
+        impl TryFrom<TransformId> for $id {
+            type Error = anyhow::Error;
 
-    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
-        match other {
-            TransformId::Encr(Num::Assigned(encr_id)) => Ok(encr_id),
-            _ => Err(anyhow::anyhow!("no matching EncrId")),
+            fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
+                match other {
+                    TransformId::$ce(Num::Assigned(id)) => Ok(id),
+                    _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
+                }
+            }
         }
-    }
+
+        impl TryFrom<Num<u16, TransformId>> for $id {
+            type Error = anyhow::Error;
+
+            fn try_from(other: Num<u16, TransformId>) -> std::result::Result<Self, Self::Error> {
+                match other {
+                    Num::Assigned(TransformId::$ce(Num::Assigned(id))) => Ok(id),
+                    _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
+                }
+            }
+        }
+    };
 }
 
-impl TryFrom<TransformId> for PrfId {
-    type Error = anyhow::Error;
-
-    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
-        match other {
-            TransformId::Prf(Num::Assigned(prf_id)) => Ok(prf_id),
-            _ => Err(anyhow::anyhow!("no matching PrfId")),
-        }
-    }
-}
-
-impl TryFrom<TransformId> for IntegId {
-    type Error = anyhow::Error;
-
-    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
-        match other {
-            TransformId::Integ(Num::Assigned(integ_id)) => Ok(integ_id),
-            _ => Err(anyhow::anyhow!("no matching IntegId")),
-        }
-    }
-}
-
-impl TryFrom<TransformId> for DhId {
-    type Error = anyhow::Error;
-
-    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
-        match other {
-            TransformId::Dh(Num::Assigned(dh_id)) => Ok(dh_id),
-            _ => Err(anyhow::anyhow!("no matching DhId")),
-        }
-    }
-}
+create_try_from!(EncrId, Encr);
+create_try_from!(PrfId, Prf);
+create_try_from!(IntegId, Integ);
+create_try_from!(DhId, Dh);
 
 impl TryFrom<TransformId> for EsnId {
     type Error = anyhow::Error;

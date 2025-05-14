@@ -1,15 +1,13 @@
 use crate::{
     config::Config,
-    crypto::{self, Group, Prf},
+    crypto,
     message::{
         Message, SPI,
-        num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol, TransformType},
+        num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
-        proposal::Proposal,
         traffic_selector::TrafficSelector,
-        transform::TransformId,
     },
-    sa::{ChildSa, ControlMessage, IkeSa},
+    sa::{ChildSa, ChosenProposal, ControlMessage, IkeSa},
     state::{self, State, StateData},
 };
 use anyhow::Result;
@@ -23,7 +21,7 @@ impl Initial {
     fn generate_ike_sa_init_request(
         config: &Config,
         spi: &SPI,
-    ) -> Result<(Message, Group, Vec<u8>, Vec<Proposal>)> {
+    ) -> Result<(Message, ChosenProposal, Vec<u8>)> {
         let mut message = Message::new(
             spi,
             &SPI::default(),
@@ -32,12 +30,8 @@ impl Initial {
             1,
         );
 
-        let proposals: Result<Vec<_>> = config
-            .ike_proposals()
-            .enumerate()
-            .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, spi)))
-            .collect();
-        let proposals = proposals?;
+        let proposals: Vec<_> = config.ike_proposals(spi).collect();
+
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::SA),
             payload::Content::SA(payload::SA::new(&proposals)),
@@ -52,27 +46,22 @@ impl Initial {
             true,
         ));
 
-        let proposal = proposals
-            .iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("no proposal"))?;
-        let transform = proposal
-            .transforms()
-            .find(|t| t.r#type() == Num::Assigned(TransformType::DH))
-            .ok_or_else(|| anyhow::anyhow!("DH transform not found"))?;
-        let dh_id = match transform.id() {
-            Num::Assigned(TransformId::Dh(Num::Assigned(dh_id))) => dh_id,
-            _ => return Err(anyhow::anyhow!("invalid DH transform")),
-        };
-        let group = Group::new(dh_id)?;
-        let public_key = group.public_key()?;
+        if proposals.is_empty() {
+            return Err(anyhow::anyhow!("no proposal"));
+        }
+
+        let chosen_proposal = ChosenProposal::new(&proposals[0])?;
+        let public_key = chosen_proposal.group().public_key()?;
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::KE),
-            payload::Content::KE(payload::KE::new(Num::Assigned(dh_id), &public_key)),
+            payload::Content::KE(payload::KE::new(
+                Num::Assigned(chosen_proposal.group().id()),
+                &public_key,
+            )),
             true,
         ));
 
-        Ok((message, group, nonce, proposals))
+        Ok((message, chosen_proposal, nonce))
     }
 
     fn generate_ike_sa_init_response(
@@ -87,13 +76,7 @@ impl Initial {
             MessageFlags::R,
             request.id(),
         );
-        let proposals: Result<Vec<_>> = config
-            .ike_proposals()
-            .enumerate()
-            .map(|(i, pb)| Ok(pb.build((i + 1).try_into()?, Protocol::IKE, spi)))
-            .collect();
-
-        let proposals = proposals?;
+        let proposals: Vec<_> = config.ike_proposals(spi).collect();
 
         let sa = request
             .payloads()
@@ -112,42 +95,34 @@ impl Initial {
             .find(|payload| payload.r#type() == Num::Assigned(PayloadType::NONCE))
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
         let nonce: &payload::Nonce = nonce.try_into()?;
-        let n_i = nonce.nonce();
 
         let proposal =
             IkeSa::choose_proposal(proposals.iter().map(|proposal| proposal), sa.proposals())
                 .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
-        let transform = proposal
-            .transforms()
-            .find(|t| t.r#type() == Num::Assigned(TransformType::DH))
-            .ok_or_else(|| anyhow::anyhow!("DH transform not found"))?;
-        let dh_id = match transform.id() {
-            Num::Assigned(TransformId::Dh(Num::Assigned(dh_id))) => dh_id,
-            _ => return Err(anyhow::anyhow!("invalid DH transform")),
-        };
 
-        let group = Group::new(dh_id)?;
-        let public_key = group.public_key()?;
+        let chosen_proposal = ChosenProposal::new(&proposal)?;
+
+        let public_key = chosen_proposal.group().public_key()?;
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::KE),
-            payload::Content::KE(payload::KE::new(Num::Assigned(dh_id), &public_key)),
+            payload::Content::KE(payload::KE::new(
+                Num::Assigned(chosen_proposal.group().id()),
+                &public_key,
+            )),
             true,
         ));
 
-        let transform = proposal
-            .transforms()
-            .find(|t| t.r#type() == Num::Assigned(TransformType::PRF))
-            .ok_or_else(|| anyhow::anyhow!("PRF transform not found"))?;
-        let prf_id = match transform.id() {
-            Num::Assigned(TransformId::Prf(Num::Assigned(prf_id))) => prf_id,
-            _ => return Err(anyhow::anyhow!("invalid PRF transform")),
-        };
-        let prf = Prf::new(prf_id)?;
+        let n_i = nonce.nonce();
+        let mut n_r = [0u8; 32];
+        crypto::rand_bytes(&mut n_r[..])?;
 
-        let mut nonce = [0u8; 32];
-        crypto::rand_bytes(&mut nonce[..])?;
-
-        let skeyseed = crypto::generate_skeyseed(&prf, n_i, &nonce[..], &group, ke.ke_data())?;
+        let skeyseed = crypto::generate_skeyseed(
+            chosen_proposal.prf(),
+            n_i,
+            &n_r[..],
+            chosen_proposal.group(),
+            ke.ke_data(),
+        )?;
         eprintln!("SKEYSEED generated: {:?}", &skeyseed);
 
         message.add_payload(Payload::new(
@@ -158,7 +133,7 @@ impl Initial {
 
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::NONCE),
-            payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
+            payload::Content::Nonce(payload::Nonce::new(&n_r[..])),
             true,
         ));
 
@@ -205,7 +180,7 @@ impl State for Initial {
     ) -> Result<Box<dyn State>> {
         let inner = data.read().await;
 
-        let (message, group, nonce, proposals) =
+        let (message, chosen_proposal, nonce) =
             Self::generate_ike_sa_init_request(&inner.config, &inner.spi)?;
         let message_id = message.id();
 
@@ -216,9 +191,8 @@ impl State for Initial {
 
         let mut inner = data.write().await;
         inner.initiator = Some(true);
-        inner.group = Some(group);
+        inner.chosen_proposal = Some(chosen_proposal);
         inner.nonce = Some(nonce);
-        inner.proposals = Some(proposals);
         inner.message_id = message_id;
         inner.larval_sa = Some(ChildSa::new(ts_i, ts_r));
         drop(inner);

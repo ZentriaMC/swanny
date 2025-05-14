@@ -1,15 +1,13 @@
 use crate::{
     config::Config,
-    crypto::{self, Group, Prf},
+    crypto::{self, Group},
     message::{
         Message, SPI,
-        num::{ExchangeType, MessageFlags, Num, PayloadType, TransformType},
+        num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload,
-        proposal::Proposal,
         traffic_selector::TrafficSelector,
-        transform::TransformId,
     },
-    sa::{ControlMessage, IkeSa},
+    sa::{ChosenProposal, ControlMessage},
     state::{self, State, StateData},
 };
 use anyhow::Result;
@@ -23,8 +21,7 @@ impl IkeSaInitRequestSent {
     fn generate_skeyseed(
         response: &Message,
         group: &Group,
-        nonce: impl AsRef<[u8]>,
-        proposals: &[Proposal],
+        n_i: impl AsRef<[u8]>,
     ) -> Result<Vec<u8>> {
         let sa = response
             .payloads()
@@ -38,30 +35,31 @@ impl IkeSaInitRequestSent {
             .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
         let ke: &payload::KE = ke.try_into()?;
 
-        let proposal =
-            IkeSa::choose_proposal(proposals.iter().map(|proposal| proposal), sa.proposals())
-                .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
-
-        let transform = proposal
-            .transforms()
-            .find(|t| t.r#type() == Num::Assigned(TransformType::PRF))
-            .ok_or_else(|| anyhow::anyhow!("PRF transform not found"))?;
-        let prf_id = match transform.id() {
-            Num::Assigned(TransformId::Prf(Num::Assigned(prf_id))) => prf_id,
-            _ => return Err(anyhow::anyhow!("invalid PRF transform")),
-        };
-        let prf = Prf::new(prf_id)?;
-
-        let n_i = nonce.as_ref();
-
         let nonce = response
             .payloads()
             .find(|payload| payload.r#type() == Num::Assigned(PayloadType::NONCE))
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
         let nonce: &payload::Nonce = nonce.try_into()?;
+
+        if ke.dh_group() != Num::Assigned(group.id()) {
+            return Err(anyhow::anyhow!("unmatched DH group"));
+        }
+
+        let proposal = sa
+            .proposals()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
+
+        let chosen_proposal = ChosenProposal::new(&proposal)?;
         let n_r = nonce.nonce();
 
-        crypto::generate_skeyseed(&prf, n_i, n_r, &group, ke.ke_data())
+        crypto::generate_skeyseed(
+            chosen_proposal.prf(),
+            n_i,
+            n_r,
+            chosen_proposal.group(),
+            ke.ke_data(),
+        )
     }
 
     fn generate_ike_auth_request(config: &Config, spi: &SPI, peer_spi: &SPI) -> Result<Message> {
@@ -88,16 +86,15 @@ impl State for IkeSaInitRequestSent {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let request =
-                    Self::generate_ike_auth_request(&inner.config, &inner.spi, message.spi_r())?;
-
                 let skeyseed = Self::generate_skeyseed(
                     message,
-                    inner.group.as_ref().unwrap(),
+                    inner.chosen_proposal.as_ref().unwrap().group(),
                     inner.nonce.as_ref().unwrap(),
-                    inner.proposals.as_ref().unwrap(),
                 )?;
                 eprintln!("SKEYSEED generated: {:?}", &skeyseed);
+
+                let request =
+                    Self::generate_ike_auth_request(&inner.config, &inner.spi, message.spi_r())?;
 
                 inner
                     .sender

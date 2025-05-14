@@ -1,4 +1,5 @@
 use crate::message::{
+    SPI,
     num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType},
     proposal::Proposal,
     transform::{Attribute, AttributeFormat, Transform, TransformId},
@@ -120,7 +121,7 @@ impl ProposalBuilder {
 
         transforms.append(&mut esn);
 
-        Proposal::new(number, Num::Assigned(protocol), spi, &transforms)
+        Proposal::new(number, Num::Assigned(protocol), spi.as_ref(), &transforms)
     }
 }
 
@@ -170,16 +171,22 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn ike_proposals(&self) -> impl Iterator<Item = &ProposalBuilder> {
-        self.ike_proposals.iter()
+    pub fn ike_proposals(&self, spi: &SPI) -> impl Iterator<Item = Proposal> {
+        self.ike_proposals
+            .iter()
+            .enumerate()
+            .map(|(i, pb)| pb.build(i as u8 + 1, Protocol::IKE, spi.as_ref()))
     }
 
     pub fn ipsec_protocol(&self) -> Protocol {
         self.ipsec_protocol
     }
 
-    pub fn ipsec_proposals(&self) -> impl Iterator<Item = &ProposalBuilder> {
-        self.ipsec_proposals.iter()
+    pub fn ipsec_proposals(&self, spi: &SPI) -> impl Iterator<Item = Proposal> {
+        self.ipsec_proposals
+            .iter()
+            .enumerate()
+            .map(|(i, pb)| pb.build(i as u8 + 1, self.ipsec_protocol, spi.as_ref()))
     }
 }
 
