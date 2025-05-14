@@ -1,5 +1,5 @@
 use crate::message::{
-    num::{Num, Protocol, TransformType},
+    num::{Num, Protocol},
     serialize,
     transform::{self, Transform},
 };

@@ -295,6 +295,29 @@ impl Cipher {
     }
 }
 
+pub(crate) fn generate_skeyseed(
+    prf: &Prf,
+    n_i: impl AsRef<[u8]>,
+    n_r: impl AsRef<[u8]>,
+    group: &Group,
+    peer_public_key: impl AsRef<[u8]>,
+) -> Result<Vec<u8>> {
+    let g_ir = group.compute_key(peer_public_key)?;
+    let mut n_i_n_r = n_i.as_ref().to_vec();
+    n_i_n_r.extend_from_slice(n_r.as_ref());
+    prf.prf(n_i_n_r, g_ir)
+}
+
+struct Keys {
+    s_d: Vec<u8>,
+    s_ei: Vec<u8>,
+    s_er: Vec<u8>,
+    s_ai: Vec<u8>,
+    s_ar: Vec<u8>,
+    s_pi: Vec<u8>,
+    s_pr: Vec<u8>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

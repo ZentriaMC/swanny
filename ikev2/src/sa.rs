@@ -1,63 +1,36 @@
 use crate::{
     config::Config,
-    crypto::{Group, rand_bytes},
+    crypto::{self, Group},
     message::{Message, SPI, proposal::Proposal, traffic_selector::TrafficSelector},
+    state::{self, State, StateData},
 };
 use anyhow::Result;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
-mod state;
-use state::State;
-
 #[derive(Debug)]
 pub enum ControlMessage {
     IkeMessage(Message),
 }
 
-struct IkeSaInner {
-    config: Config,
-    initiator: Option<bool>,
-    spi: SPI,
-    peer_spi: Option<SPI>,
-    message_id: u32,
-    proposals: Option<Vec<Proposal>>,
-    group: Option<Group>,
-    nonce: Option<Vec<u8>>,
-    larval_sa: Option<ChildSa>,
-    sender: UnboundedSender<ControlMessage>,
-}
-
 #[derive(Clone)]
 pub struct IkeSa {
-    inner: Arc<RwLock<IkeSaInner>>,
+    data: Arc<RwLock<StateData>>,
     state: Arc<Mutex<Option<Box<dyn State>>>>,
 }
 
 impl IkeSa {
     pub fn new(config: &Config) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
         let mut spi = SPI::default();
-        rand_bytes(&mut spi)?;
+        crypto::rand_bytes(&mut spi)?;
 
         let (sender, receiver) = unbounded();
-
-        let inner = IkeSaInner {
-            initiator: None,
-            config: config.to_owned(),
-            spi,
-            peer_spi: None,
-            message_id: 1,
-            sender,
-            group: None,
-            nonce: None,
-            proposals: None,
-            larval_sa: None,
-        };
+        let data = StateData::new(config, &spi, sender);
 
         Ok((
             Self {
-                inner: Arc::new(RwLock::new(inner)),
+                data: Arc::new(RwLock::new(data)),
                 state: Arc::new(Mutex::new(Some(Box::new(state::Initial {})))),
             },
             receiver,
@@ -76,7 +49,7 @@ impl IkeSa {
         if let Some(s) = state.take() {
             drop(state);
 
-            let s = s.handle_message(self.inner.clone(), &message).await?;
+            let s = s.handle_message(self.data.clone(), &message).await?;
             let mut state = self.state.lock().await;
             *state = Some(s);
         }
@@ -95,7 +68,7 @@ impl IkeSa {
             drop(state);
 
             let s = s
-                .handle_acquire(self.inner.clone(), &ts_i, &ts_r, index)
+                .handle_acquire(self.data.clone(), &ts_i, &ts_r, index)
                 .await?;
             let mut state = self.state.lock().await;
             *state = Some(s);
@@ -105,10 +78,18 @@ impl IkeSa {
     }
 }
 
-#[derive(Clone)]
-pub struct ChildSa {
+pub(crate) struct ChildSa {
     ts_i: TrafficSelector,
     ts_r: TrafficSelector,
+}
+
+impl ChildSa {
+    pub fn new(ts_i: &TrafficSelector, ts_r: &TrafficSelector) -> Self {
+        Self {
+            ts_i: ts_i.to_owned(),
+            ts_r: ts_r.to_owned(),
+        }
+    }
 }
 
 #[cfg(test)]

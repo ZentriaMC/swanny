@@ -164,13 +164,12 @@ macro_rules! create_try_from {
 
             fn try_from(other: &'a Payload) -> std::result::Result<Self, Self::Error> {
                 match (other.r#type(), other.content()) {
-                    (Num::Assigned($pe),
-                     Content::$ce(content)) => Ok(content),
+                    (Num::Assigned($pe), Content::$ce(content)) => Ok(content),
                     _ => Err(anyhow::anyhow!("unable to convert payload")),
                 }
             }
         }
-    }
+    };
 }
 
 create_try_from!(PayloadType::SA, SA);
