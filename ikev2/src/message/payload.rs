@@ -1,11 +1,14 @@
-use crate::message::{
-    num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
-    proposal::{self, Proposal},
-    serialize::{self, Deserialize, Serialize},
-    traffic_selector,
+use crate::{
+    crypto::Cipher,
+    message::{
+        num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
+        proposal::{self, Proposal},
+        serialize::{self, Deserialize, Serialize},
+        traffic_selector,
+    },
 };
 use anyhow::Result;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, BytesMut};
 
 pub const HEADER_SIZE: usize = 4;
 
@@ -24,6 +27,7 @@ pub enum Content {
     Nonce(Nonce),
     Notify(Notify),
     TS(TS),
+    SK(SK),
 }
 
 impl Serialize for Content {
@@ -36,6 +40,7 @@ impl Serialize for Content {
             Content::Nonce(nonce) => nonce.serialize(buf),
             Content::Notify(notify) => notify.serialize(buf),
             Content::TS(ts) => ts.serialize(buf),
+            Content::SK(sk) => sk.serialize(buf),
         }
     }
 
@@ -48,6 +53,7 @@ impl Serialize for Content {
             Content::Nonce(nonce) => nonce.size(),
             Content::Notify(notify) => notify.size(),
             Content::TS(ts) => ts.size(),
+            Content::SK(sk) => sk.size(),
         }
     }
 }
@@ -129,6 +135,9 @@ impl Payload {
             Num::Assigned(PayloadType::TSi | PayloadType::TSr) => {
                 Content::TS(TS::deserialize(&mut &buf.chunk()[..len])?)
             }
+            Num::Assigned(PayloadType::SK) => {
+                Content::SK(SK::deserialize(&mut &buf.chunk()[..len])?)
+            }
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
         };
         buf.advance(len);
@@ -137,23 +146,6 @@ impl Payload {
             Self::new(payload_type, content, critical),
             next_payload_type,
         ))
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct SA {
-    proposals: Vec<Proposal>,
-}
-
-impl SA {
-    pub fn new(proposals: impl AsRef<[Proposal]>) -> Self {
-        Self {
-            proposals: proposals.as_ref().to_vec(),
-        }
-    }
-
-    pub fn proposals(&self) -> impl Iterator<Item = &Proposal> {
-        self.proposals.iter()
     }
 }
 
@@ -179,6 +171,24 @@ create_try_from!(PayloadType::AUTH, Auth);
 create_try_from!(PayloadType::NONCE, Nonce);
 create_try_from!(PayloadType::NOTIFY, Notify);
 create_try_from!(PayloadType::TSi | PayloadType::TSr, TS);
+create_try_from!(PayloadType::SK, SK);
+
+#[derive(Debug, PartialEq)]
+pub struct SA {
+    proposals: Vec<Proposal>,
+}
+
+impl SA {
+    pub fn new(proposals: impl AsRef<[Proposal]>) -> Self {
+        Self {
+            proposals: proposals.as_ref().to_vec(),
+        }
+    }
+
+    pub fn proposals(&self) -> impl Iterator<Item = &Proposal> {
+        self.proposals.iter()
+    }
+}
 
 impl serialize::Serialize for SA {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
@@ -565,6 +575,93 @@ impl serialize::Deserialize for TS {
             return Err(anyhow::anyhow!("payload with extra data"));
         }
         Ok(Self::new(traffic_selectors))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SK {
+    ciphertext: Vec<u8>,
+}
+
+pub fn cumulative_size(payloads: impl AsRef<[Payload]>) -> Result<usize> {
+    let sizes: Result<Vec<_>> = payloads.as_ref().iter().map(|p| p.size()).collect();
+
+    let sizes: Result<Vec<_>> = sizes?
+        .iter()
+        .map(|s| {
+            HEADER_SIZE
+                .checked_add(*s)
+                .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+        })
+        .collect();
+
+    sizes?
+        .into_iter()
+        .try_fold(HEADER_SIZE, |acc, x| acc.checked_add(x))
+        .ok_or_else(|| anyhow::anyhow!("exceeded maximum message size"))
+}
+
+impl SK {
+    pub fn new(ciphertext: impl AsRef<[u8]>) -> Self {
+        Self {
+            ciphertext: ciphertext.as_ref().to_owned(),
+        }
+    }
+
+    pub fn ciphertext(&self) -> &[u8] {
+        &self.ciphertext
+    }
+
+    pub fn encrypt(
+        cipher: &Cipher,
+        key: impl AsRef<[u8]>,
+        payloads: impl AsRef<[Payload]>,
+    ) -> Result<Self> {
+        let mut plaintext = BytesMut::with_capacity(cumulative_size(&payloads)?);
+        let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
+        let mut types_iter = payloads.as_ref().iter().map(|p| p.ty()).chain(trailer);
+        for (payload, next_payload_type) in payloads.as_ref().iter().zip(types_iter) {
+            payload.serialize(next_payload_type, &mut plaintext)?;
+        }
+        let ciphertext = cipher.encrypt(key, plaintext)?;
+        Ok(Self { ciphertext })
+    }
+
+    pub fn decrypt(
+        &self,
+        cipher: &Cipher,
+        key: impl AsRef<[u8]>,
+        mut payload_type: Num<u8, PayloadType>,
+    ) -> Result<Vec<Payload>> {
+        let plaintext = cipher.decrypt(key, &self.ciphertext)?;
+        let mut plaintext = plaintext.as_slice();
+        let mut payloads = Vec::new();
+        while plaintext.has_remaining() {
+            let (payload, next_payload_type) = Payload::deserialize(payload_type, &mut plaintext)?;
+            payloads.push(payload);
+            payload_type = next_payload_type;
+        }
+        Ok(payloads)
+    }
+}
+
+impl serialize::Serialize for SK {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        buf.put_slice(&self.ciphertext[..]);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize> {
+        Ok(self.ciphertext.len())
+    }
+}
+
+impl serialize::Deserialize for SK {
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self::new(buf.chunk()))
     }
 }
 

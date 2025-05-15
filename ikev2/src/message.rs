@@ -94,21 +94,7 @@ impl serialize::Serialize for Message {
     }
 
     fn size(&self) -> Result<usize> {
-        let sizes: Result<Vec<_>> = self.payloads.iter().map(|p| p.size()).collect();
-
-        let sizes: Result<Vec<_>> = sizes?
-            .iter()
-            .map(|s| {
-                payload::HEADER_SIZE
-                    .checked_add(*s)
-                    .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
-            })
-            .collect();
-
-        sizes?
-            .into_iter()
-            .try_fold(HEADER_SIZE, |acc, x| acc.checked_add(x))
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum message size"))
+        payload::cumulative_size(&self.payloads)
     }
 }
 
