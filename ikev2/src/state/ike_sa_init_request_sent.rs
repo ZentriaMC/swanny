@@ -53,7 +53,20 @@ impl IkeSaInitRequestSent {
         let chosen_proposal = ChosenProposal::new(&proposal)?;
         let n_r = nonce.nonce();
 
-        crypto::generate_skeyseed(chosen_proposal.prf(), n_i, n_r, private_key, ke.ke_data())
+        let skeyseed =
+            crypto::generate_skeyseed(chosen_proposal.prf(), &n_i, n_r, private_key, ke.ke_data())?;
+        eprintln!("SKEYSEED generated: {:?}", &skeyseed);
+
+        let keys = chosen_proposal.generate_keys(
+            &skeyseed,
+            &n_i,
+            n_r,
+            response.spi_i(),
+            response.spi_r(),
+        )?;
+        eprintln!("Keys generated: {:?}", &keys);
+
+        Ok(skeyseed)
     }
 
     fn generate_ike_auth_request(config: &Config, spi: &SPI, peer_spi: &SPI) -> Result<Message> {
@@ -85,7 +98,6 @@ impl State for IkeSaInitRequestSent {
                     inner.private_key.as_ref().unwrap(),
                     inner.nonce.as_ref().unwrap(),
                 )?;
-                eprintln!("SKEYSEED generated: {:?}", &skeyseed);
 
                 let request =
                     Self::generate_ike_auth_request(&inner.config, &inner.spi, message.spi_r())?;

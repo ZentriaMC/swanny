@@ -1,4 +1,7 @@
-use crate::message::num::{DhId, EncrId, IntegId, PrfId};
+use crate::message::{
+    SPI,
+    num::{DhId, EncrId, IntegId, PrfId},
+};
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 
@@ -61,7 +64,7 @@ impl Prf {
         let mut signer = Signer::new(self.md, &pkey)?;
         let mut buf = BytesMut::with_capacity(size);
         let blocks = size.div_ceil(self.md.size());
-        let mut block = Vec::with_capacity(self.md.size());
+        let mut block = vec![0; self.md.size()];
         for i in 0..blocks {
             signer.update(&block)?;
             signer.update(seed.as_ref())?;
@@ -341,7 +344,7 @@ impl Cipher {
     }
 }
 
-pub(crate) fn generate_skeyseed(
+pub fn generate_skeyseed(
     prf: &Prf,
     n_i: impl AsRef<[u8]>,
     n_r: impl AsRef<[u8]>,
@@ -349,9 +352,9 @@ pub(crate) fn generate_skeyseed(
     peer_public_key: impl AsRef<[u8]>,
 ) -> Result<Vec<u8>> {
     let g_ir = private_key.compute_key(peer_public_key)?;
-    let mut n_i_n_r = n_i.as_ref().to_vec();
-    n_i_n_r.extend_from_slice(n_r.as_ref());
-    prf.prf(n_i_n_r, g_ir)
+    let mut buf = n_i.as_ref().to_vec();
+    buf.extend_from_slice(n_r.as_ref());
+    prf.prf(buf, g_ir)
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use crate::{
     state::{self, State, StateData},
 };
 use anyhow::Result;
+use bytes::Buf;
 use futures::channel::mpsc::{UnboundedReceiver, unbounded};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -151,7 +152,76 @@ impl ChosenProposal {
     pub fn group(&self) -> &Group {
         &self.group
     }
+
+    pub fn generate_keys(
+        &self,
+        skeyseed: impl AsRef<[u8]>,
+        n_i: impl AsRef<[u8]>,
+        n_r: impl AsRef<[u8]>,
+        spi_i: &SPI,
+        spi_r: &SPI,
+    ) -> Result<Keys> {
+        let mut buf = n_i.as_ref().to_vec();
+        buf.extend_from_slice(n_r.as_ref());
+        buf.extend_from_slice(&spi_i[..]);
+        buf.extend_from_slice(&spi_r[..]);
+        let integ_key_size = self
+            .integ
+            .as_ref()
+            .map(|integ| integ.key_size())
+            .unwrap_or(0);
+        let buf = self.prf.prfplus(
+            skeyseed,
+            &buf,
+            self.prf.size() * 3 + self.cipher.key_size() * 2 + integ_key_size * 2,
+        )?;
+        let mut buf = buf.as_slice();
+
+        let mut d = vec![0; self.prf.size()];
+        buf.try_copy_to_slice(&mut d)?;
+
+        let mut ei = vec![0; self.cipher.key_size()];
+        buf.try_copy_to_slice(&mut ei)?;
+
+        let mut er = vec![0; self.cipher.key_size()];
+        buf.try_copy_to_slice(&mut er)?;
+
+        let mut ai = vec![0; integ_key_size];
+        buf.try_copy_to_slice(&mut ai)?;
+
+        let mut ar = vec![0; integ_key_size];
+        buf.try_copy_to_slice(&mut ar)?;
+
+        let mut pi = vec![0; self.prf.size()];
+        buf.try_copy_to_slice(&mut pi)?;
+
+        let mut pr = vec![0; self.prf.size()];
+        buf.try_copy_to_slice(&mut pr)?;
+
+        Ok(Keys {
+            d,
+            ei,
+            er,
+            ai,
+            ar,
+            pi,
+            pr,
+        })
+    }
 }
+
+#[derive(Debug)]
+pub struct Keys {
+    d: Vec<u8>,
+    ei: Vec<u8>,
+    er: Vec<u8>,
+    ai: Vec<u8>,
+    ar: Vec<u8>,
+    pi: Vec<u8>,
+    pr: Vec<u8>,
+}
+
+impl Keys {}
 
 pub(crate) struct ChildSa {
     ts_i: TrafficSelector,

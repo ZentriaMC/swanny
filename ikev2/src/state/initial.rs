@@ -77,7 +77,7 @@ impl Initial {
             MessageFlags::R,
             request.id(),
         );
-        let proposals: Vec<_> = config.ike_proposals(spi).collect();
+        let proposals: Vec<_> = config.ike_proposals(request.spi_i()).collect();
 
         let sa = request
             .payloads()
@@ -125,6 +125,8 @@ impl Initial {
             ke.ke_data(),
         )?;
         eprintln!("SKEYSEED generated: {:?}", &skeyseed);
+
+        let keys = chosen_proposal.generate_keys(&skeyseed, n_i, &n_r[..], request.spi_i(), spi)?;
 
         message.add_payload(Payload::new(
             Num::Assigned(PayloadType::SA),
