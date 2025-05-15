@@ -44,9 +44,11 @@ impl IkeSa {
     }
 
     pub(crate) fn choose_proposal<'a, 'b>(
-        mut this: impl Iterator<Item = &'a Proposal>,
-        mut other: impl Iterator<Item = &'b Proposal>,
+        this: impl IntoIterator<Item = &'a Proposal>,
+        other: impl IntoIterator<Item = &'b Proposal>,
     ) -> Option<Proposal> {
+        let mut this = this.into_iter();
+        let mut other = other.into_iter();
         this.find_map(|px| other.find_map(|py| px.intersection(py)))
     }
 

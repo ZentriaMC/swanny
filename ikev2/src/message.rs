@@ -66,8 +66,14 @@ impl Message {
         self.payloads.iter()
     }
 
-    pub fn add_payload(&mut self, payload: Payload) {
-        self.payloads.push(payload);
+    pub fn add_payloads<P>(&mut self, payloads: P)
+    where
+        P: IntoIterator,
+        P::Item: Into<Payload>,
+    {
+        for p in payloads {
+            self.payloads.push(p.into());
+        }
     }
 }
 
@@ -94,7 +100,9 @@ impl serialize::Serialize for Message {
     }
 
     fn size(&self) -> Result<usize> {
-        payload::cumulative_size(&self.payloads)
+        HEADER_SIZE
+            .checked_add(payload::cumulative_size(&self.payloads)?)
+            .ok_or_else(|| anyhow::anyhow!("overflow while calculating message size"))
     }
 }
 
@@ -175,16 +183,16 @@ mod tests {
         let sa = payload::tests::create_sa();
         let ke = payload::tests::create_ke();
 
-        message.add_payload(Payload::new(
+        message.add_payloads(Some(Payload::new(
             Num::Assigned(PayloadType::SA),
             payload::Content::SA(sa),
             true,
-        ));
-        message.add_payload(Payload::new(
+        )));
+        message.add_payloads(Some(Payload::new(
             Num::Assigned(PayloadType::KE),
             payload::Content::KE(ke),
             true,
-        ));
+        )));
 
         let len = message.size().expect("unable to determine serialized size");
         let mut buf = BytesMut::with_capacity(len);

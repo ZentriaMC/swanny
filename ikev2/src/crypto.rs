@@ -1,7 +1,4 @@
-use crate::message::{
-    SPI,
-    num::{DhId, EncrId, IntegId, PrfId},
-};
+use crate::message::num::{DhId, EncrId, IntegId, PrfId};
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 

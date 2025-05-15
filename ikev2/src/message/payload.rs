@@ -179,9 +179,17 @@ pub struct SA {
 }
 
 impl SA {
-    pub fn new(proposals: impl AsRef<[Proposal]>) -> Self {
+    pub fn new<P>(proposals: P) -> Self
+    where
+        P: IntoIterator,
+        P::Item: Into<Proposal>,
+    {
+        let mut owned_proposals = Vec::new();
+        for p in proposals {
+            owned_proposals.push(p.into());
+        }
         Self {
-            proposals: proposals.as_ref().to_vec(),
+            proposals: owned_proposals,
         }
     }
 
@@ -619,7 +627,7 @@ impl SK {
     ) -> Result<Self> {
         let mut plaintext = BytesMut::with_capacity(cumulative_size(&payloads)?);
         let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
-        let mut types_iter = payloads.as_ref().iter().map(|p| p.ty()).chain(trailer);
+        let types_iter = payloads.as_ref().iter().map(|p| p.ty()).chain(trailer);
         for (payload, next_payload_type) in payloads.as_ref().iter().zip(types_iter) {
             payload.serialize(next_payload_type, &mut plaintext)?;
         }
@@ -673,7 +681,7 @@ pub(crate) mod tests {
 
     pub(crate) fn create_sa() -> SA {
         let proposal = proposal::tests::create_proposal();
-        SA::new(&[proposal])
+        SA::new(Some(proposal))
     }
 
     pub(crate) fn create_ke() -> KE {

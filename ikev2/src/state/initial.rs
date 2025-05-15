@@ -22,6 +22,19 @@ impl Initial {
         config: &Config,
         spi: &SPI,
     ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
+        let proposals: Vec<_> = config.ike_proposals(spi).collect();
+        if proposals.is_empty() {
+            return Err(anyhow::anyhow!("no proposal to send"));
+        }
+
+        let chosen_proposal = ChosenProposal::new(&proposals[0])?;
+
+        let mut nonce = vec![0u8; 32];
+        crypto::rand_bytes(&mut nonce[..])?;
+
+        let private_key = chosen_proposal.group().generate_key()?;
+        let public_key = private_key.public_key()?;
+
         let mut message = Message::new(
             spi,
             &SPI::default(),
@@ -30,37 +43,26 @@ impl Initial {
             1,
         );
 
-        let proposals: Vec<_> = config.ike_proposals(spi).collect();
-
-        message.add_payload(Payload::new(
-            Num::Assigned(PayloadType::SA),
-            payload::Content::SA(payload::SA::new(&proposals)),
-            true,
-        ));
-
-        let mut nonce = vec![0u8; 32];
-        crypto::rand_bytes(&mut nonce[..])?;
-        message.add_payload(Payload::new(
-            Num::Assigned(PayloadType::NONCE),
-            payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
-            true,
-        ));
-
-        if proposals.is_empty() {
-            return Err(anyhow::anyhow!("no proposal"));
-        }
-
-        let chosen_proposal = ChosenProposal::new(&proposals[0])?;
-        let private_key = chosen_proposal.group().generate_key()?;
-        let public_key = private_key.public_key()?;
-        message.add_payload(Payload::new(
-            Num::Assigned(PayloadType::KE),
-            payload::Content::KE(payload::KE::new(
-                Num::Assigned(chosen_proposal.group().id()),
-                &public_key,
-            )),
-            true,
-        ));
+        message.add_payloads([
+            Payload::new(
+                Num::Assigned(PayloadType::SA),
+                payload::Content::SA(payload::SA::new(proposals)),
+                true,
+            ),
+            Payload::new(
+                Num::Assigned(PayloadType::NONCE),
+                payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
+                true,
+            ),
+            Payload::new(
+                Num::Assigned(PayloadType::KE),
+                payload::Content::KE(payload::KE::new(
+                    Num::Assigned(chosen_proposal.group().id()),
+                    &public_key,
+                )),
+                true,
+            ),
+        ]);
 
         Ok((message, chosen_proposal, private_key, nonce))
     }
@@ -70,6 +72,57 @@ impl Initial {
         spi: &SPI,
         request: &Message,
     ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
+        let sa_i = request
+            .payloads()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
+            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
+        let sa_i: &payload::SA = sa_i.try_into()?;
+
+        let ke_i = request
+            .payloads()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::KE))
+            .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
+        let ke_i: &payload::KE = ke_i.try_into()?;
+
+        let nonce_i = request
+            .payloads()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::NONCE))
+            .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
+        let nonce_i: &payload::Nonce = nonce_i.try_into()?;
+
+        let proposals: Vec<_> = config.ike_proposals(request.spi_i()).collect();
+        if proposals.is_empty() {
+            return Err(anyhow::anyhow!("no proposal to send"));
+        }
+
+        let proposal = IkeSa::choose_proposal(&proposals, sa_i.proposals())
+            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
+
+        let chosen_proposal = ChosenProposal::new(&proposal)?;
+        let private_key = chosen_proposal.group().generate_key()?;
+        let public_key = private_key.public_key()?;
+
+        let mut nonce_r = [0u8; 32];
+        crypto::rand_bytes(&mut nonce_r[..])?;
+
+        let skeyseed = crypto::generate_skeyseed(
+            chosen_proposal.prf(),
+            nonce_i.nonce(),
+            &nonce_r[..],
+            &private_key,
+            ke_i.ke_data(),
+        )?;
+        eprintln!("SKEYSEED generated: {:?}", &skeyseed);
+
+        let keys = chosen_proposal.generate_keys(
+            &skeyseed,
+            nonce_i.nonce(),
+            &nonce_r[..],
+            request.spi_i(),
+            spi,
+        )?;
+        eprintln!("Keys generated: {:?}", &keys);
+
         let mut message = Message::new(
             request.spi_i(),
             spi,
@@ -77,70 +130,29 @@ impl Initial {
             MessageFlags::R,
             request.id(),
         );
-        let proposals: Vec<_> = config.ike_proposals(request.spi_i()).collect();
 
-        let sa = request
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
-            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
-        let sa: &payload::SA = sa.try_into()?;
+        message.add_payloads([
+            Payload::new(
+                Num::Assigned(PayloadType::KE),
+                payload::Content::KE(payload::KE::new(
+                    Num::Assigned(chosen_proposal.group().id()),
+                    &public_key,
+                )),
+                true,
+            ),
+            Payload::new(
+                Num::Assigned(PayloadType::SA),
+                payload::Content::SA(payload::SA::new([proposal])),
+                true,
+            ),
+            Payload::new(
+                Num::Assigned(PayloadType::NONCE),
+                payload::Content::Nonce(payload::Nonce::new(&nonce_r[..])),
+                true,
+            ),
+        ]);
 
-        let ke = request
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::KE))
-            .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
-        let ke: &payload::KE = ke.try_into()?;
-
-        let nonce = request
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::NONCE))
-            .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
-        let nonce: &payload::Nonce = nonce.try_into()?;
-
-        let proposal =
-            IkeSa::choose_proposal(proposals.iter().map(|proposal| proposal), sa.proposals())
-                .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
-
-        let chosen_proposal = ChosenProposal::new(&proposal)?;
-        let private_key = chosen_proposal.group().generate_key()?;
-        let public_key = private_key.public_key()?;
-        message.add_payload(Payload::new(
-            Num::Assigned(PayloadType::KE),
-            payload::Content::KE(payload::KE::new(
-                Num::Assigned(chosen_proposal.group().id()),
-                &public_key,
-            )),
-            true,
-        ));
-
-        let n_i = nonce.nonce();
-        let mut n_r = [0u8; 32];
-        crypto::rand_bytes(&mut n_r[..])?;
-
-        let skeyseed = crypto::generate_skeyseed(
-            chosen_proposal.prf(),
-            n_i,
-            &n_r[..],
-            &private_key,
-            ke.ke_data(),
-        )?;
-        eprintln!("SKEYSEED generated: {:?}", &skeyseed);
-
-        let keys = chosen_proposal.generate_keys(&skeyseed, n_i, &n_r[..], request.spi_i(), spi)?;
-
-        message.add_payload(Payload::new(
-            Num::Assigned(PayloadType::SA),
-            payload::Content::SA(payload::SA::new(&[proposal])),
-            true,
-        ));
-
-        message.add_payload(Payload::new(
-            Num::Assigned(PayloadType::NONCE),
-            payload::Content::Nonce(payload::Nonce::new(&n_r[..])),
-            true,
-        ));
-
-        Ok((message, chosen_proposal, private_key, n_r.to_vec()))
+        Ok((message, chosen_proposal, private_key, nonce_r.to_vec()))
     }
 }
 
