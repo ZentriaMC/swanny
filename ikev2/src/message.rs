@@ -81,21 +81,15 @@ const HEADER_SIZE: usize = 28;
 
 impl serialize::Serialize for Message {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
-        let mut types_iter = self.payloads.iter().map(|p| p.ty()).chain(trailer);
-
         buf.put_slice(&self.spi_i[..]);
         buf.put_slice(&self.spi_r[..]);
-        buf.put_u8(types_iter.next().unwrap().into());
+        buf.put_u8(self.payloads.first().map(|p| p.ty().into()).unwrap_or(0));
         buf.put_u8(0x20);
         buf.put_u8(self.exchange.into());
         buf.put_u8(self.flags.bits());
         buf.put_u32(self.id);
         buf.put_u32(self.size()?.try_into()?);
-
-        for (payload, next_payload_type) in self.payloads.iter().zip(types_iter) {
-            payload.serialize(next_payload_type, buf)?;
-        }
+        payload::serialize_payloads(&self.payloads, buf)?;
         Ok(())
     }
 
@@ -115,19 +109,14 @@ impl serialize::Deserialize for Message {
         buf.try_copy_to_slice(&mut spi_i[..])?;
         let mut spi_r: SPI = Default::default();
         buf.try_copy_to_slice(&mut spi_r[..])?;
-        let mut payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
+        let next_payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
         let _version = buf.try_get_u8()?;
         let exchange: Num<u8, ExchangeType> = buf.try_get_u8()?.into();
         let flags = MessageFlags::from_bits(buf.try_get_u8()?)
             .ok_or_else(|| anyhow::anyhow!("unknown flags"))?;
         let id = buf.try_get_u32()?;
         let _length = buf.try_get_u32()?;
-        let mut payloads = Vec::new();
-        while buf.has_remaining() {
-            let (payload, next_payload_type) = Payload::deserialize(payload_type, buf)?;
-            payloads.push(payload);
-            payload_type = next_payload_type;
-        }
+        let payloads = payload::deserialize_payloads(next_payload_type, buf)?;
         Ok(Self {
             spi_i,
             spi_r,

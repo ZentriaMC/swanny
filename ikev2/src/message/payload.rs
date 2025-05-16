@@ -590,6 +590,33 @@ pub struct SK {
     ciphertext: Vec<u8>,
 }
 
+pub fn serialize_payloads<'a>(
+    payloads: impl IntoIterator<Item = &'a Payload>,
+    buf: &mut dyn BufMut,
+) -> Result<()> {
+    let payloads: Vec<_> = payloads.into_iter().collect();
+    let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
+    let mut next_types = payloads.iter().map(|p| p.ty()).chain(trailer);
+    let _ = next_types.next();
+    for (payload, next_type) in payloads.iter().zip(next_types) {
+        payload.serialize(next_type, buf)?;
+    }
+    Ok(())
+}
+
+pub fn deserialize_payloads(
+    mut payload_type: Num<u8, PayloadType>,
+    buf: &mut dyn Buf,
+) -> Result<Vec<Payload>> {
+    let mut payloads = Vec::new();
+    while buf.has_remaining() {
+        let (payload, next_type) = Payload::deserialize(payload_type, buf)?;
+        payloads.push(payload);
+        payload_type = next_type;
+    }
+    Ok(payloads)
+}
+
 pub fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> Result<usize> {
     let sizes: Result<Vec<_>> = payloads.into_iter().map(|p| p.size()).collect();
 
@@ -626,13 +653,7 @@ impl SK {
     ) -> Result<Self> {
         let payloads: Vec<_> = payloads.into_iter().collect();
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
-        let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
-
-        let types_iter = payloads.iter().map(|p| p.ty()).chain(trailer);
-
-        for (payload, next_payload_type) in payloads.iter().zip(types_iter) {
-            payload.serialize(next_payload_type, &mut plaintext)?;
-        }
+        serialize_payloads(payloads, &mut plaintext)?;
         let ciphertext = cipher.encrypt(key, plaintext)?;
         Ok(Self { ciphertext })
     }

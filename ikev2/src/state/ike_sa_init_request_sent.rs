@@ -50,7 +50,7 @@ impl IkeSaInitRequestSent {
             .next()
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
 
-        let chosen_proposal = ChosenProposal::new(&proposal)?;
+        let chosen_proposal = ChosenProposal::new(proposal)?;
         let n_r = nonce.nonce();
 
         let skeyseed =
