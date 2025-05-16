@@ -293,13 +293,15 @@ impl Cipher {
         encrypter.pad(false);
         let block_size = self.cipher.block_size();
         let blocks = (plaintext.as_ref().len() + 1).div_ceil(block_size);
+        let padded_size = block_size
+            .checked_mul(blocks)
+            .ok_or_else(|| anyhow::anyhow!("overflow"))?;
         let mut ciphertext = vec![0; block_size * blocks + block_size];
 
         let mut count = encrypter.update(plaintext.as_ref(), &mut ciphertext)?;
-        let buf = vec![0; block_size * blocks - plaintext.as_ref().len() - 1];
-        count += encrypter.update(&buf, &mut ciphertext[count..])?;
-        let pad_len: u8 = buf.len().try_into()?;
-        count += encrypter.update(&[pad_len], &mut ciphertext[count..])?;
+        let padding = vec![0; padded_size - plaintext.as_ref().len() - 1];
+        count += encrypter.update(&padding, &mut ciphertext[count..])?;
+        count += encrypter.update(&[padding.len().try_into()?], &mut ciphertext[count..])?;
         count += encrypter.finalize(&mut ciphertext[count..])?;
         ciphertext.truncate(count);
         iv.append(&mut ciphertext);
@@ -308,17 +310,14 @@ impl Cipher {
     }
 
     pub fn decrypt(&self, key: impl AsRef<[u8]>, ciphertext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
-        let iv = &ciphertext.as_ref()[..self.cipher.iv_len().unwrap()];
+        let (iv, ciphertext) = ciphertext.as_ref().split_at(self.cipher.iv_len().unwrap());
         let mut decrypter =
             symm::Crypter::new(self.cipher, symm::Mode::Decrypt, key.as_ref(), Some(iv))?;
         decrypter.pad(false);
         let block_size = self.cipher.block_size();
-        let mut plaintext = vec![0; ciphertext.as_ref().len() + block_size];
+        let mut plaintext = vec![0; ciphertext.len() + block_size];
 
-        let mut count = decrypter.update(
-            &ciphertext.as_ref()[self.cipher.iv_len().unwrap()..],
-            &mut plaintext,
-        )?;
+        let mut count = decrypter.update(ciphertext, &mut plaintext)?;
         count += decrypter.finalize(&mut plaintext[count..])?;
         plaintext.truncate(count);
 
