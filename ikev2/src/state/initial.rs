@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto::{self, GroupPrivateKey},
     message::{
-        Message, SPI,
+        Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         traffic_selector::TrafficSelector,
@@ -20,7 +20,7 @@ pub(crate) struct Initial {}
 impl Initial {
     fn generate_ike_sa_init_request(
         config: &Config,
-        spi: &SPI,
+        spi: &Spi,
     ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
         let proposals: Vec<_> = config.ike_proposals(spi).collect();
         if proposals.is_empty() {
@@ -37,7 +37,7 @@ impl Initial {
 
         let mut message = Message::new(
             spi,
-            &SPI::default(),
+            &Spi::default(),
             Num::Assigned(ExchangeType::IKE_SA_INIT),
             MessageFlags::I,
             1,
@@ -46,7 +46,7 @@ impl Initial {
         message.add_payloads([
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::SA(payload::SA::new(proposals)),
+                payload::Content::Sa(payload::Sa::new(proposals)),
                 true,
             ),
             Payload::new(
@@ -56,7 +56,7 @@ impl Initial {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::KE),
-                payload::Content::KE(payload::KE::new(
+                payload::Content::Ke(payload::Ke::new(
                     Num::Assigned(chosen_proposal.group().id()),
                     &public_key,
                 )),
@@ -69,20 +69,20 @@ impl Initial {
 
     fn generate_ike_sa_init_response(
         config: &Config,
-        spi: &SPI,
+        spi: &Spi,
         request: &Message,
     ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
         let sa_i = request
             .payloads()
             .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
-        let sa_i: &payload::SA = sa_i.try_into()?;
+        let sa_i: &payload::Sa = sa_i.try_into()?;
 
         let ke_i = request
             .payloads()
             .find(|payload| payload.ty() == Num::Assigned(PayloadType::KE))
             .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
-        let ke_i: &payload::KE = ke_i.try_into()?;
+        let ke_i: &payload::Ke = ke_i.try_into()?;
 
         let nonce_i = request
             .payloads()
@@ -134,7 +134,7 @@ impl Initial {
         message.add_payloads([
             Payload::new(
                 Num::Assigned(PayloadType::KE),
-                payload::Content::KE(payload::KE::new(
+                payload::Content::Ke(payload::Ke::new(
                     Num::Assigned(chosen_proposal.group().id()),
                     &public_key,
                 )),
@@ -142,7 +142,7 @@ impl Initial {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::SA(payload::SA::new([proposal])),
+                payload::Content::Sa(payload::Sa::new([proposal])),
                 true,
             ),
             Payload::new(

@@ -12,12 +12,12 @@ pub mod serialize;
 pub mod traffic_selector;
 pub mod transform;
 
-pub type SPI = [u8; 8];
+pub type Spi = [u8; 8];
 
 #[derive(Debug)]
 pub struct Message {
-    spi_i: SPI,
-    spi_r: SPI,
+    spi_i: Spi,
+    spi_r: Spi,
     exchange: Num<u8, ExchangeType>,
     flags: MessageFlags,
     id: u32,
@@ -26,8 +26,8 @@ pub struct Message {
 
 impl Message {
     pub fn new(
-        spi_i: &SPI,
-        spi_r: &SPI,
+        spi_i: &Spi,
+        spi_r: &Spi,
         exchange: Num<u8, ExchangeType>,
         flags: MessageFlags,
         id: u32,
@@ -42,11 +42,11 @@ impl Message {
         }
     }
 
-    pub fn spi_i(&self) -> &SPI {
+    pub fn spi_i(&self) -> &Spi {
         &self.spi_i
     }
 
-    pub fn spi_r(&self) -> &SPI {
+    pub fn spi_r(&self) -> &Spi {
         &self.spi_r
     }
 
@@ -105,9 +105,9 @@ impl serialize::Deserialize for Message {
     where
         Self: Sized,
     {
-        let mut spi_i: SPI = Default::default();
+        let mut spi_i: Spi = Default::default();
         buf.try_copy_to_slice(&mut spi_i[..])?;
-        let mut spi_r: SPI = Default::default();
+        let mut spi_r: Spi = Default::default();
         buf.try_copy_to_slice(&mut spi_r[..])?;
         let next_payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
         let _version = buf.try_get_u8()?;
@@ -134,8 +134,8 @@ mod tests {
     use crate::message::serialize::{Deserialize, Serialize};
     use bytes::BytesMut;
 
-    const SPI_I: SPI = [1, 2, 3, 4, 5, 6, 7, 8];
-    const SPI_R: SPI = [9, 10, 11, 12, 13, 14, 15, 16];
+    const SPI_I: Spi = [1, 2, 3, 4, 5, 6, 7, 8];
+    const SPI_R: Spi = [9, 10, 11, 12, 13, 14, 15, 16];
 
     fn create_empty() -> Message {
         Message::new(
@@ -174,12 +174,12 @@ mod tests {
 
         message.add_payloads(Some(Payload::new(
             Num::Assigned(PayloadType::SA),
-            payload::Content::SA(sa),
+            payload::Content::Sa(sa),
             true,
         )));
         message.add_payloads(Some(Payload::new(
             Num::Assigned(PayloadType::KE),
-            payload::Content::KE(ke),
+            payload::Content::Ke(ke),
             true,
         )));
 

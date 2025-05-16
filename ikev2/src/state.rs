@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     crypto::GroupPrivateKey,
-    message::{Message, SPI, traffic_selector::TrafficSelector},
+    message::{Message, Spi, traffic_selector::TrafficSelector},
     sa::{ChildSa, ChosenProposal, ControlMessage},
 };
 use anyhow::Result;
@@ -42,8 +42,8 @@ pub(crate) trait State: Send + Sync {
 pub(crate) struct StateData {
     config: Config,
     initiator: Option<bool>,
-    spi: SPI,
-    peer_spi: Option<SPI>,
+    spi: Spi,
+    peer_spi: Option<Spi>,
     message_id: u32,
     chosen_proposal: Option<ChosenProposal>,
     private_key: Option<GroupPrivateKey>,
@@ -53,7 +53,7 @@ pub(crate) struct StateData {
 }
 
 impl StateData {
-    pub fn new(config: &Config, spi: &SPI, sender: UnboundedSender<ControlMessage>) -> Self {
+    pub fn new(config: &Config, spi: &Spi, sender: UnboundedSender<ControlMessage>) -> Self {
         Self {
             config: config.to_owned(),
             initiator: None,

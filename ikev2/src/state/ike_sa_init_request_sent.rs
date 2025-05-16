@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto::{self, GroupPrivateKey},
     message::{
-        Message, SPI,
+        Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload,
         traffic_selector::TrafficSelector,
@@ -27,13 +27,13 @@ impl IkeSaInitRequestSent {
             .payloads()
             .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
-        let sa: &payload::SA = sa.try_into()?;
+        let sa: &payload::Sa = sa.try_into()?;
 
         let ke = response
             .payloads()
             .find(|payload| payload.ty() == Num::Assigned(PayloadType::KE))
             .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
-        let ke: &payload::KE = ke.try_into()?;
+        let ke: &payload::Ke = ke.try_into()?;
 
         let nonce = response
             .payloads()
@@ -69,7 +69,7 @@ impl IkeSaInitRequestSent {
         Ok(skeyseed)
     }
 
-    fn generate_ike_auth_request(config: &Config, spi: &SPI, peer_spi: &SPI) -> Result<Message> {
+    fn generate_ike_auth_request(config: &Config, spi: &Spi, peer_spi: &Spi) -> Result<Message> {
         let message = Message::new(
             spi,
             peer_spi,

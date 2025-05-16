@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto::{self, Cipher, Group, Integ, Prf},
     message::{
-        Message, SPI,
+        Message, Spi,
         num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
         proposal::Proposal,
         traffic_selector::TrafficSelector,
@@ -28,7 +28,7 @@ pub struct IkeSa {
 
 impl IkeSa {
     pub fn new(config: &Config) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
-        let mut spi = SPI::default();
+        let mut spi = Spi::default();
         crypto::rand_bytes(&mut spi)?;
 
         let (sender, receiver) = unbounded();
@@ -160,8 +160,8 @@ impl ChosenProposal {
         skeyseed: impl AsRef<[u8]>,
         n_i: impl AsRef<[u8]>,
         n_r: impl AsRef<[u8]>,
-        spi_i: &SPI,
-        spi_r: &SPI,
+        spi_i: &Spi,
+        spi_r: &Spi,
     ) -> Result<Keys> {
         let mut buf = n_i.as_ref().to_vec();
         buf.extend_from_slice(n_r.as_ref());

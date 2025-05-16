@@ -274,11 +274,11 @@ impl From<AuthType> for u8 {
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum NotifyType {
     UNSUPPORTED_CRITICAL_PAYLOAD = 1,
-    INVALID_IKE_SPI = 4,
+    INVALID_IKE_Spi = 4,
     INVALID_MAJOR_VERSION = 5,
     INVALID_SYNTAX = 7,
     INVALID_MESSAGE_ID = 9,
-    INVALID_SPI = 11,
+    INVALID_Spi = 11,
     NO_PROPOSAL_CHOSEN = 14,
     INVALID_KE_PAYLOAD = 17,
     AUTHENTICATION_FAILED = 24,

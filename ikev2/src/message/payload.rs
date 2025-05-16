@@ -20,40 +20,40 @@ impl From<PayloadType> for u8 {
 
 #[derive(Debug)]
 pub enum Content {
-    SA(SA),
-    KE(KE),
-    ID(ID),
+    Sa(Sa),
+    Ke(Ke),
+    Id(Id),
     Auth(Auth),
     Nonce(Nonce),
     Notify(Notify),
-    TS(TS),
-    SK(SK),
+    Ts(Ts),
+    Sk(Sk),
 }
 
 impl Serialize for Content {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         match self {
-            Content::SA(sa) => sa.serialize(buf),
-            Content::KE(ke) => ke.serialize(buf),
-            Content::ID(id) => id.serialize(buf),
+            Content::Sa(sa) => sa.serialize(buf),
+            Content::Ke(ke) => ke.serialize(buf),
+            Content::Id(id) => id.serialize(buf),
             Content::Auth(auth) => auth.serialize(buf),
             Content::Nonce(nonce) => nonce.serialize(buf),
             Content::Notify(notify) => notify.serialize(buf),
-            Content::TS(ts) => ts.serialize(buf),
-            Content::SK(sk) => sk.serialize(buf),
+            Content::Ts(ts) => ts.serialize(buf),
+            Content::Sk(sk) => sk.serialize(buf),
         }
     }
 
     fn size(&self) -> Result<usize> {
         match self {
-            Content::SA(sa) => sa.size(),
-            Content::KE(ke) => ke.size(),
-            Content::ID(id) => id.size(),
+            Content::Sa(sa) => sa.size(),
+            Content::Ke(ke) => ke.size(),
+            Content::Id(id) => id.size(),
             Content::Auth(auth) => auth.size(),
             Content::Nonce(nonce) => nonce.size(),
             Content::Notify(notify) => notify.size(),
-            Content::TS(ts) => ts.size(),
-            Content::SK(sk) => sk.size(),
+            Content::Ts(ts) => ts.size(),
+            Content::Sk(sk) => sk.size(),
         }
     }
 }
@@ -115,10 +115,10 @@ impl Payload {
 
         let content = match payload_type {
             Num::Assigned(PayloadType::SA) => {
-                Content::SA(SA::deserialize(&mut &buf.chunk()[..len])?)
+                Content::Sa(Sa::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::KE) => {
-                Content::KE(KE::deserialize(&mut &buf.chunk()[..len])?)
+                Content::Ke(Ke::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::AUTH) => {
                 Content::Auth(Auth::deserialize(&mut &buf.chunk()[..len])?)
@@ -130,13 +130,13 @@ impl Payload {
                 Content::Notify(Notify::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::IDi | PayloadType::IDr) => {
-                Content::ID(ID::deserialize(&mut &buf.chunk()[..len])?)
+                Content::Id(Id::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::TSi | PayloadType::TSr) => {
-                Content::TS(TS::deserialize(&mut &buf.chunk()[..len])?)
+                Content::Ts(Ts::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::SK) => {
-                Content::SK(SK::deserialize(&mut &buf.chunk()[..len])?)
+                Content::Sk(Sk::deserialize(&mut &buf.chunk()[..len])?)
             }
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
         };
@@ -164,21 +164,21 @@ macro_rules! create_try_from {
     };
 }
 
-create_try_from!(PayloadType::SA, SA);
-create_try_from!(PayloadType::KE, KE);
-create_try_from!(PayloadType::IDi | PayloadType::IDr, ID);
+create_try_from!(PayloadType::SA, Sa);
+create_try_from!(PayloadType::KE, Ke);
+create_try_from!(PayloadType::IDi | PayloadType::IDr, Id);
 create_try_from!(PayloadType::AUTH, Auth);
 create_try_from!(PayloadType::NONCE, Nonce);
 create_try_from!(PayloadType::NOTIFY, Notify);
-create_try_from!(PayloadType::TSi | PayloadType::TSr, TS);
-create_try_from!(PayloadType::SK, SK);
+create_try_from!(PayloadType::TSi | PayloadType::TSr, Ts);
+create_try_from!(PayloadType::SK, Sk);
 
 #[derive(Debug, PartialEq)]
-pub struct SA {
+pub struct Sa {
     proposals: Vec<Proposal>,
 }
 
-impl SA {
+impl Sa {
     pub fn new<P>(proposals: P) -> Self
     where
         P: IntoIterator,
@@ -194,7 +194,7 @@ impl SA {
     }
 }
 
-impl serialize::Serialize for SA {
+impl serialize::Serialize for Sa {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         for (i, proposal) in self.proposals.iter().enumerate() {
             if i == self.proposals.len() - 1 {
@@ -225,7 +225,7 @@ impl serialize::Serialize for SA {
     }
 }
 
-impl serialize::Deserialize for SA {
+impl serialize::Deserialize for Sa {
     fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
@@ -246,12 +246,12 @@ impl serialize::Deserialize for SA {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct KE {
+pub struct Ke {
     dh_group: Num<u16, DhId>,
     ke_data: Vec<u8>,
 }
 
-impl KE {
+impl Ke {
     pub fn new(dh_group: Num<u16, DhId>, ke_data: impl AsRef<[u8]>) -> Self {
         Self {
             dh_group,
@@ -268,7 +268,7 @@ impl KE {
     }
 }
 
-impl serialize::Serialize for KE {
+impl serialize::Serialize for Ke {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         buf.put_u16(self.dh_group.into());
         buf.put_u16(0);
@@ -283,7 +283,7 @@ impl serialize::Serialize for KE {
     }
 }
 
-impl serialize::Deserialize for KE {
+impl serialize::Deserialize for Ke {
     fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
@@ -295,12 +295,12 @@ impl serialize::Deserialize for KE {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct ID {
+pub struct Id {
     ty: Num<u8, IdType>,
     id_data: Vec<u8>,
 }
 
-impl ID {
+impl Id {
     pub fn new(ty: Num<u8, IdType>, id_data: impl AsRef<[u8]>) -> Self {
         Self {
             ty,
@@ -317,7 +317,7 @@ impl ID {
     }
 }
 
-impl serialize::Serialize for ID {
+impl serialize::Serialize for Id {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         buf.put_u8(self.ty.into());
         buf.put_u8(0);
@@ -333,7 +333,7 @@ impl serialize::Serialize for ID {
     }
 }
 
-impl serialize::Deserialize for ID {
+impl serialize::Deserialize for Id {
     fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
@@ -521,11 +521,11 @@ impl serialize::Deserialize for Notify {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct TS {
+pub struct Ts {
     traffic_selectors: Vec<TrafficSelector>,
 }
 
-impl TS {
+impl Ts {
     pub fn new<T>(traffic_selectors: T) -> Self
     where
         T: IntoIterator,
@@ -541,7 +541,7 @@ impl TS {
     }
 }
 
-impl serialize::Serialize for TS {
+impl serialize::Serialize for Ts {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         buf.put_u8(self.traffic_selectors.len().try_into()?);
         buf.put_u8(0);
@@ -563,7 +563,7 @@ impl serialize::Serialize for TS {
     }
 }
 
-impl serialize::Deserialize for TS {
+impl serialize::Deserialize for Ts {
     fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
@@ -583,11 +583,6 @@ impl serialize::Deserialize for TS {
         }
         Ok(Self::new(traffic_selectors))
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct SK {
-    ciphertext: Vec<u8>,
 }
 
 pub fn serialize_payloads<'a>(
@@ -635,7 +630,12 @@ pub fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> R
         .ok_or_else(|| anyhow::anyhow!("exceeded maximum message size"))
 }
 
-impl SK {
+#[derive(Debug, PartialEq)]
+pub struct Sk {
+    ciphertext: Vec<u8>,
+}
+
+impl Sk {
     pub fn new(ciphertext: impl AsRef<[u8]>) -> Self {
         Self {
             ciphertext: ciphertext.as_ref().to_owned(),
@@ -676,7 +676,7 @@ impl SK {
     }
 }
 
-impl serialize::Serialize for SK {
+impl serialize::Serialize for Sk {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
         buf.put_slice(&self.ciphertext[..]);
         Ok(())
@@ -687,7 +687,7 @@ impl serialize::Serialize for SK {
     }
 }
 
-impl serialize::Deserialize for SK {
+impl serialize::Deserialize for Sk {
     fn deserialize(buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
@@ -702,14 +702,14 @@ pub(crate) mod tests {
     use crate::message::serialize::{Deserialize, Serialize};
     use bytes::BytesMut;
 
-    pub(crate) fn create_sa() -> SA {
+    pub(crate) fn create_sa() -> Sa {
         let proposal = proposal::tests::create_proposal();
-        SA::new(Some(proposal))
+        Sa::new(Some(proposal))
     }
 
-    pub(crate) fn create_ke() -> KE {
+    pub(crate) fn create_ke() -> Ke {
         const DATA: &'static [u8] = b"key exchange data";
-        KE::new(Num::Assigned(DhId::MODP4096), DATA)
+        Ke::new(Num::Assigned(DhId::MODP4096), DATA)
     }
 
     #[test]
@@ -720,7 +720,7 @@ pub(crate) mod tests {
         let mut buf = BytesMut::with_capacity(len);
         sa.serialize(&mut buf).expect("unable to serialize SA");
 
-        let sa2 = SA::deserialize(&mut &buf[..]).expect("unable to deserialize SA");
+        let sa2 = Sa::deserialize(&mut &buf[..]).expect("unable to deserialize SA");
 
         assert_eq!(sa2, sa);
     }
@@ -733,7 +733,7 @@ pub(crate) mod tests {
         let mut buf = BytesMut::with_capacity(len);
         ke.serialize(&mut buf).expect("unable to serialize KE");
 
-        let ke2 = KE::deserialize(&mut &buf[..]).expect("unable to deserialize KE");
+        let ke2 = Ke::deserialize(&mut &buf[..]).expect("unable to deserialize KE");
 
         assert_eq!(ke2, ke);
     }
