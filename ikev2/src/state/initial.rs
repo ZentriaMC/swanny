@@ -21,11 +21,10 @@ pub(crate) struct Initial {}
 impl Initial {
     fn generate_ike_sa_init_request<D>(
         data: &D,
-        spi: &Spi,
     ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)>
         where D: Deref<Target = StateData>,
     {
-        let proposals: Vec<_> = data.config.ike_proposals(spi).collect();
+        let proposals: Vec<_> = data.config.ike_proposals(&data.spi).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
@@ -39,7 +38,7 @@ impl Initial {
         let public_key = private_key.public_key()?;
 
         let mut message = Message::new(
-            spi,
+            &data.spi,
             &Spi::default(),
             Num::Assigned(ExchangeType::IKE_SA_INIT),
             MessageFlags::I,
@@ -202,7 +201,7 @@ impl State for Initial {
         let inner = data.read().await;
 
         let (message, chosen_proposal, private_key, nonce) =
-            Self::generate_ike_sa_init_request(&inner.config, &inner.spi)?;
+            Self::generate_ike_sa_init_request(&inner)?;
         let message_id = message.id();
 
         inner

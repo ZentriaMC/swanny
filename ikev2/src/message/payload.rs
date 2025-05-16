@@ -590,7 +590,12 @@ pub fn serialize_payloads<'a>(
     buf: &mut dyn BufMut,
 ) -> Result<()> {
     let payloads: Vec<_> = payloads.into_iter().collect();
-    let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
+    let trailer = if let Some(Payload { ty: Num::Assigned(PayloadType::SK), content: Content::Sk(sk), ..}) = payloads.last() {
+        sk.inner
+    } else {
+        Num::Unassigned(0)
+    };
+    let trailer: Vec<Num<u8, PayloadType>> = vec![trailer; 1];
     let mut next_types = payloads.iter().map(|p| p.ty()).chain(trailer);
     let _ = next_types.next();
     for (payload, next_type) in payloads.iter().zip(next_types) {
@@ -633,12 +638,14 @@ pub fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> R
 #[derive(Debug, PartialEq)]
 pub struct Sk {
     ciphertext: Vec<u8>,
+    inner: Num<u8, PayloadType>,
 }
 
 impl Sk {
-    pub fn new(ciphertext: impl AsRef<[u8]>) -> Self {
+    pub fn new(ciphertext: impl AsRef<[u8]>, inner: Num<u8, PayloadType>,) -> Self {
         Self {
             ciphertext: ciphertext.as_ref().to_owned(),
+            inner,
         }
     }
 
@@ -652,10 +659,11 @@ impl Sk {
         payloads: impl IntoIterator<Item = &'a Payload>,
     ) -> Result<Self> {
         let payloads: Vec<_> = payloads.into_iter().collect();
+        let inner = payloads.first().map(|p| p.ty()).unwrap_or(Num::Unassigned(0));
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         serialize_payloads(payloads, &mut plaintext)?;
         let ciphertext = cipher.encrypt(key, plaintext)?;
-        Ok(Self { ciphertext })
+        Ok(Self { ciphertext, inner })
     }
 
     pub fn decrypt(
@@ -692,7 +700,7 @@ impl serialize::Deserialize for Sk {
     where
         Self: Sized,
     {
-        Ok(Self::new(buf.chunk()))
+        Ok(Self::new(buf.chunk(), Num::Unassigned(0)))
     }
 }
 
