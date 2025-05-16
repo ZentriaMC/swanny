@@ -189,15 +189,15 @@ impl Transform {
         self.attributes.iter()
     }
 
-    pub fn new(
-        ty: Num<u8, TransformType>,
-        id: Num<u16, TransformId>,
-        attributes: impl AsRef<[Attribute]>,
-    ) -> Self {
+    pub fn new<A>(ty: Num<u8, TransformType>, id: Num<u16, TransformId>, attributes: A) -> Self
+    where
+        A: IntoIterator,
+        A::Item: Into<Attribute>,
+    {
         Self {
             ty,
             id,
-            attributes: attributes.as_ref().to_vec(),
+            attributes: attributes.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -257,7 +257,7 @@ pub(crate) mod tests {
         Transform::new(
             Num::Assigned(TransformType::ENCR),
             Num::Assigned(TransformId::Encr(Num::Assigned(EncrId::ENCR_AES_CTR))),
-            &[attr],
+            [attr],
         )
     }
 

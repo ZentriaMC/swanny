@@ -33,17 +33,21 @@ impl Proposal {
         self.transforms.iter()
     }
 
-    pub fn new(
+    pub fn new<T>(
         number: u8,
         protocol: Num<u8, Protocol>,
         spi: impl AsRef<[u8]>,
-        transforms: impl AsRef<[Transform]>,
-    ) -> Self {
+        transforms: T,
+    ) -> Self
+    where
+        T: IntoIterator,
+        T::Item: Into<Transform>,
+    {
         Self {
             number,
             protocol,
             spi: spi.as_ref().to_vec(),
-            transforms: transforms.as_ref().to_vec(),
+            transforms: transforms.into_iter().map(Into::into).collect(),
         }
     }
 
@@ -151,7 +155,7 @@ pub(crate) mod tests {
             1,
             Num::Assigned(Protocol::IKE),
             &[1, 2, 3, 4, 5, 6, 7, 8],
-            &[transform],
+            [transform],
         )
     }
 

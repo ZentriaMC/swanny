@@ -4,7 +4,7 @@ use crate::{
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
         proposal::{self, Proposal},
         serialize::{self, Deserialize, Serialize},
-        traffic_selector,
+        traffic_selector::TrafficSelector,
     },
 };
 use anyhow::Result;
@@ -184,12 +184,8 @@ impl SA {
         P: IntoIterator,
         P::Item: Into<Proposal>,
     {
-        let mut owned_proposals = Vec::new();
-        for p in proposals {
-            owned_proposals.push(p.into());
-        }
         Self {
-            proposals: owned_proposals,
+            proposals: proposals.into_iter().map(Into::into).collect(),
         }
     }
 
@@ -526,17 +522,21 @@ impl serialize::Deserialize for Notify {
 
 #[derive(Debug, PartialEq)]
 pub struct TS {
-    traffic_selectors: Vec<traffic_selector::TrafficSelector>,
+    traffic_selectors: Vec<TrafficSelector>,
 }
 
 impl TS {
-    pub fn new(traffic_selectors: impl AsRef<[traffic_selector::TrafficSelector]>) -> Self {
+    pub fn new<T>(traffic_selectors: T) -> Self
+    where
+        T: IntoIterator,
+        T::Item: Into<TrafficSelector>,
+    {
         Self {
-            traffic_selectors: traffic_selectors.as_ref().to_vec(),
+            traffic_selectors: traffic_selectors.into_iter().map(Into::into).collect(),
         }
     }
 
-    pub fn traffic_selectors(&self) -> impl Iterator<Item = &traffic_selector::TrafficSelector> {
+    pub fn traffic_selectors(&self) -> impl Iterator<Item = &TrafficSelector> {
         self.traffic_selectors.iter()
     }
 }
@@ -574,8 +574,7 @@ impl serialize::Deserialize for TS {
 
         let mut traffic_selectors = Vec::new();
         for _ in 0..count {
-            let traffic_selector =
-                traffic_selector::TrafficSelector::deserialize(&mut buf.chunk())?;
+            let traffic_selector = TrafficSelector::deserialize(&mut buf.chunk())?;
             buf.advance(traffic_selector.size()?);
             traffic_selectors.push(traffic_selector);
         }
@@ -591,8 +590,8 @@ pub struct SK {
     ciphertext: Vec<u8>,
 }
 
-pub fn cumulative_size(payloads: impl AsRef<[Payload]>) -> Result<usize> {
-    let sizes: Result<Vec<_>> = payloads.as_ref().iter().map(|p| p.size()).collect();
+pub fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> Result<usize> {
+    let sizes: Result<Vec<_>> = payloads.into_iter().map(|p| p.size()).collect();
 
     let sizes: Result<Vec<_>> = sizes?
         .iter()
@@ -620,15 +619,18 @@ impl SK {
         &self.ciphertext
     }
 
-    pub fn encrypt(
+    pub fn encrypt<'a>(
         cipher: &Cipher,
         key: impl AsRef<[u8]>,
-        payloads: impl AsRef<[Payload]>,
+        payloads: impl IntoIterator<Item = &'a Payload>,
     ) -> Result<Self> {
-        let mut plaintext = BytesMut::with_capacity(cumulative_size(&payloads)?);
+        let payloads: Vec<_> = payloads.into_iter().collect();
+        let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         let trailer: Vec<Num<u8, PayloadType>> = vec![Num::Unassigned(0); 1];
-        let types_iter = payloads.as_ref().iter().map(|p| p.ty()).chain(trailer);
-        for (payload, next_payload_type) in payloads.as_ref().iter().zip(types_iter) {
+
+        let types_iter = payloads.iter().map(|p| p.ty()).chain(trailer);
+
+        for (payload, next_payload_type) in payloads.iter().zip(types_iter) {
             payload.serialize(next_payload_type, &mut plaintext)?;
         }
         let ciphertext = cipher.encrypt(key, plaintext)?;

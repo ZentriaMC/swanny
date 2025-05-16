@@ -58,7 +58,7 @@ impl ProposalBuilder {
                 Transform::new(
                     Num::Assigned(TransformType::ENCR),
                     Num::Assigned(TransformId::Encr(Num::Assigned(*id))),
-                    &attributes,
+                    attributes,
                 )
             })
             .collect();
@@ -72,7 +72,7 @@ impl ProposalBuilder {
                 Transform::new(
                     Num::Assigned(TransformType::PRF),
                     Num::Assigned(TransformId::Prf(Num::Assigned(*id))),
-                    &[],
+                    None::<Attribute>,
                 )
             })
             .collect();
@@ -86,7 +86,7 @@ impl ProposalBuilder {
                 Transform::new(
                     Num::Assigned(TransformType::INTEG),
                     Num::Assigned(TransformId::Integ(Num::Assigned(*id))),
-                    &[],
+                    None::<Attribute>,
                 )
             })
             .collect();
@@ -100,7 +100,7 @@ impl ProposalBuilder {
                 Transform::new(
                     Num::Assigned(TransformType::DH),
                     Num::Assigned(TransformId::Dh(Num::Assigned(*id))),
-                    &[],
+                    None::<Attribute>,
                 )
             })
             .collect();
@@ -114,14 +114,14 @@ impl ProposalBuilder {
                 Transform::new(
                     Num::Assigned(TransformType::ESN),
                     Num::Assigned(TransformId::Esn(Num::Assigned(*id))),
-                    &[],
+                    None::<Attribute>,
                 )
             })
             .collect();
 
         transforms.append(&mut esn);
 
-        Proposal::new(number, Num::Assigned(protocol), spi.as_ref(), &transforms)
+        Proposal::new(number, Num::Assigned(protocol), spi.as_ref(), transforms)
     }
 }
 
