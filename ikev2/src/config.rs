@@ -1,5 +1,5 @@
 use crate::message::{
-    Spi, EspSpi,
+    EspSpi, Spi,
     num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType},
     proposal::Proposal,
     transform::{Attribute, AttributeFormat, Transform, TransformId},

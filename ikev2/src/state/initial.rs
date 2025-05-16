@@ -8,7 +8,7 @@ use crate::{
         traffic_selector::TrafficSelector,
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, IkeSa},
-    state::{self, State, StateData},
+    state::{self, Keys, State, StateData},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -22,7 +22,8 @@ impl Initial {
     fn generate_ike_sa_init_request<D>(
         data: &D,
     ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)>
-        where D: Deref<Target = StateData>,
+    where
+        D: Deref<Target = StateData>,
     {
         let proposals: Vec<_> = data.config.ike_proposals(&data.spi).collect();
         if proposals.is_empty() {
@@ -73,7 +74,7 @@ impl Initial {
         config: &Config,
         spi: &Spi,
         request: &Message,
-    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
+    ) -> Result<(Message, ChosenProposal, Keys, Vec<u8>)> {
         let sa_i = request
             .payloads()
             .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
@@ -154,7 +155,7 @@ impl Initial {
             ),
         ]);
 
-        Ok((message, chosen_proposal, private_key, nonce_r.to_vec()))
+        Ok((message, chosen_proposal, keys, nonce_r.to_vec()))
     }
 }
 
@@ -169,7 +170,7 @@ impl State for Initial {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let (message, chosen_proposal, private_key, nonce) =
+                let (message, chosen_proposal, keys, nonce) =
                     Self::generate_ike_sa_init_response(&inner.config, &inner.spi, message)?;
                 inner
                     .sender
@@ -179,7 +180,7 @@ impl State for Initial {
                 let mut inner = data.write().await;
                 inner.initiator = Some(false);
                 inner.chosen_proposal = Some(chosen_proposal);
-                inner.private_key = Some(private_key);
+                inner.keys = Some(keys);
                 inner.nonce = Some(nonce);
                 drop(inner);
 

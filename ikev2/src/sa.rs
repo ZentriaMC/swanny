@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto::{self, Cipher, Group, Integ, Prf},
     message::{
-        Message, Spi, EspSpi,
+        EspSpi, Message, Spi,
         num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
         proposal::Proposal,
         traffic_selector::TrafficSelector,

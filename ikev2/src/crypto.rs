@@ -264,7 +264,6 @@ impl Group {
 
 pub struct Cipher {
     cipher: symm::Cipher,
-    iv: Vec<u8>,
     is_aead: bool,
 }
 
@@ -275,13 +274,7 @@ impl Cipher {
             (EncrId::ENCR_AES_CBC, Some(256)) => (symm::Cipher::aes_256_cbc(), false),
             _ => return Err(anyhow::anyhow!("unsupported cipher")),
         };
-        let mut iv = vec![0; cipher.iv_len().unwrap()];
-        rand::rand_bytes(&mut iv)?;
-        Ok(Self {
-            cipher,
-            iv,
-            is_aead,
-        })
+        Ok(Self { cipher, is_aead })
     }
 
     pub fn key_size(&self) -> usize {
@@ -293,12 +286,10 @@ impl Cipher {
     }
 
     pub fn encrypt(&self, key: impl AsRef<[u8]>, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
-        let mut encrypter = symm::Crypter::new(
-            self.cipher,
-            symm::Mode::Encrypt,
-            key.as_ref(),
-            Some(&self.iv),
-        )?;
+        let mut iv = vec![0; self.cipher.iv_len().unwrap()];
+        rand::rand_bytes(&mut iv)?;
+        let mut encrypter =
+            symm::Crypter::new(self.cipher, symm::Mode::Encrypt, key.as_ref(), Some(&iv))?;
         encrypter.pad(false);
         let block_size = self.cipher.block_size();
         let blocks = (plaintext.as_ref().len() + 1).div_ceil(block_size);
@@ -311,22 +302,23 @@ impl Cipher {
         count += encrypter.update(&[pad_len], &mut ciphertext[count..])?;
         count += encrypter.finalize(&mut ciphertext[count..])?;
         ciphertext.truncate(count);
+        iv.append(&mut ciphertext);
 
-        Ok(ciphertext)
+        Ok(iv)
     }
 
     pub fn decrypt(&self, key: impl AsRef<[u8]>, ciphertext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
-        let mut decrypter = symm::Crypter::new(
-            self.cipher,
-            symm::Mode::Decrypt,
-            key.as_ref(),
-            Some(&self.iv),
-        )?;
+        let iv = &ciphertext.as_ref()[..self.cipher.iv_len().unwrap()];
+        let mut decrypter =
+            symm::Crypter::new(self.cipher, symm::Mode::Decrypt, key.as_ref(), Some(iv))?;
         decrypter.pad(false);
         let block_size = self.cipher.block_size();
         let mut plaintext = vec![0; ciphertext.as_ref().len() + block_size];
 
-        let mut count = decrypter.update(ciphertext.as_ref(), &mut plaintext)?;
+        let mut count = decrypter.update(
+            &ciphertext.as_ref()[self.cipher.iv_len().unwrap()..],
+            &mut plaintext,
+        )?;
         count += decrypter.finalize(&mut plaintext[count..])?;
         plaintext.truncate(count);
 
@@ -334,10 +326,6 @@ impl Cipher {
         plaintext.truncate(plaintext.len() - pad_len - 1);
 
         Ok(plaintext)
-    }
-
-    pub fn iv(&self) -> &[u8] {
-        &self.iv
     }
 }
 
@@ -402,7 +390,6 @@ mod tests {
     #[test]
     fn test_cipher() {
         let cipher = Cipher::new(EncrId::ENCR_AES_CBC, Some(128)).expect("");
-        assert_eq!(cipher.iv().len(), 16);
 
         let key = vec![1; 16];
         let plaintext = b"hello world";

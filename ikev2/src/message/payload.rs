@@ -590,7 +590,12 @@ pub fn serialize_payloads<'a>(
     buf: &mut dyn BufMut,
 ) -> Result<()> {
     let payloads: Vec<_> = payloads.into_iter().collect();
-    let trailer = if let Some(Payload { ty: Num::Assigned(PayloadType::SK), content: Content::Sk(sk), ..}) = payloads.last() {
+    let trailer = if let Some(Payload {
+        ty: Num::Assigned(PayloadType::SK),
+        content: Content::Sk(sk),
+        ..
+    }) = payloads.last()
+    {
         sk.inner
     } else {
         Num::Unassigned(0)
@@ -642,7 +647,7 @@ pub struct Sk {
 }
 
 impl Sk {
-    pub fn new(ciphertext: impl AsRef<[u8]>, inner: Num<u8, PayloadType>,) -> Self {
+    pub fn new(ciphertext: impl AsRef<[u8]>, inner: Num<u8, PayloadType>) -> Self {
         Self {
             ciphertext: ciphertext.as_ref().to_owned(),
             inner,
@@ -659,20 +664,20 @@ impl Sk {
         payloads: impl IntoIterator<Item = &'a Payload>,
     ) -> Result<Self> {
         let payloads: Vec<_> = payloads.into_iter().collect();
-        let inner = payloads.first().map(|p| p.ty()).unwrap_or(Num::Unassigned(0));
+        let inner = payloads
+            .first()
+            .map(|p| p.ty())
+            .unwrap_or(Num::Unassigned(0));
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         serialize_payloads(payloads, &mut plaintext)?;
-        let ciphertext = cipher.encrypt(key, plaintext)?;
+        let ciphertext = cipher.encrypt(&key, &plaintext)?;
+        let plaintext2 = cipher.decrypt(&key, &ciphertext)?;
         Ok(Self { ciphertext, inner })
     }
 
-    pub fn decrypt(
-        &self,
-        cipher: &Cipher,
-        key: impl AsRef<[u8]>,
-        mut payload_type: Num<u8, PayloadType>,
-    ) -> Result<Vec<Payload>> {
+    pub fn decrypt(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<Vec<Payload>> {
         let plaintext = cipher.decrypt(key, &self.ciphertext)?;
+        let mut payload_type: Num<u8, PayloadType> = self.inner;
         let mut plaintext = plaintext.as_slice();
         let mut payloads = Vec::new();
         while plaintext.has_remaining() {

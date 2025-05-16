@@ -98,21 +98,21 @@ impl IkeSaInitRequestSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let payloads = [
-            Payload::new(
-                Num::Assigned(PayloadType::SA),
-                payload::Content::Sa(payload::Sa::new(proposals)),
-                true,
-            ),
-        ];
+        let payloads = [Payload::new(
+            Num::Assigned(PayloadType::SA),
+            payload::Content::Sa(payload::Sa::new(proposals)),
+            true,
+        )];
 
-        message.add_payloads([
-            Payload::new(
-                Num::Assigned(PayloadType::SK),
-                payload::Content::Sk(payload::Sk::encrypt(chosen_proposal.cipher(), &keys.ei, &payloads)?),
-                true,
-            ),
-        ]);
+        message.add_payloads([Payload::new(
+            Num::Assigned(PayloadType::SK),
+            payload::Content::Sk(payload::Sk::encrypt(
+                chosen_proposal.cipher(),
+                &keys.ei,
+                &payloads,
+            )?),
+            true,
+        )]);
         Ok(message)
     }
 }
@@ -128,18 +128,14 @@ impl State for IkeSaInitRequestSent {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let (chosen_proposal, keys) = Self::handle_ike_sa_init_response(
-                    &inner,
-                    message,
-                )?;
+                let (chosen_proposal, keys) = Self::handle_ike_sa_init_response(&inner, message)?;
 
-                let request =
-                    Self::generate_ike_auth_request(
-                        &inner,
-                        &chosen_proposal,
-                        &keys,
-                        message.spi_r(),
-                    )?;
+                let request = Self::generate_ike_auth_request(
+                    &inner,
+                    &chosen_proposal,
+                    &keys,
+                    message.spi_r(),
+                )?;
 
                 drop(inner);
 
