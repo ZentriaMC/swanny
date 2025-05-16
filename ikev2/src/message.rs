@@ -13,6 +13,7 @@ pub mod traffic_selector;
 pub mod transform;
 
 pub type Spi = [u8; 8];
+pub type EspSpi = [u8; 4];
 
 #[derive(Debug)]
 pub struct Message {

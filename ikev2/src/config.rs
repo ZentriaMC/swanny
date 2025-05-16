@@ -1,5 +1,5 @@
 use crate::message::{
-    Spi,
+    Spi, EspSpi,
     num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType},
     proposal::Proposal,
     transform::{Attribute, AttributeFormat, Transform, TransformId},
@@ -182,7 +182,7 @@ impl Config {
         self.ipsec_protocol
     }
 
-    pub fn ipsec_proposals(&self, spi: &Spi) -> impl Iterator<Item = Proposal> {
+    pub fn ipsec_proposals(&self, spi: &EspSpi) -> impl Iterator<Item = Proposal> {
         self.ipsec_proposals
             .iter()
             .enumerate()
@@ -238,7 +238,7 @@ pub(crate) mod tests {
         assert_eq!(config.ipsec_protocol(), Protocol::ESP);
         assert_eq!(
             config
-                .ipsec_proposals(&Spi::default())
+                .ipsec_proposals(&EspSpi::default())
                 .collect::<Vec<_>>()
                 .len(),
             1

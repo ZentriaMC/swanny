@@ -12,17 +12,20 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub(crate) struct Initial {}
 
 impl Initial {
-    fn generate_ike_sa_init_request(
-        config: &Config,
+    fn generate_ike_sa_init_request<D>(
+        data: &D,
         spi: &Spi,
-    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)> {
-        let proposals: Vec<_> = config.ike_proposals(spi).collect();
+    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)>
+        where D: Deref<Target = StateData>,
+    {
+        let proposals: Vec<_> = data.config.ike_proposals(spi).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
@@ -213,8 +216,7 @@ impl State for Initial {
         inner.private_key = Some(private_key);
         inner.nonce = Some(nonce);
         inner.message_id = message_id;
-        inner.larval_sa = Some(ChildSa::new(ts_i, ts_r));
-        drop(inner);
+        inner.larval_child_sa = Some(ChildSa::new(ts_i, ts_r)?);
 
         Ok(Box::new(state::IkeSaInitRequestSent {}))
     }

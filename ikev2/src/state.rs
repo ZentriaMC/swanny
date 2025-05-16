@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto::GroupPrivateKey,
     message::{Message, Spi, traffic_selector::TrafficSelector},
-    sa::{ChildSa, ChosenProposal, ControlMessage},
+    sa::{ChildSa, ChosenProposal, ControlMessage, Keys},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -47,8 +47,9 @@ pub(crate) struct StateData {
     message_id: u32,
     chosen_proposal: Option<ChosenProposal>,
     private_key: Option<GroupPrivateKey>,
+    keys: Option<Keys>,
     nonce: Option<Vec<u8>>,
-    larval_sa: Option<ChildSa>,
+    larval_child_sa: Option<ChildSa>,
     sender: UnboundedSender<ControlMessage>,
 }
 
@@ -62,8 +63,9 @@ impl StateData {
             message_id: 0,
             chosen_proposal: None,
             private_key: None,
+            keys: None,
             nonce: None,
-            larval_sa: None,
+            larval_child_sa: None,
             sender,
         }
     }

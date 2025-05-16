@@ -4,25 +4,28 @@ use crate::{
     message::{
         Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
-        payload,
+        payload::{self, Payload},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage},
+    sa::{ChosenProposal, ControlMessage, Keys},
     state::{self, State, StateData},
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub(crate) struct IkeSaInitRequestSent {}
 
 impl IkeSaInitRequestSent {
-    fn generate_skeyseed(
+    fn handle_ike_sa_init_response<D>(
+        data: &D,
         response: &Message,
-        private_key: &GroupPrivateKey,
-        n_i: impl AsRef<[u8]>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<(ChosenProposal, Keys)>
+    where
+        D: Deref<Target = StateData>,
+    {
         let sa = response
             .payloads()
             .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
@@ -41,43 +44,75 @@ impl IkeSaInitRequestSent {
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
         let nonce: &payload::Nonce = nonce.try_into()?;
 
+        let proposal = if let Some(proposal) = sa.proposals().next() {
+            proposal
+        } else {
+            return Err(anyhow::anyhow!("no proposals received"));
+        };
+
+        let chosen_proposal = ChosenProposal::new(proposal)?;
+
+        let private_key = data.private_key.as_ref().unwrap();
         if ke.dh_group() != Num::Assigned(private_key.group().id()) {
             return Err(anyhow::anyhow!("unmatched DH group"));
         }
 
-        let proposal = sa
-            .proposals()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
-
-        let chosen_proposal = ChosenProposal::new(proposal)?;
+        let n_i = data.nonce.as_ref().unwrap();
         let n_r = nonce.nonce();
-
         let skeyseed =
-            crypto::generate_skeyseed(chosen_proposal.prf(), &n_i, n_r, private_key, ke.ke_data())?;
+            crypto::generate_skeyseed(chosen_proposal.prf(), n_i, n_r, private_key, ke.ke_data())?;
         eprintln!("SKEYSEED generated: {:?}", &skeyseed);
 
         let keys = chosen_proposal.generate_keys(
             &skeyseed,
-            &n_i,
+            n_i,
             n_r,
             response.spi_i(),
             response.spi_r(),
         )?;
         eprintln!("Keys generated: {:?}", &keys);
 
-        Ok(skeyseed)
+        Ok((chosen_proposal, keys))
     }
 
-    fn generate_ike_auth_request(config: &Config, spi: &Spi, peer_spi: &Spi) -> Result<Message> {
-        let message = Message::new(
-            spi,
-            peer_spi,
+    fn generate_ike_auth_request<D>(
+        data: &D,
+        chosen_proposal: &ChosenProposal,
+        keys: &Keys,
+        spi_r: &Spi,
+    ) -> Result<Message>
+    where
+        D: Deref<Target = StateData>,
+    {
+        let mut message = Message::new(
+            &data.spi,
+            spi_r,
             Num::Assigned(ExchangeType::IKE_AUTH),
             MessageFlags::I,
-            2,
+            data.message_id.wrapping_add(1),
         );
 
+        let larval_child_sa = data.larval_child_sa.as_ref().unwrap();
+        let proposals: Vec<_> = data.config.ipsec_proposals(&larval_child_sa.spi).collect();
+        if proposals.is_empty() {
+            return Err(anyhow::anyhow!("no proposal to send"));
+        }
+
+        let payloads = [
+            Payload::new(
+                Num::Assigned(PayloadType::SA),
+                payload::Content::Sa(payload::Sa::new(proposals)),
+                true,
+            ),
+        ];
+
+        message.add_payloads([
+            Payload::new(
+                Num::Assigned(PayloadType::SK),
+                payload::Content::Sk(payload::Sk::encrypt(chosen_proposal.cipher(), &keys.ei, &payloads)?),
+                true,
+            ),
+        ]);
         Ok(message)
     }
 }
@@ -93,23 +128,30 @@ impl State for IkeSaInitRequestSent {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let skeyseed = Self::generate_skeyseed(
+                let (chosen_proposal, keys) = Self::handle_ike_sa_init_response(
+                    &inner,
                     message,
-                    inner.private_key.as_ref().unwrap(),
-                    inner.nonce.as_ref().unwrap(),
                 )?;
 
                 let request =
-                    Self::generate_ike_auth_request(&inner.config, &inner.spi, message.spi_r())?;
+                    Self::generate_ike_auth_request(
+                        &inner,
+                        &chosen_proposal,
+                        &keys,
+                        message.spi_r(),
+                    )?;
+
+                drop(inner);
+
+                let mut inner = data.write().await;
+                inner.chosen_proposal = Some(chosen_proposal);
+                inner.keys = Some(keys);
+                inner.peer_spi = Some(request.spi_r().to_owned());
+                inner.message_id = request.id();
 
                 inner
                     .sender
                     .unbounded_send(ControlMessage::IkeMessage(request))?;
-                drop(inner);
-
-                let mut inner = data.write().await;
-                inner.initiator = Some(false);
-                drop(inner);
 
                 Ok(Box::new(state::IkeAuthRequestSent {}))
             }

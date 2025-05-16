@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto::{self, Cipher, Group, Integ, Prf},
     message::{
-        Message, Spi,
+        Message, Spi, EspSpi,
         num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
         proposal::Proposal,
         traffic_selector::TrafficSelector,
@@ -213,29 +213,36 @@ impl ChosenProposal {
 }
 
 #[derive(Debug)]
-pub struct Keys {
-    d: Vec<u8>,
-    ei: Vec<u8>,
-    er: Vec<u8>,
-    ai: Vec<u8>,
-    ar: Vec<u8>,
-    pi: Vec<u8>,
-    pr: Vec<u8>,
+pub(crate) struct Keys {
+    pub d: Vec<u8>,
+    pub ei: Vec<u8>,
+    pub er: Vec<u8>,
+    pub ai: Vec<u8>,
+    pub ar: Vec<u8>,
+    pub pi: Vec<u8>,
+    pub pr: Vec<u8>,
 }
 
-impl Keys {}
-
 pub(crate) struct ChildSa {
-    ts_i: TrafficSelector,
-    ts_r: TrafficSelector,
+    pub ts_i: TrafficSelector,
+    pub ts_r: TrafficSelector,
+    pub spi: EspSpi,
+    pub peer_spi: Option<EspSpi>,
+    pub chosen_proposal: Option<ChosenProposal>,
 }
 
 impl ChildSa {
-    pub fn new(ts_i: &TrafficSelector, ts_r: &TrafficSelector) -> Self {
-        Self {
+    pub fn new(ts_i: &TrafficSelector, ts_r: &TrafficSelector) -> Result<Self> {
+        let mut spi = EspSpi::default();
+        crypto::rand_bytes(&mut spi)?;
+
+        Ok(Self {
             ts_i: ts_i.to_owned(),
             ts_r: ts_r.to_owned(),
-        }
+            spi,
+            peer_spi: None,
+            chosen_proposal: None,
+        })
     }
 }
 
