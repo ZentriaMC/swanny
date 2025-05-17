@@ -1,4 +1,5 @@
 use crate::{
+    config::Config,
     message::{
         Message,
         num::{Num, PayloadType},
@@ -6,10 +7,12 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
+    sa::ControlMessage,
     state::{State, StateData},
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -31,7 +34,7 @@ impl IkeSaInitResponseSent {
         let sk: &payload::Sk = last.try_into()?;
         let payloads = sk.decrypt(
             data.chosen_proposal.as_ref().unwrap().cipher(),
-            &data.keys.as_ref().unwrap().ei,
+            &data.keys.as_ref().unwrap().protecting.ei,
         )?;
         eprintln!("{:?}", &payloads);
         Ok(())
@@ -42,6 +45,8 @@ impl IkeSaInitResponseSent {
 impl State for IkeSaInitResponseSent {
     async fn handle_message(
         self: Box<Self>,
+        _config: &Config,
+        _sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
@@ -53,6 +58,8 @@ impl State for IkeSaInitResponseSent {
 
     async fn handle_acquire(
         self: Box<Self>,
+        _config: &Config,
+        _sender: UnboundedSender<ControlMessage>,
         _data: Arc<RwLock<StateData>>,
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,

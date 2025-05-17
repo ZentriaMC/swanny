@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto::{self, Cipher, Group, Integ, Prf},
     message::{
-        EspSpi, Message, Spi,
+        EspSpi, Spi,
         num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
         proposal::Proposal,
         traffic_selector::TrafficSelector,
@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::Result;
 use bytes::Buf;
-use futures::channel::mpsc::{UnboundedReceiver, unbounded};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -24,6 +24,8 @@ pub enum ControlMessage {
 pub struct IkeSa {
     data: Arc<RwLock<StateData>>,
     state: Arc<Mutex<Option<Box<dyn State>>>>,
+    config: Config,
+    sender: UnboundedSender<ControlMessage>,
 }
 
 impl IkeSa {
@@ -32,12 +34,14 @@ impl IkeSa {
         crypto::rand_bytes(&mut spi)?;
 
         let (sender, receiver) = unbounded();
-        let data = StateData::new(config, &spi, sender);
+        let data = StateData::new(&spi);
 
         Ok((
             Self {
                 data: Arc::new(RwLock::new(data)),
                 state: Arc::new(Mutex::new(Some(Box::new(state::Initial {})))),
+                config: config.to_owned(),
+                sender,
             },
             receiver,
         ))
@@ -58,7 +62,12 @@ impl IkeSa {
             drop(state);
 
             let s = s
-                .handle_message(self.data.clone(), message.as_ref())
+                .handle_message(
+                    &self.config,
+                    self.sender.clone(),
+                    self.data.clone(),
+                    message.as_ref(),
+                )
                 .await?;
             let mut state = self.state.lock().await;
             *state = Some(s);
@@ -78,7 +87,14 @@ impl IkeSa {
             drop(state);
 
             let s = s
-                .handle_acquire(self.data.clone(), &ts_i, &ts_r, index)
+                .handle_acquire(
+                    &self.config,
+                    self.sender.clone(),
+                    self.data.clone(),
+                    &ts_i,
+                    &ts_r,
+                    index,
+                )
                 .await?;
             let mut state = self.state.lock().await;
             *state = Some(s);
@@ -203,26 +219,31 @@ impl ChosenProposal {
         buf.try_copy_to_slice(&mut pr)?;
 
         Ok(Keys {
-            d,
-            ei,
-            er,
-            ai,
-            ar,
-            pi,
-            pr,
+            deriving: DerivingKeys { d, pi, pr },
+            protecting: ProtectingKeys { ei, er, ai, ar },
         })
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct Keys {
+    pub deriving: DerivingKeys,
+    pub protecting: ProtectingKeys,
+}
+
+#[derive(Debug)]
+pub(crate) struct DerivingKeys {
     pub d: Vec<u8>,
+    pub pi: Vec<u8>,
+    pub pr: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ProtectingKeys {
     pub ei: Vec<u8>,
     pub er: Vec<u8>,
     pub ai: Vec<u8>,
     pub ar: Vec<u8>,
-    pub pi: Vec<u8>,
-    pub pr: Vec<u8>,
 }
 
 pub(crate) struct ChildSa {

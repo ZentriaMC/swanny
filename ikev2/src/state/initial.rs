@@ -14,6 +14,7 @@ use crate::{
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
+use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -22,12 +23,13 @@ pub(crate) struct Initial {}
 
 impl Initial {
     fn generate_ike_sa_init_request<D>(
+        config: &Config,
         data: &D,
     ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)>
     where
         D: Deref<Target = StateData>,
     {
-        let proposals: Vec<_> = data.config.ike_proposals(&data.spi).collect();
+        let proposals: Vec<_> = config.ike_proposals(&data.spi).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
@@ -159,6 +161,8 @@ impl Initial {
 impl State for Initial {
     async fn handle_message(
         self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
@@ -168,13 +172,11 @@ impl State for Initial {
                 let inner = data.read().await;
 
                 let (response, chosen_proposal, keys, nonce) =
-                    Self::generate_ike_sa_init_response(&inner.config, &inner.spi, &message)?;
+                    Self::generate_ike_sa_init_response(config, &inner.spi, &message)?;
                 let len = response.size()?;
                 let mut buf = BytesMut::with_capacity(len);
                 response.serialize(&mut buf)?;
-                inner
-                    .sender
-                    .unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
                 drop(inner);
 
                 let mut inner = data.write().await;
@@ -194,6 +196,8 @@ impl State for Initial {
 
     async fn handle_acquire(
         self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
@@ -202,15 +206,13 @@ impl State for Initial {
         let inner = data.read().await;
 
         let (request, chosen_proposal, private_key, nonce) =
-            Self::generate_ike_sa_init_request(&inner)?;
+            Self::generate_ike_sa_init_request(config, &inner)?;
         let message_id = request.id();
 
         let len = request.size()?;
         let mut buf = BytesMut::with_capacity(len);
         request.serialize(&mut buf)?;
-        inner
-            .sender
-            .unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+        sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
         drop(inner);
 
         let mut inner = data.write().await;

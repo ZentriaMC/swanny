@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     crypto::GroupPrivateKey,
-    message::{Message, Spi, traffic_selector::TrafficSelector},
+    message::{Spi, traffic_selector::TrafficSelector},
     sa::{ChildSa, ChosenProposal, ControlMessage, Keys},
 };
 use anyhow::Result;
@@ -26,12 +26,16 @@ pub(crate) use ike_auth_request_sent::IkeAuthRequestSent;
 pub(crate) trait State: Send + Sync {
     async fn handle_message(
         self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         message: &[u8],
     ) -> Result<Box<dyn State>>;
 
     async fn handle_acquire(
         self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
@@ -39,8 +43,8 @@ pub(crate) trait State: Send + Sync {
     ) -> Result<Box<dyn State>>;
 }
 
+#[derive(Default)]
 pub(crate) struct StateData {
-    config: Config,
     initiator: Option<bool>,
     spi: Spi,
     peer_spi: Option<Spi>,
@@ -50,23 +54,13 @@ pub(crate) struct StateData {
     keys: Option<Keys>,
     nonce: Option<Vec<u8>>,
     larval_child_sa: Option<ChildSa>,
-    sender: UnboundedSender<ControlMessage>,
 }
 
 impl StateData {
-    pub fn new(config: &Config, spi: &Spi, sender: UnboundedSender<ControlMessage>) -> Self {
+    pub fn new(spi: &Spi) -> Self {
         Self {
-            config: config.to_owned(),
-            initiator: None,
             spi: spi.to_owned(),
-            peer_spi: None,
-            message_id: 0,
-            chosen_proposal: None,
-            private_key: None,
-            keys: None,
-            nonce: None,
-            larval_child_sa: None,
-            sender,
+            ..Default::default()
         }
     }
 }

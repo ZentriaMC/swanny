@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    crypto::{self, GroupPrivateKey},
+    crypto,
     message::{
         Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
@@ -14,6 +14,7 @@ use crate::{
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
+use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -72,6 +73,7 @@ impl IkeSaInitRequestSent {
     }
 
     fn generate_ike_auth_request<D>(
+        config: &Config,
         data: &D,
         chosen_proposal: &ChosenProposal,
         keys: &Keys,
@@ -89,7 +91,7 @@ impl IkeSaInitRequestSent {
         );
 
         let larval_child_sa = data.larval_child_sa.as_ref().unwrap();
-        let proposals: Vec<_> = data.config.ipsec_proposals(&larval_child_sa.spi).collect();
+        let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
@@ -104,7 +106,7 @@ impl IkeSaInitRequestSent {
             Num::Assigned(PayloadType::SK),
             payload::Content::Sk(payload::Sk::encrypt(
                 chosen_proposal.cipher(),
-                &keys.ei,
+                &keys.protecting.ei,
                 &payloads,
             )?),
             true,
@@ -117,6 +119,8 @@ impl IkeSaInitRequestSent {
 impl State for IkeSaInitRequestSent {
     async fn handle_message(
         self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
@@ -128,6 +132,7 @@ impl State for IkeSaInitRequestSent {
                 let (chosen_proposal, keys) = Self::handle_ike_sa_init_response(&inner, &message)?;
 
                 let request = Self::generate_ike_auth_request(
+                    &config,
                     &inner,
                     &chosen_proposal,
                     &keys,
@@ -145,9 +150,7 @@ impl State for IkeSaInitRequestSent {
                 let len = request.size()?;
                 let mut buf = BytesMut::with_capacity(len);
                 request.serialize(&mut buf)?;
-                inner
-                    .sender
-                    .unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
                 Ok(Box::new(state::IkeAuthRequestSent {}))
             }
@@ -159,6 +162,8 @@ impl State for IkeSaInitRequestSent {
 
     async fn handle_acquire(
         self: Box<Self>,
+        _config: &Config,
+        _sender: UnboundedSender<ControlMessage>,
         _data: Arc<RwLock<StateData>>,
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,

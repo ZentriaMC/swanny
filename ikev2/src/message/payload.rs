@@ -671,7 +671,6 @@ impl Sk {
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         serialize_payloads(payloads, &mut plaintext)?;
         let ciphertext = cipher.encrypt(&key, &plaintext)?;
-        let plaintext2 = cipher.decrypt(&key, &ciphertext)?;
         Ok(Self { ciphertext, inner })
     }
 
