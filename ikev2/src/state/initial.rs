@@ -5,6 +5,7 @@ use crate::{
         Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
+        serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, IkeSa},
@@ -12,6 +13,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use bytes::BytesMut;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -75,23 +77,17 @@ impl Initial {
         spi: &Spi,
         request: &Message,
     ) -> Result<(Message, ChosenProposal, Keys, Vec<u8>)> {
-        let sa_i = request
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
+        let sa_i: &payload::Sa = request
+            .get(PayloadType::SA)
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
-        let sa_i: &payload::Sa = sa_i.try_into()?;
 
-        let ke_i = request
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::KE))
+        let ke_i: &payload::Ke = request
+            .get(PayloadType::KE)
             .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
-        let ke_i: &payload::Ke = ke_i.try_into()?;
 
-        let nonce_i = request
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::NONCE))
+        let nonce_i: &payload::Nonce = request
+            .get(PayloadType::NONCE)
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
-        let nonce_i: &payload::Nonce = nonce_i.try_into()?;
 
         let proposals: Vec<_> = config.ike_proposals(request.spi_i()).collect();
         if proposals.is_empty() {
@@ -164,17 +160,21 @@ impl State for Initial {
     async fn handle_message(
         self: Box<Self>,
         data: Arc<RwLock<StateData>>,
-        message: &Message,
+        mut message: &[u8],
     ) -> Result<Box<dyn State>> {
+        let message = Message::deserialize(&mut message)?;
         match message.exchange() {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let (message, chosen_proposal, keys, nonce) =
-                    Self::generate_ike_sa_init_response(&inner.config, &inner.spi, message)?;
+                let (response, chosen_proposal, keys, nonce) =
+                    Self::generate_ike_sa_init_response(&inner.config, &inner.spi, &message)?;
+                let len = response.size()?;
+                let mut buf = BytesMut::with_capacity(len);
+                response.serialize(&mut buf)?;
                 inner
                     .sender
-                    .unbounded_send(ControlMessage::IkeMessage(message))?;
+                    .unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
                 drop(inner);
 
                 let mut inner = data.write().await;
@@ -201,13 +201,16 @@ impl State for Initial {
     ) -> Result<Box<dyn State>> {
         let inner = data.read().await;
 
-        let (message, chosen_proposal, private_key, nonce) =
+        let (request, chosen_proposal, private_key, nonce) =
             Self::generate_ike_sa_init_request(&inner)?;
-        let message_id = message.id();
+        let message_id = request.id();
 
+        let len = request.size()?;
+        let mut buf = BytesMut::with_capacity(len);
+        request.serialize(&mut buf)?;
         inner
             .sender
-            .unbounded_send(ControlMessage::IkeMessage(message))?;
+            .unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
         drop(inner);
 
         let mut inner = data.write().await;

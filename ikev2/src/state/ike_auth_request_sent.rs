@@ -14,7 +14,7 @@ impl State for IkeAuthRequestSent {
     async fn handle_message(
         self: Box<Self>,
         _data: Arc<RwLock<StateData>>,
-        _message: &Message,
+        _message: &[u8],
     ) -> Result<Box<dyn State>> {
         Ok(self)
     }

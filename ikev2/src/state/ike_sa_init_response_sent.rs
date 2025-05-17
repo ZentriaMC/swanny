@@ -3,6 +3,7 @@ use crate::{
         Message,
         num::{Num, PayloadType},
         payload,
+        serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     state::{State, StateData},
@@ -42,10 +43,11 @@ impl State for IkeSaInitResponseSent {
     async fn handle_message(
         self: Box<Self>,
         data: Arc<RwLock<StateData>>,
-        message: &Message,
+        mut message: &[u8],
     ) -> Result<Box<dyn State>> {
+        let message = Message::deserialize(&mut message)?;
         let inner = data.read().await;
-        Self::handle_ike_auth_request(&inner, message)?;
+        Self::handle_ike_auth_request(&inner, &message)?;
         Ok(self)
     }
 

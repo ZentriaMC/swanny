@@ -76,6 +76,21 @@ impl Message {
             self.payloads.push(p.into());
         }
     }
+
+    pub fn get<'a, C>(&'a self, ty: PayloadType) -> Option<C>
+    where
+        C: TryFrom<&'a Payload>,
+    {
+        if let Some(p) = self
+            .payloads
+            .iter()
+            .find(|payload| payload.ty() == Num::Assigned(ty))
+        {
+            TryInto::<C>::try_into(p).ok()
+        } else {
+            None
+        }
+    }
 }
 
 const HEADER_SIZE: usize = 28;

@@ -17,7 +17,7 @@ use tokio::sync::{Mutex, RwLock};
 
 #[derive(Debug)]
 pub enum ControlMessage {
-    IkeMessage(Message),
+    IkeMessage(Vec<u8>),
 }
 
 #[derive(Clone)]
@@ -52,12 +52,14 @@ impl IkeSa {
         this.find_map(|px| other.find_map(|py| px.intersection(py)))
     }
 
-    pub async fn handle_message(&self, message: Message) -> Result<()> {
+    pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {
         let mut state = self.state.lock().await;
         if let Some(s) = state.take() {
             drop(state);
 
-            let s = s.handle_message(self.data.clone(), &message).await?;
+            let s = s
+                .handle_message(self.data.clone(), message.as_ref())
+                .await?;
             let mut state = self.state.lock().await;
             *state = Some(s);
         }

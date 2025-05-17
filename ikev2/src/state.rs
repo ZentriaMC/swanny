@@ -27,7 +27,7 @@ pub(crate) trait State: Send + Sync {
     async fn handle_message(
         self: Box<Self>,
         data: Arc<RwLock<StateData>>,
-        message: &Message,
+        message: &[u8],
     ) -> Result<Box<dyn State>>;
 
     async fn handle_acquire(

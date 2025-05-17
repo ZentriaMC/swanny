@@ -5,6 +5,7 @@ use crate::{
         Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
+        serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
     sa::{ChosenProposal, ControlMessage, Keys},
@@ -12,6 +13,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use bytes::BytesMut;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -26,23 +28,17 @@ impl IkeSaInitRequestSent {
     where
         D: Deref<Target = StateData>,
     {
-        let sa = response
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
+        let sa: &payload::Sa = response
+            .get(PayloadType::SA)
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
-        let sa: &payload::Sa = sa.try_into()?;
 
-        let ke = response
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::KE))
+        let ke: &payload::Ke = response
+            .get(PayloadType::KE)
             .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
-        let ke: &payload::Ke = ke.try_into()?;
 
-        let nonce = response
-            .payloads()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::NONCE))
+        let nonce: &payload::Nonce = response
+            .get(PayloadType::NONCE)
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
-        let nonce: &payload::Nonce = nonce.try_into()?;
 
         let proposal = if let Some(proposal) = sa.proposals().next() {
             proposal
@@ -122,13 +118,14 @@ impl State for IkeSaInitRequestSent {
     async fn handle_message(
         self: Box<Self>,
         data: Arc<RwLock<StateData>>,
-        message: &Message,
+        mut message: &[u8],
     ) -> Result<Box<dyn State>> {
+        let message = Message::deserialize(&mut message)?;
         match message.exchange() {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let (chosen_proposal, keys) = Self::handle_ike_sa_init_response(&inner, message)?;
+                let (chosen_proposal, keys) = Self::handle_ike_sa_init_response(&inner, &message)?;
 
                 let request = Self::generate_ike_auth_request(
                     &inner,
@@ -145,9 +142,12 @@ impl State for IkeSaInitRequestSent {
                 inner.peer_spi = Some(request.spi_r().to_owned());
                 inner.message_id = request.id();
 
+                let len = request.size()?;
+                let mut buf = BytesMut::with_capacity(len);
+                request.serialize(&mut buf)?;
                 inner
                     .sender
-                    .unbounded_send(ControlMessage::IkeMessage(request))?;
+                    .unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
                 Ok(Box::new(state::IkeAuthRequestSent {}))
             }
