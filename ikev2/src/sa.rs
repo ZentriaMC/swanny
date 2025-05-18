@@ -317,7 +317,9 @@ mod tests {
                             _ => {},
                         }
                     },
-                    _ = pending_operations.select_next_some() => {},
+                    res = pending_operations.select_next_some() => {
+                        eprintln!("{:?}", res);
+                    },
                 };
             }
         });

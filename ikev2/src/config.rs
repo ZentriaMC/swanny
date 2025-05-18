@@ -1,6 +1,7 @@
 use crate::message::{
     EspSpi, Spi,
-    num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType},
+    num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType, IdType},
+    payload::Id,
     proposal::Proposal,
     transform::{Attribute, AttributeFormat, Transform, TransformId},
 };
@@ -154,11 +155,12 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn build(mut self) -> Config {
+    pub fn build(mut self, id: Id) -> Config {
         Config {
             ike_proposals: self.ike_proposals,
             ipsec_protocol: self.ipsec_protocol.take().unwrap_or(Protocol::ESP),
             ipsec_proposals: self.ipsec_proposals,
+            id: id,
         }
     }
 }
@@ -168,6 +170,7 @@ pub struct Config {
     ike_proposals: Vec<ProposalBuilder>,
     ipsec_protocol: Protocol,
     ipsec_proposals: Vec<ProposalBuilder>,
+    id: Id,
 }
 
 impl Config {
@@ -188,11 +191,16 @@ impl Config {
             .enumerate()
             .map(|(i, pb)| pb.build(i as u8 + 1, self.ipsec_protocol, spi.as_ref()))
     }
+
+    pub fn id(&self) -> &Id {
+        &self.id
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::message::{num::IdType, payload::Id};
 
     pub(crate) fn create_config() -> Config {
         let mut builder = ConfigBuilder::default();
@@ -221,7 +229,7 @@ pub(crate) mod tests {
                     .integrity(IntegId::AUTH_HMAC_SHA1_96)
                     .dh(DhId::MODP2048)
             })
-            .build()
+            .build(Id::new(Num::Assigned(IdType::ID_KEY_ID), b""))
     }
 
     #[test]

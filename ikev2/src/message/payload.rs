@@ -136,7 +136,7 @@ impl Payload {
                 Content::Ts(Ts::deserialize(&mut &buf.chunk()[..len])?)
             }
             Num::Assigned(PayloadType::SK) => {
-                Content::Sk(Sk::deserialize(&mut &buf.chunk()[..len])?)
+                Content::Sk(Sk::deserialize(next_payload_type, &mut &buf.chunk()[..len])?)
             }
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
         };
@@ -294,7 +294,7 @@ impl serialize::Deserialize for Ke {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Id {
     ty: Num<u8, IdType>,
     id_data: Vec<u8>,
@@ -553,7 +553,7 @@ impl serialize::Serialize for Ts {
     }
 
     fn size(&self) -> Result<usize> {
-        let mut len = 0usize;
+        let mut len = 4usize;
         for traffic_selector in &self.traffic_selectors {
             len = len
                 .checked_add(traffic_selector.size()?)
@@ -686,6 +686,16 @@ impl Sk {
         }
         Ok(payloads)
     }
+
+    pub fn deserialize(
+        payload_type: Num<u8, PayloadType>,
+        buf: &mut dyn Buf,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self::new(buf.chunk(), payload_type))
+    }
 }
 
 impl serialize::Serialize for Sk {
@@ -696,15 +706,6 @@ impl serialize::Serialize for Sk {
 
     fn size(&self) -> Result<usize> {
         Ok(self.ciphertext.len())
-    }
-}
-
-impl serialize::Deserialize for Sk {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        Ok(Self::new(buf.chunk(), Num::Unassigned(0)))
     }
 }
 

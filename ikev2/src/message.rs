@@ -15,6 +15,8 @@ pub mod transform;
 pub type Spi = [u8; 8];
 pub type EspSpi = [u8; 4];
 
+pub const KEY_PAD: &[u8] = b"Key Pad for IKEv2";
+
 #[derive(Debug)]
 pub struct Message {
     spi_i: Spi,

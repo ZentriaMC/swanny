@@ -1,17 +1,19 @@
 use crate::{
     config::Config,
     message::{
+        self,
         Message,
-        num::{Num, PayloadType},
-        payload,
-        serialize::Deserialize,
+        num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
+        payload::{self, Payload},
+        serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::ControlMessage,
-    state::{State, StateData},
+    sa::{ChildSa, ControlMessage, IkeSa},
+    state::{self, State, StateData},
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -20,7 +22,11 @@ use tokio::sync::RwLock;
 pub(crate) struct IkeSaInitResponseSent {}
 
 impl IkeSaInitResponseSent {
-    fn handle_ike_auth_request<D>(data: &D, request: &Message) -> Result<()>
+    fn handle_ike_auth_request<D>(
+        config: &Config,
+        data: &D,
+        request: &Message,
+    ) -> Result<Message>
     where
         D: Deref<Target = StateData>,
     {
@@ -32,12 +38,103 @@ impl IkeSaInitResponseSent {
             return Err(anyhow::anyhow!("no SK payload"));
         }
         let sk: &payload::Sk = last.try_into()?;
+
         let payloads = sk.decrypt(
             data.chosen_proposal.as_ref().unwrap().cipher(),
             &data.keys.as_ref().unwrap().protecting.ei,
         )?;
-        eprintln!("{:?}", &payloads);
-        Ok(())
+
+        let auth = payloads
+            .iter()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::AUTH))
+            .ok_or_else(|| anyhow::anyhow!("no AUTH payload"))?;
+        let auth: &payload::Auth = auth.try_into()?;
+
+        let id_i = payloads
+            .iter()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::IDi))
+            .ok_or_else(|| anyhow::anyhow!("no ID payload"))?;
+        let id_i: &payload::Id = id_i.try_into()?;
+
+        let sa_i = payloads
+            .iter()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
+            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
+        let sa_i: &payload::Sa = sa_i.try_into()?;
+
+        let ts_i = payloads
+            .iter()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::TSi))
+            .ok_or_else(|| anyhow::anyhow!("no TSi payload"))?;
+        let ts_i: &payload::Ts = ts_i.try_into()?;
+
+        let ts_r = payloads
+            .iter()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::TSr))
+            .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
+        let ts_r: &payload::Ts = ts_r.try_into()?;
+
+        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
+        let prf = chosen_proposal.prf();
+        let keys = data.keys.as_ref().unwrap();
+
+        let signed_data = data.initiator_signed_data(&id_i)?;
+        match prf.verify(prf.prf(b"foo", message::KEY_PAD)?, &signed_data, auth.auth_data()) {
+            Ok(true) => eprintln!("authenticated"),
+            _ => eprintln!("authentication failed"),
+        }
+
+        let signed_data = data.responder_signed_data(config.id())?;
+        let auth_data = prf.prf(prf.prf(b"foo", message::KEY_PAD)?, &signed_data)?;
+
+        let mut message = Message::new(
+            request.spi_i(),
+            &data.spi,
+            Num::Assigned(ExchangeType::IKE_AUTH),
+            MessageFlags::R,
+            request.id(),
+        );
+
+        let child_sa = ChildSa::new(
+            ts_i.traffic_selectors().next().unwrap(),
+            ts_r.traffic_selectors().next().unwrap(),
+        )?;
+        let proposals: Vec<_> = config.ipsec_proposals(&child_sa.spi).collect();
+        if proposals.is_empty() {
+            return Err(anyhow::anyhow!("no proposal to send"));
+        }
+
+        let proposal = IkeSa::choose_proposal(&proposals, sa_i.proposals())
+            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
+
+        let payloads = [
+            Payload::new(
+                Num::Assigned(PayloadType::SA),
+                payload::Content::Sa(payload::Sa::new(proposals)),
+                true,
+            ),
+            Payload::new(
+                Num::Assigned(PayloadType::AUTH),
+                payload::Content::Auth(payload::Auth::new(Num::Assigned(AuthType::PSK), &auth_data)),
+                true,
+            ),
+            Payload::new(
+                Num::Assigned(PayloadType::IDr),
+                payload::Content::Id(config.id().clone()),
+                true,
+            ),
+        ];
+
+        message.add_payloads([Payload::new(
+            Num::Assigned(PayloadType::SK),
+            payload::Content::Sk(payload::Sk::encrypt(
+                chosen_proposal.cipher(),
+                &keys.protecting.er,
+                &payloads,
+            )?),
+            true,
+        )]);
+        Ok(message)
     }
 }
 
@@ -45,15 +142,31 @@ impl IkeSaInitResponseSent {
 impl State for IkeSaInitResponseSent {
     async fn handle_message(
         self: Box<Self>,
-        _config: &Config,
-        _sender: UnboundedSender<ControlMessage>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
-        let message = Message::deserialize(&mut message)?;
-        let inner = data.read().await;
-        Self::handle_ike_auth_request(&inner, &message)?;
-        Ok(self)
+        let request = Message::deserialize(&mut message)?;
+        match request.exchange() {
+            Num::Assigned(ExchangeType::IKE_AUTH) => {
+                let inner = data.read().await;
+
+                let response =
+                    Self::handle_ike_auth_request(config, &inner, &request)?;
+                drop(inner);
+
+                let len = response.size()?;
+                let mut buf = BytesMut::with_capacity(len);
+                response.serialize(&mut buf)?;
+
+                sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                Ok(Box::new(state::Established {}))
+            }
+            exchange => {
+                return Err(anyhow::anyhow!("unknown exchange {:?}", exchange));
+            }
+        }
     }
 
     async fn handle_acquire(

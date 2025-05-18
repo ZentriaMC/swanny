@@ -78,7 +78,7 @@ impl Initial {
         config: &Config,
         spi: &Spi,
         request: &Message,
-    ) -> Result<(Message, ChosenProposal, Keys, Vec<u8>)> {
+    ) -> Result<(Message, ChosenProposal, Keys, Vec<u8>, Vec<u8>)> {
         let sa_i: &payload::Sa = request
             .get(PayloadType::SA)
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
@@ -153,7 +153,7 @@ impl Initial {
             ),
         ]);
 
-        Ok((message, chosen_proposal, keys, nonce_r.to_vec()))
+        Ok((message, chosen_proposal, keys, nonce_i.nonce().to_vec(), nonce_r.to_vec()))
     }
 }
 
@@ -166,25 +166,30 @@ impl State for Initial {
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
-        let message = Message::deserialize(&mut message)?;
-        match message.exchange() {
+        let serialized_request = message;
+        let request = Message::deserialize(&mut message)?;
+        match request.exchange() {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
                 let inner = data.read().await;
 
-                let (response, chosen_proposal, keys, nonce) =
-                    Self::generate_ike_sa_init_response(config, &inner.spi, &message)?;
+                let (response, chosen_proposal, keys, nonce_i, nonce_r) =
+                    Self::generate_ike_sa_init_response(config, &inner.spi, &request)?;
+                drop(inner);
+
                 let len = response.size()?;
                 let mut buf = BytesMut::with_capacity(len);
                 response.serialize(&mut buf)?;
-                sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
-                drop(inner);
 
                 let mut inner = data.write().await;
                 inner.initiator = Some(false);
                 inner.chosen_proposal = Some(chosen_proposal);
                 inner.keys = Some(keys);
-                inner.nonce = Some(nonce);
-                drop(inner);
+                inner.nonce_i = Some(nonce_i);
+                inner.nonce_r = Some(nonce_r);
+                inner.ike_sa_init_request = Some(serialized_request.to_vec());
+                inner.ike_sa_init_response = Some(buf.to_vec());
+
+                sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
                 Ok(Box::new(state::IkeSaInitResponseSent {}))
             }
@@ -209,19 +214,22 @@ impl State for Initial {
             Self::generate_ike_sa_init_request(config, &inner)?;
         let message_id = request.id();
 
+        drop(inner);
+
         let len = request.size()?;
         let mut buf = BytesMut::with_capacity(len);
         request.serialize(&mut buf)?;
-        sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
-        drop(inner);
 
         let mut inner = data.write().await;
         inner.initiator = Some(true);
         inner.chosen_proposal = Some(chosen_proposal);
         inner.private_key = Some(private_key);
-        inner.nonce = Some(nonce);
+        inner.nonce_i = Some(nonce);
         inner.message_id = message_id;
         inner.larval_child_sa = Some(ChildSa::new(ts_i, ts_r)?);
+        inner.ike_sa_init_request = Some(buf.to_vec());
+
+        sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
         Ok(Box::new(state::IkeSaInitRequestSent {}))
     }

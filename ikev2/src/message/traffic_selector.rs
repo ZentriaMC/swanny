@@ -104,7 +104,7 @@ impl serialize::Deserialize for TrafficSelector {
         let ip_proto = buf.try_get_u8()?;
         let size: usize = buf.try_get_u16()?.into();
         if size != buf.remaining() + 4usize {
-            return Err(anyhow::anyhow!("invalid TS length"));
+            return Err(anyhow::anyhow!("invalid TS length: {}, {}", size, buf.remaining()));
         }
 
         let start_port = buf.try_get_u16()?;

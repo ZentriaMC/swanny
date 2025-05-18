@@ -7,6 +7,7 @@ use openssl::{
     derive::Deriver,
     dh, ec,
     hash::MessageDigest,
+    memcmp,
     nid::Nid,
     pkey::{self, PKey},
     rand,
@@ -42,6 +43,10 @@ impl Prf {
 
     pub fn size(&self) -> usize {
         self.md.size()
+    }
+
+    pub fn verify(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>, mac: impl AsRef<[u8]>) -> Result<bool> {
+        Ok(memcmp::eq(&self.prf(key, data)?, mac.as_ref()))
     }
 
     pub fn prf(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Vec<u8>> {
@@ -281,6 +286,14 @@ impl Cipher {
         self.cipher.key_len()
     }
 
+    pub fn block_size(&self) -> usize {
+        self.cipher.block_size()
+    }
+
+    pub fn iv_size(&self) -> Option<usize> {
+        self.cipher.iv_len()
+    }
+
     pub fn is_aead(&self) -> bool {
         self.is_aead
     }
@@ -393,7 +406,7 @@ mod tests {
         let key = vec![1; 16];
         let plaintext = b"hello world";
         let ciphertext = cipher.encrypt(&key, &plaintext).expect("");
-        assert_eq!(ciphertext.len(), ((plaintext.len() + 15) / 16) * 16);
+        assert_eq!(ciphertext.len(), cipher.iv_size().unwrap() + (plaintext.len() + 1).div_ceil(cipher.block_size()) * cipher.block_size());
 
         let plaintext2 = cipher.decrypt(&key, &ciphertext).expect("");
         assert_eq!(plaintext2, plaintext);
