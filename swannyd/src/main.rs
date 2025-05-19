@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use futures::{
     future::Either,
     stream::{FuturesUnordered, StreamExt},
@@ -15,9 +15,7 @@ use swanny_ikev2::{
     message::{
         num::{IdType, Num, TrafficSelectorType},
         payload::Id,
-        serialize::Deserialize,
         traffic_selector::TrafficSelector,
-        Message,
     },
     sa::{ControlMessage, IkeSa},
 };
@@ -159,7 +157,7 @@ async fn main() -> Result<()> {
             },
             result = incoming_framed.select_next_some() => {
                 match result {
-                    Ok((message, peer_address)) => {
+                    Ok((message, _peer_address)) => {
                         pending_operations.push(Either::Right(ike_sa.handle_message(message.to_vec())));
                     },
                     _ => {},
