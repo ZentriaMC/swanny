@@ -1,4 +1,7 @@
-use crate::message::num::{DhId, EncrId, IntegId, PrfId};
+use crate::message::{
+    num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, Protocol, TransformType},
+    transform::{Attribute, AttributeFormat, Transform, TransformId},
+};
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 
@@ -51,11 +54,6 @@ impl Prf {
         data: impl AsRef<[u8]>,
         mac: impl AsRef<[u8]>,
     ) -> Result<bool> {
-        eprintln!(
-            "{:?} {:?}",
-            mac.as_ref(),
-            &self.prf(key.as_ref(), data.as_ref())
-        );
         Ok(memcmp::eq(&self.prf(key, data)?, mac.as_ref()))
     }
 
@@ -89,7 +87,18 @@ impl Prf {
     }
 }
 
+impl From<&Prf> for Transform {
+    fn from(other: &Prf) -> Self {
+        Transform::new(
+            Num::Assigned(TransformType::PRF),
+            Num::Assigned(TransformId::Prf(Num::Assigned(other.id))),
+            None::<Attribute>,
+        )
+    }
+}
+
 pub struct Integ {
+    id: IntegId,
     md: MessageDigest,
     output_size: usize,
 }
@@ -102,7 +111,11 @@ impl Integ {
             _ => return Err(anyhow::anyhow!("unsupported integrity checking")),
         };
 
-        Ok(Self { md, output_size })
+        Ok(Self {
+            id,
+            md,
+            output_size,
+        })
     }
 
     pub fn key_size(&self) -> usize {
@@ -111,6 +124,16 @@ impl Integ {
 
     pub fn output_size(&self) -> usize {
         self.output_size
+    }
+}
+
+impl From<&Integ> for Transform {
+    fn from(other: &Integ) -> Self {
+        Transform::new(
+            Num::Assigned(TransformType::INTEG),
+            Num::Assigned(TransformId::Integ(Num::Assigned(other.id))),
+            None::<Attribute>,
+        )
     }
 }
 
@@ -277,7 +300,18 @@ impl Group {
     }
 }
 
+impl From<&Group> for Transform {
+    fn from(other: &Group) -> Self {
+        Transform::new(
+            Num::Assigned(TransformType::DH),
+            Num::Assigned(TransformId::Dh(Num::Assigned(other.id))),
+            None::<Attribute>,
+        )
+    }
+}
+
 pub struct Cipher {
+    id: EncrId,
     cipher: symm::Cipher,
     is_aead: bool,
 }
@@ -289,7 +323,11 @@ impl Cipher {
             (EncrId::ENCR_AES_CBC, Some(256)) => (symm::Cipher::aes_256_cbc(), false),
             _ => return Err(anyhow::anyhow!("unsupported cipher")),
         };
-        Ok(Self { cipher, is_aead })
+        Ok(Self {
+            id,
+            cipher,
+            is_aead,
+        })
     }
 
     pub fn key_size(&self) -> usize {
@@ -351,6 +389,20 @@ impl Cipher {
         plaintext.truncate(plaintext.len() - pad_len - 1);
 
         Ok(plaintext)
+    }
+}
+
+impl From<&Cipher> for Transform {
+    fn from(other: &Cipher) -> Self {
+        Transform::new(
+            Num::Assigned(TransformType::ENCR),
+            Num::Assigned(TransformId::Encr(Num::Assigned(other.id))),
+            [Attribute::new(
+                Num::Assigned(AttributeType::KeyLength),
+                &other.key_size().to_be_bytes()[..],
+                AttributeFormat::TV,
+            )],
+        )
     }
 }
 

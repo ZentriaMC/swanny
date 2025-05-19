@@ -3,9 +3,10 @@ use crate::{
     crypto::{self, Cipher, Group, Integ, Prf},
     message::{
         EspSpi, Spi,
-        num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
+        num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, Protocol, TransformType},
         proposal::Proposal,
         traffic_selector::TrafficSelector,
+        transform::Transform,
     },
     state::{self, State, StateData},
 };
@@ -222,6 +223,24 @@ impl ChosenProposal {
             deriving: DerivingKeys { d, pi, pr },
             protecting: ProtectingKeys { ei, er, ai, ar },
         })
+    }
+
+    pub fn proposal(
+        &self,
+        number: u8,
+        protocol: Num<u8, Protocol>,
+        spi: impl AsRef<[u8]>,
+    ) -> Proposal {
+        let mut transforms: Vec<Transform> = Vec::new();
+
+        transforms.push(self.cipher().into());
+        transforms.push(self.prf().into());
+        if let Some(integ) = self.integ() {
+            transforms.push(integ.into());
+        }
+        transforms.push(self.group().into());
+
+        Proposal::new(number, protocol, spi.as_ref(), transforms)
     }
 }
 

@@ -566,6 +566,8 @@ dependencies = [
  "num-traits",
  "openssl",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

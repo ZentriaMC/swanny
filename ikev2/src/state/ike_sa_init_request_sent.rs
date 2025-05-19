@@ -18,6 +18,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 pub(crate) struct IkeSaInitRequestSent {}
 
@@ -62,7 +63,7 @@ impl IkeSaInitRequestSent {
             private_key,
             ke_r.ke_data(),
         )?;
-        eprintln!("SKEYSEED generated: {:?}", &skeyseed);
+        debug!("SKEYSEED generated: {:?}", &skeyseed);
 
         let keys = chosen_proposal.generate_keys(
             &skeyseed,
@@ -71,7 +72,7 @@ impl IkeSaInitRequestSent {
             response.spi_i(),
             response.spi_r(),
         )?;
-        eprintln!("Keys generated: {:?}", &keys);
+        debug!("Keys generated: {:?}", &keys);
 
         Ok((chosen_proposal, keys, nonce_r.nonce().to_vec()))
     }

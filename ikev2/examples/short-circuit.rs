@@ -17,6 +17,7 @@ use swanny_ikev2::{
     },
     sa::{ControlMessage, IkeSa},
 };
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 fn create_config(id: impl AsRef<[u8]>) -> Config {
     let mut builder = ConfigBuilder::default();
@@ -51,7 +52,12 @@ fn create_traffic_selector(address: &IpAddr) -> TrafficSelector {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init()?;
+
     let config = create_config(b"initiator");
     let (mut initiator, mut messages_i) = IkeSa::new(&config).expect("unable to create IKE SA");
 
@@ -73,7 +79,6 @@ async fn main() {
                             let mut buf = serialized_message;
                             let message = Message::deserialize(&mut buf)
                                 .expect("unable to deserialize message");
-                            eprintln!("INITIATOR: {:?}", message);
                             pending_operations.push(responder2.handle_message(serialized_message.to_vec()));
                         },
                         _ => {},
@@ -86,7 +91,6 @@ async fn main() {
                             let mut buf = serialized_message;
                             let message = Message::deserialize(&mut buf)
                                 .expect("unable to deserialize message");
-                            eprintln!("RESPONDER: {:?}", message);
                             pending_operations.push(initiator2.handle_message(serialized_message.to_vec()));
                         },
                         _ => {},
@@ -109,4 +113,5 @@ async fn main() {
         .expect("unable to handle acquire");
 
     handle.await.unwrap();
+    Ok(())
 }

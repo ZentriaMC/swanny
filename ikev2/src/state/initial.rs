@@ -3,7 +3,7 @@ use crate::{
     crypto::{self, GroupPrivateKey},
     message::{
         Message, Spi,
-        num::{ExchangeType, MessageFlags, Num, PayloadType},
+        num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
@@ -18,6 +18,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 pub(crate) struct Initial {}
 
@@ -74,16 +75,19 @@ impl Initial {
         Ok((message, chosen_proposal, private_key, nonce))
     }
 
-    fn generate_ike_sa_init_response(
+    fn handle_ike_sa_init_request<D>(
         config: &Config,
-        spi: &Spi,
+        data: &D,
         request: &Message,
-    ) -> Result<(Message, ChosenProposal, Keys, Vec<u8>, Vec<u8>)> {
-        let sa_i: &payload::Sa = request
+    ) -> Result<(ChosenProposal, Vec<u8>, Keys, Vec<u8>, Vec<u8>)>
+    where
+        D: Deref<Target = StateData>,
+    {
+        let sa: &payload::Sa = request
             .get(PayloadType::SA)
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
 
-        let ke_i: &payload::Ke = request
+        let ke: &payload::Ke = request
             .get(PayloadType::KE)
             .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
 
@@ -96,37 +100,58 @@ impl Initial {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let proposal = IkeSa::choose_proposal(&proposals, sa_i.proposals())
+        let proposal = IkeSa::choose_proposal(&proposals, sa.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
 
         let chosen_proposal = ChosenProposal::new(&proposal)?;
         let private_key = chosen_proposal.group().generate_key()?;
         let public_key = private_key.public_key()?;
 
-        let mut nonce_r = [0u8; 32];
-        crypto::rand_bytes(&mut nonce_r[..])?;
+        let mut nonce_r = vec![0u8; 32];
+        crypto::rand_bytes(&mut nonce_r)?;
 
         let skeyseed = crypto::generate_skeyseed(
             chosen_proposal.prf(),
             nonce_i.nonce(),
             &nonce_r[..],
             &private_key,
-            ke_i.ke_data(),
+            ke.ke_data(),
         )?;
-        eprintln!("SKEYSEED generated: {:?}", &skeyseed);
+        debug!("SKEYSEED generated: {:?}", &skeyseed);
 
         let keys = chosen_proposal.generate_keys(
             &skeyseed,
             nonce_i.nonce(),
-            &nonce_r[..],
+            &nonce_r,
             request.spi_i(),
-            spi,
+            &data.spi,
         )?;
-        eprintln!("Keys generated: {:?}", &keys);
+        debug!("Keys generated: {:?}", &keys);
+
+        Ok((
+            chosen_proposal,
+            public_key,
+            keys,
+            nonce_i.nonce().to_vec(),
+            nonce_r,
+        ))
+    }
+
+    fn generate_ike_sa_init_response<D>(
+        config: &Config,
+        data: &D,
+        request: &Message,
+        public_key: impl AsRef<[u8]>,
+    ) -> Result<Message>
+    where
+        D: Deref<Target = StateData>,
+    {
+        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
+        let nonce_r = data.nonce_r.as_ref().unwrap();
 
         let mut message = Message::new(
-            request.spi_i(),
-            spi,
+            data.peer_spi.as_ref().unwrap(),
+            &data.spi,
             Num::Assigned(ExchangeType::IKE_SA_INIT),
             MessageFlags::R,
             request.id(),
@@ -143,7 +168,11 @@ impl Initial {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::Sa(payload::Sa::new([proposal])),
+                payload::Content::Sa(payload::Sa::new([chosen_proposal.proposal(
+                    1,
+                    Num::Assigned(Protocol::IKE),
+                    b"",
+                )])),
                 true,
             ),
             Payload::new(
@@ -153,13 +182,7 @@ impl Initial {
             ),
         ]);
 
-        Ok((
-            message,
-            chosen_proposal,
-            keys,
-            nonce_i.nonce().to_vec(),
-            nonce_r.to_vec(),
-        ))
+        Ok(message)
     }
 }
 
@@ -176,24 +199,37 @@ impl State for Initial {
         let request = Message::deserialize(&mut message)?;
         match request.exchange() {
             Num::Assigned(ExchangeType::IKE_SA_INIT) => {
-                let inner = data.read().await;
+                let (chosen_proposal, public_key, keys, nonce_i, nonce_r) = {
+                    let data = data.read().await;
 
-                let (response, chosen_proposal, keys, nonce_i, nonce_r) =
-                    Self::generate_ike_sa_init_response(config, &inner.spi, &request)?;
-                drop(inner);
+                    Self::handle_ike_sa_init_request(config, &data, &request)?
+                };
+
+                {
+                    let mut data = data.write().await;
+                    data.initiator = Some(false);
+                    data.chosen_proposal = Some(chosen_proposal);
+                    data.keys = Some(keys);
+                    data.nonce_i = Some(nonce_i);
+                    data.nonce_r = Some(nonce_r);
+                    data.peer_spi = Some(request.spi_i().to_owned());
+                }
+
+                let response = {
+                    let data = data.read().await;
+
+                    Self::generate_ike_sa_init_response(config, &data, &request, &public_key)?
+                };
 
                 let len = response.size()?;
                 let mut buf = BytesMut::with_capacity(len);
                 response.serialize(&mut buf)?;
 
-                let mut inner = data.write().await;
-                inner.initiator = Some(false);
-                inner.chosen_proposal = Some(chosen_proposal);
-                inner.keys = Some(keys);
-                inner.nonce_i = Some(nonce_i);
-                inner.nonce_r = Some(nonce_r);
-                inner.ike_sa_init_request = Some(serialized_request.to_vec());
-                inner.ike_sa_init_response = Some(buf.to_vec());
+                {
+                    let mut data = data.write().await;
+                    data.ike_sa_init_request = Some(serialized_request.to_vec());
+                    data.ike_sa_init_response = Some(buf.to_vec());
+                }
 
                 sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
