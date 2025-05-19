@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     message::{
-        self, Message,
+        Message,
         num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
@@ -95,7 +95,7 @@ impl IkeSaInitResponseSent {
         let payloads = [
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::Sa(payload::Sa::new(proposals)),
+                payload::Content::Sa(payload::Sa::new(Some(proposal))),
                 true,
             ),
             Payload::new(

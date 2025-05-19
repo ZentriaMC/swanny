@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto,
     message::{
-        self, Message, Spi,
+        Message, Spi,
         num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
@@ -18,7 +18,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::debug;
 
 pub(crate) struct IkeSaInitRequestSent {}
 

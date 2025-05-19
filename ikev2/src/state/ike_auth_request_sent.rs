@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     message::{
-        self, Message,
+        Message,
         num::{ExchangeType, Num, PayloadType},
         payload,
         serialize::Deserialize,

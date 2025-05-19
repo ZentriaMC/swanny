@@ -18,7 +18,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::debug;
 
 pub(crate) struct Initial {}
 
@@ -138,10 +138,9 @@ impl Initial {
     }
 
     fn generate_ike_sa_init_response<D>(
-        config: &Config,
         data: &D,
-        request: &Message,
         public_key: impl AsRef<[u8]>,
+        message_id: u32,
     ) -> Result<Message>
     where
         D: Deref<Target = StateData>,
@@ -154,7 +153,7 @@ impl Initial {
             &data.spi,
             Num::Assigned(ExchangeType::IKE_SA_INIT),
             MessageFlags::R,
-            request.id(),
+            message_id,
         );
 
         message.add_payloads([
@@ -218,7 +217,7 @@ impl State for Initial {
                 let response = {
                     let data = data.read().await;
 
-                    Self::generate_ike_sa_init_response(config, &data, &request, &public_key)?
+                    Self::generate_ike_sa_init_response(&data, &public_key, request.id())?
                 };
 
                 let len = response.size()?;
@@ -250,26 +249,26 @@ impl State for Initial {
         ts_r: &TrafficSelector,
         _index: u32,
     ) -> Result<Box<dyn State>> {
-        let inner = data.read().await;
+        let (request, chosen_proposal, private_key, nonce) = {
+            let data = data.read().await;
 
-        let (request, chosen_proposal, private_key, nonce) =
-            Self::generate_ike_sa_init_request(config, &inner)?;
-        let message_id = request.id();
-
-        drop(inner);
+            Self::generate_ike_sa_init_request(config, &data)?
+        };
 
         let len = request.size()?;
         let mut buf = BytesMut::with_capacity(len);
         request.serialize(&mut buf)?;
 
-        let mut inner = data.write().await;
-        inner.initiator = Some(true);
-        inner.chosen_proposal = Some(chosen_proposal);
-        inner.private_key = Some(private_key);
-        inner.nonce_i = Some(nonce);
-        inner.message_id = message_id;
-        inner.larval_child_sa = Some(ChildSa::new(ts_i, ts_r)?);
-        inner.ike_sa_init_request = Some(buf.to_vec());
+        {
+            let mut data = data.write().await;
+            data.initiator = Some(true);
+            data.chosen_proposal = Some(chosen_proposal);
+            data.private_key = Some(private_key);
+            data.nonce_i = Some(nonce);
+            data.message_id = request.id();
+            data.larval_child_sa = Some(ChildSa::new(ts_i, ts_r)?);
+            data.ike_sa_init_request = Some(buf.to_vec());
+        }
 
         sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 

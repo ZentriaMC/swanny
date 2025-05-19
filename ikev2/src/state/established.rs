@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    message::{Message, traffic_selector::TrafficSelector},
+    message::traffic_selector::TrafficSelector,
     sa::ControlMessage,
     state::{State, StateData},
 };

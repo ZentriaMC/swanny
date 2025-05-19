@@ -1,7 +1,7 @@
 use crate::message::{
     EspSpi, Spi,
     num::{
-        AttributeType, DhId, EncrId, EsnId, IdType, IntegId, Num, PrfId, Protocol, TransformType,
+        AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType,
     },
     payload::Id,
     proposal::Proposal,
