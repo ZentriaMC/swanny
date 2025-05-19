@@ -7,7 +7,7 @@ use crate::{
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ControlMessage, IkeSa},
+    sa::{ChildSa, ChosenProposal, ControlMessage, IkeSa},
     state::{self, State, StateData},
 };
 use anyhow::Result;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-pub(crate) struct IkeSaInitResponseSent {}
+pub struct IkeSaInitResponseSent;
 
 impl std::fmt::Display for IkeSaInitResponseSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -99,19 +99,19 @@ impl IkeSaInitResponseSent {
             ts_i.traffic_selectors().next().unwrap(),
             ts_r.traffic_selectors().next().unwrap(),
         )?;
-        let proposals: Vec<_> = config.ipsec_proposals(&child_sa.spi).collect();
+        let proposals: Vec<_> = config.ipsec_proposals(&child_sa.spi()).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let chosen_proposal = IkeSa::choose_proposal(&proposals, sa_i.proposals())
+        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa_i.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
         let proposal = chosen_proposal.proposal(
             1,
             Num::Assigned(chosen_proposal.protocol()),
             chosen_proposal.spi(),
         );
-        child_sa.chosen_proposal = Some(chosen_proposal);
+        child_sa.set_chosen_proposal(&chosen_proposal);
 
         let payloads = [
             Payload::new(

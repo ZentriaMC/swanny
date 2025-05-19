@@ -20,7 +20,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-pub(crate) struct Initial {}
+pub struct Initial;
 
 impl std::fmt::Display for Initial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -106,7 +106,7 @@ impl Initial {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let chosen_proposal = IkeSa::choose_proposal(&proposals, sa.proposals())
+        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
 
         let group = chosen_proposal

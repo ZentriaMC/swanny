@@ -10,8 +10,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug)]
-pub(crate) struct Established {}
+pub struct Established;
 
 impl std::fmt::Display for Established {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {

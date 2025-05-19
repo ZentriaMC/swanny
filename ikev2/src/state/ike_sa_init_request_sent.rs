@@ -20,7 +20,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-pub(crate) struct IkeSaInitRequestSent {}
+pub struct IkeSaInitRequestSent;
 
 impl std::fmt::Display for IkeSaInitRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -96,7 +96,7 @@ impl IkeSaInitRequestSent {
         );
 
         let larval_child_sa = data.larval_child_sa.as_ref().unwrap();
-        let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
+        let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi()).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
@@ -124,12 +124,12 @@ impl IkeSaInitRequestSent {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::TSi),
-                payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_i.clone()))),
+                payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_i().clone()))),
                 true,
             ),
             Payload::new(
                 Num::Assigned(PayloadType::TSr),
-                payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r.clone()))),
+                payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r().clone()))),
                 true,
             ),
         ];

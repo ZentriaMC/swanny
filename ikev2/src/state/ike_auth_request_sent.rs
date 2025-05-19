@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 
-pub(crate) struct IkeAuthRequestSent {}
+pub struct IkeAuthRequestSent;
 
 impl std::fmt::Display for IkeAuthRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {

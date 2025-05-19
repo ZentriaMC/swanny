@@ -24,9 +24,18 @@ pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<()> {
     Ok(rand::rand_bytes(buf)?)
 }
 
+#[derive(Clone)]
 pub struct Prf {
     id: PrfId,
     md: MessageDigest,
+}
+
+impl std::fmt::Debug for Prf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Prf")
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 impl Prf {
@@ -97,10 +106,20 @@ impl From<&Prf> for Transform {
     }
 }
 
+#[derive(Clone)]
 pub struct Integ {
     id: IntegId,
     md: MessageDigest,
     output_size: usize,
+}
+
+impl std::fmt::Debug for Integ {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Integ")
+            .field("id", &self.id)
+            .field("output_size", &self.output_size)
+            .finish()
+    }
 }
 
 impl Integ {
@@ -205,7 +224,7 @@ impl GroupVariant {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GroupPrivateKey {
     group: Group,
     pkey: PKey<pkey::Private>,
@@ -261,6 +280,14 @@ pub struct Group {
     variant: Arc<GroupVariant>,
 }
 
+impl std::fmt::Debug for Group {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Group")
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 impl Group {
     pub fn new(id: DhId) -> Result<Self> {
         let variant = GroupVariant::new(id)?;
@@ -310,10 +337,19 @@ impl From<&Group> for Transform {
     }
 }
 
+#[derive(Clone)]
 pub struct Cipher {
     id: EncrId,
     cipher: symm::Cipher,
     is_aead: bool,
+}
+
+impl std::fmt::Debug for Cipher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cipher")
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 impl Cipher {

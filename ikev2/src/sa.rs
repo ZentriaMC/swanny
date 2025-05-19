@@ -20,6 +20,7 @@ use tracing::{debug, info};
 #[derive(Debug)]
 pub enum ControlMessage {
     IkeMessage(Vec<u8>),
+    CreateChildSa(ChildSa),
 }
 
 #[derive(Clone)]
@@ -47,25 +48,6 @@ impl IkeSa {
             },
             receiver,
         ))
-    }
-
-    pub(crate) fn choose_proposal<'a, 'b>(
-        this: impl IntoIterator<Item = &'a Proposal>,
-        other: impl IntoIterator<Item = &'b Proposal>,
-    ) -> Option<ChosenProposal> {
-        let mut this = this.into_iter();
-        let mut other = other.into_iter();
-        if let Some(proposal) = this.find_map(|px| other.find_map(|py| px.intersection(py))) {
-            match ChosenProposal::new(&proposal) {
-                Ok(proposal) => Some(proposal),
-                Err(e) => {
-                    debug!(error = %e, "error");
-                    None
-                }
-            }
-        } else {
-            None
-        }
     }
 
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {
@@ -130,6 +112,7 @@ impl IkeSa {
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct ChosenProposal {
     protocol: Protocol,
     spi: Vec<u8>,
@@ -194,6 +177,25 @@ impl ChosenProposal {
             integ,
             group,
         })
+    }
+
+    pub(crate) fn negotiate<'a, 'b>(
+        this: impl IntoIterator<Item = &'a Proposal>,
+        other: impl IntoIterator<Item = &'b Proposal>,
+    ) -> Option<Self> {
+        let mut this = this.into_iter();
+        let mut other = other.into_iter();
+        if let Some(proposal) = this.find_map(|px| other.find_map(|py| px.intersection(py))) {
+            match Self::new(&proposal) {
+                Ok(proposal) => Some(proposal),
+                Err(e) => {
+                    debug!(error = %e, "error");
+                    None
+                }
+            }
+        } else {
+            None
+        }
     }
 
     pub fn protocol(&self) -> Protocol {
@@ -292,20 +294,20 @@ impl ChosenProposal {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Keys {
     pub deriving: DerivingKeys,
     pub protecting: ProtectingKeys,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct DerivingKeys {
     pub d: Vec<u8>,
     pub pi: Vec<u8>,
     pub pr: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ProtectingKeys {
     pub ei: Vec<u8>,
     pub er: Vec<u8>,
@@ -313,12 +315,13 @@ pub(crate) struct ProtectingKeys {
     pub ar: Vec<u8>,
 }
 
-pub(crate) struct ChildSa {
-    pub ts_i: TrafficSelector,
-    pub ts_r: TrafficSelector,
-    pub spi: EspSpi,
-    pub peer_spi: Option<EspSpi>,
-    pub chosen_proposal: Option<ChosenProposal>,
+#[derive(Clone, Debug)]
+pub struct ChildSa {
+    ts_i: TrafficSelector,
+    ts_r: TrafficSelector,
+    spi: EspSpi,
+    chosen_proposal: Option<ChosenProposal>,
+    keys: Option<ProtectingKeys>,
 }
 
 impl ChildSa {
@@ -330,9 +333,29 @@ impl ChildSa {
             ts_i: ts_i.to_owned(),
             ts_r: ts_r.to_owned(),
             spi,
-            peer_spi: None,
             chosen_proposal: None,
+            keys: None,
         })
+    }
+
+    pub fn ts_i(&self) -> &TrafficSelector {
+        &self.ts_i
+    }
+
+    pub fn ts_r(&self) -> &TrafficSelector {
+        &self.ts_r
+    }
+
+    pub fn spi(&self) -> &EspSpi {
+        &self.spi
+    }
+
+    pub fn chosen_proposal(&self) -> Option<&ChosenProposal> {
+        self.chosen_proposal.as_ref()
+    }
+
+    pub fn set_chosen_proposal(&mut self, chosen_proposal: &ChosenProposal) {
+        self.chosen_proposal = Some(chosen_proposal.to_owned())
     }
 }
 
