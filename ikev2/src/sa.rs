@@ -132,6 +132,7 @@ impl IkeSa {
 
 pub(crate) struct ChosenProposal {
     protocol: Protocol,
+    spi: Vec<u8>,
     cipher: Cipher,
     prf: Prf,
     integ: Option<Integ>,
@@ -187,11 +188,20 @@ impl ChosenProposal {
 
         Ok(Self {
             protocol: proposal.protocol().try_into()?,
+            spi: proposal.spi().to_vec(),
             cipher,
             prf,
             integ,
             group,
         })
+    }
+
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    pub fn spi(&self) -> &[u8] {
+        &self.spi
     }
 
     pub fn cipher(&self) -> &Cipher {

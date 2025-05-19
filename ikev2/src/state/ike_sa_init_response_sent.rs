@@ -95,7 +95,7 @@ impl IkeSaInitResponseSent {
             request.id(),
         );
 
-        let child_sa = ChildSa::new(
+        let mut child_sa = ChildSa::new(
             ts_i.traffic_selectors().next().unwrap(),
             ts_r.traffic_selectors().next().unwrap(),
         )?;
@@ -104,19 +104,19 @@ impl IkeSaInitResponseSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        debug!("proposals: {:?}", &proposals);
-        debug!("proposals: {:?}", sa_i.proposals().collect::<Vec<_>>());
         let chosen_proposal = IkeSa::choose_proposal(&proposals, sa_i.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
+        let proposal = chosen_proposal.proposal(
+            1,
+            Num::Assigned(chosen_proposal.protocol()),
+            chosen_proposal.spi(),
+        );
+        child_sa.chosen_proposal = Some(chosen_proposal);
 
         let payloads = [
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::Sa(payload::Sa::new(Some(chosen_proposal.proposal(
-                    1,
-                    Num::Assigned(Protocol::IKE),
-                    b"",
-                )))),
+                payload::Content::Sa(payload::Sa::new(Some(proposal))),
                 true,
             ),
             Payload::new(

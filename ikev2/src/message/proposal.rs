@@ -70,7 +70,7 @@ impl Proposal {
             Some(Self {
                 number: self.number,
                 protocol: self.protocol,
-                spi: self.spi.clone(),
+                spi: other.spi.clone(),
                 transforms,
             })
         }
