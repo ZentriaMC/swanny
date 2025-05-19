@@ -51,6 +51,11 @@ impl Prf {
         data: impl AsRef<[u8]>,
         mac: impl AsRef<[u8]>,
     ) -> Result<bool> {
+        eprintln!(
+            "{:?} {:?}",
+            mac.as_ref(),
+            &self.prf(key.as_ref(), data.as_ref())
+        );
         Ok(memcmp::eq(&self.prf(key, data)?, mac.as_ref()))
     }
 
@@ -340,6 +345,9 @@ impl Cipher {
         plaintext.truncate(count);
 
         let pad_len: usize = plaintext[plaintext.len() - 1].into();
+        if pad_len > block_size {
+            return Err(anyhow::anyhow!("invalid padding length"));
+        }
         plaintext.truncate(plaintext.len() - pad_len - 1);
 
         Ok(plaintext)

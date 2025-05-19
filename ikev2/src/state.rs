@@ -151,10 +151,14 @@ impl StateData {
         };
 
         let prf = chosen_proposal.prf();
-        Ok(prf.prf(prf.prf(b"foo", message::KEY_PAD)?, &signed_data)?)
+        if let Some(psk) = config.psk() {
+            Ok(prf.prf(prf.prf(psk, message::KEY_PAD)?, &signed_data)?)
+        } else {
+            Err(anyhow::anyhow!("PSK not set"))
+        }
     }
 
-    fn verify(&self, _config: &Config, id: &Id, auth: &Auth) -> Result<()> {
+    fn verify(&self, config: &Config, id: &Id, auth: &Auth) -> Result<()> {
         let chosen_proposal = self
             .chosen_proposal
             .as_ref()
@@ -171,11 +175,16 @@ impl StateData {
         };
 
         let prf = chosen_proposal.prf();
-        let res = prf.verify(
-            prf.prf(b"foo", message::KEY_PAD)?,
-            &signed_data,
-            auth.auth_data(),
-        )?;
+        let res = if let Some(psk) = config.psk() {
+            prf.verify(
+                prf.prf(psk, message::KEY_PAD)?,
+                &signed_data,
+                auth.auth_data(),
+            )?
+        } else {
+            return Err(anyhow::anyhow!("PSK not set"));
+        };
+
         if res {
             Ok(())
         } else {

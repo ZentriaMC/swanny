@@ -133,6 +133,7 @@ pub struct ConfigBuilder {
     ike_proposals: Vec<ProposalBuilder>,
     ipsec_proposals: Vec<ProposalBuilder>,
     ipsec_protocol: Option<Protocol>,
+    psk: Option<Vec<u8>>,
 }
 
 impl ConfigBuilder {
@@ -157,12 +158,18 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn psk(mut self, psk: impl AsRef<[u8]>) -> Self {
+        self.psk = Some(psk.as_ref().to_vec());
+        self
+    }
+
     pub fn build(mut self, id: Id) -> Config {
         Config {
             ike_proposals: self.ike_proposals,
             ipsec_protocol: self.ipsec_protocol.take().unwrap_or(Protocol::ESP),
             ipsec_proposals: self.ipsec_proposals,
             id: id,
+            psk: self.psk.take(),
         }
     }
 }
@@ -173,6 +180,7 @@ pub struct Config {
     ipsec_protocol: Protocol,
     ipsec_proposals: Vec<ProposalBuilder>,
     id: Id,
+    psk: Option<Vec<u8>>,
 }
 
 impl Config {
@@ -196,6 +204,10 @@ impl Config {
 
     pub fn id(&self) -> &Id {
         &self.id
+    }
+
+    pub fn psk(&self) -> Option<&[u8]> {
+        self.psk.as_deref()
     }
 }
 
@@ -231,6 +243,7 @@ pub(crate) mod tests {
                     .integrity(IntegId::AUTH_HMAC_SHA1_96)
                     .dh(DhId::MODP2048)
             })
+            .psk(b"test test test")
             .build(Id::new(Num::Assigned(IdType::ID_KEY_ID), b""))
     }
 
