@@ -45,7 +45,12 @@ impl Prf {
         self.md.size()
     }
 
-    pub fn verify(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>, mac: impl AsRef<[u8]>) -> Result<bool> {
+    pub fn verify(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+        mac: impl AsRef<[u8]>,
+    ) -> Result<bool> {
         Ok(memcmp::eq(&self.prf(key, data)?, mac.as_ref()))
     }
 
@@ -406,7 +411,11 @@ mod tests {
         let key = vec![1; 16];
         let plaintext = b"hello world";
         let ciphertext = cipher.encrypt(&key, &plaintext).expect("");
-        assert_eq!(ciphertext.len(), cipher.iv_size().unwrap() + (plaintext.len() + 1).div_ceil(cipher.block_size()) * cipher.block_size());
+        assert_eq!(
+            ciphertext.len(),
+            cipher.iv_size().unwrap()
+                + (plaintext.len() + 1).div_ceil(cipher.block_size()) * cipher.block_size()
+        );
 
         let plaintext2 = cipher.decrypt(&key, &ciphertext).expect("");
         assert_eq!(plaintext2, plaintext);

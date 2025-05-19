@@ -153,7 +153,13 @@ impl Initial {
             ),
         ]);
 
-        Ok((message, chosen_proposal, keys, nonce_i.nonce().to_vec(), nonce_r.to_vec()))
+        Ok((
+            message,
+            chosen_proposal,
+            keys,
+            nonce_i.nonce().to_vec(),
+            nonce_r.to_vec(),
+        ))
     }
 }
 

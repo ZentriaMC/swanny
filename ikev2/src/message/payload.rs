@@ -135,9 +135,10 @@ impl Payload {
             Num::Assigned(PayloadType::TSi | PayloadType::TSr) => {
                 Content::Ts(Ts::deserialize(&mut &buf.chunk()[..len])?)
             }
-            Num::Assigned(PayloadType::SK) => {
-                Content::Sk(Sk::deserialize(next_payload_type, &mut &buf.chunk()[..len])?)
-            }
+            Num::Assigned(PayloadType::SK) => Content::Sk(Sk::deserialize(
+                next_payload_type,
+                &mut &buf.chunk()[..len],
+            )?),
             ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
         };
         buf.advance(len);
@@ -687,10 +688,7 @@ impl Sk {
         Ok(payloads)
     }
 
-    pub fn deserialize(
-        payload_type: Num<u8, PayloadType>,
-        buf: &mut dyn Buf,
-    ) -> Result<Self>
+    pub fn deserialize(payload_type: Num<u8, PayloadType>, buf: &mut dyn Buf) -> Result<Self>
     where
         Self: Sized,
     {

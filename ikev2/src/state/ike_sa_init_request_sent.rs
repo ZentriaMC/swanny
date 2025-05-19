@@ -2,8 +2,7 @@ use crate::{
     config::Config,
     crypto,
     message::{
-        self,
-        Message, Spi,
+        self, Message, Spi,
         num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
@@ -56,8 +55,13 @@ impl IkeSaInitRequestSent {
         }
 
         let nonce_i = data.nonce_i.as_ref().unwrap();
-        let skeyseed =
-            crypto::generate_skeyseed(chosen_proposal.prf(), nonce_i, nonce_r.nonce(), private_key, ke_r.ke_data())?;
+        let skeyseed = crypto::generate_skeyseed(
+            chosen_proposal.prf(),
+            nonce_i,
+            nonce_r.nonce(),
+            private_key,
+            ke_r.ke_data(),
+        )?;
         eprintln!("SKEYSEED generated: {:?}", &skeyseed);
 
         let keys = chosen_proposal.generate_keys(
@@ -72,11 +76,7 @@ impl IkeSaInitRequestSent {
         Ok((chosen_proposal, keys, nonce_r.nonce().to_vec()))
     }
 
-    fn generate_ike_auth_request<D>(
-        config: &Config,
-        data: &D,
-        spi_r: &Spi,
-    ) -> Result<Message>
+    fn generate_ike_auth_request<D>(config: &Config, data: &D, spi_r: &Spi) -> Result<Message>
     where
         D: Deref<Target = StateData>,
     {
@@ -94,12 +94,7 @@ impl IkeSaInitRequestSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
-        let prf = chosen_proposal.prf();
-        let keys = data.keys.as_ref().unwrap();
-
-        let signed_data = data.initiator_signed_data(config.id())?;
-        let auth_data = prf.prf(prf.prf(b"foo", message::KEY_PAD)?, &signed_data)?;
+        let auth_data = data.sign(config)?;
 
         let payloads = [
             Payload::new(
@@ -114,7 +109,10 @@ impl IkeSaInitRequestSent {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::AUTH),
-                payload::Content::Auth(payload::Auth::new(Num::Assigned(AuthType::PSK), &auth_data)),
+                payload::Content::Auth(payload::Auth::new(
+                    Num::Assigned(AuthType::PSK),
+                    &auth_data,
+                )),
                 true,
             ),
             Payload::new(
@@ -128,6 +126,9 @@ impl IkeSaInitRequestSent {
                 true,
             ),
         ];
+
+        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
+        let keys = data.keys.as_ref().unwrap();
 
         message.add_payloads([Payload::new(
             Num::Assigned(PayloadType::SK),
@@ -170,12 +171,7 @@ impl State for IkeSaInitRequestSent {
                 let request = {
                     let data = data.read().await;
 
-                    Self::generate_ike_auth_request(
-                        &config,
-                        &data,
-                        response.spi_r(),
-                    )?
-
+                    Self::generate_ike_auth_request(config, &data, response.spi_r())?
                 };
 
                 {

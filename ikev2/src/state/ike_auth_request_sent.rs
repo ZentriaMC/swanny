@@ -1,6 +1,12 @@
 use crate::{
     config::Config,
-    message::{self, Message, num::{Num, ExchangeType, PayloadType}, payload, serialize::Deserialize, traffic_selector::TrafficSelector},
+    message::{
+        self, Message,
+        num::{ExchangeType, Num, PayloadType},
+        payload,
+        serialize::Deserialize,
+        traffic_selector::TrafficSelector,
+    },
     sa::ControlMessage,
     state::{self, State, StateData},
 };
@@ -14,11 +20,9 @@ use tokio::sync::RwLock;
 pub(crate) struct IkeAuthRequestSent {}
 
 impl IkeAuthRequestSent {
-    fn handle_ike_auth_response<D>(
-        data: &D,
-        response: &Message,
-    ) -> Result<()>
-        where D: Deref<Target = StateData>,
+    fn handle_ike_auth_response<D>(config: &Config, data: &D, response: &Message) -> Result<()>
+    where
+        D: Deref<Target = StateData>,
     {
         let last = response
             .payloads()
@@ -46,15 +50,8 @@ impl IkeAuthRequestSent {
             .ok_or_else(|| anyhow::anyhow!("no IDr payload"))?;
         let id_r: &payload::Id = id_r.try_into()?;
 
-        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
-        let prf = chosen_proposal.prf();
+        data.verify(config, id_r, auth)?;
 
-        let signed_data = data.responder_signed_data(&id_r)?;
-        match prf.verify(prf.prf(b"foo", message::KEY_PAD)?, &signed_data, auth.auth_data()) {
-            Ok(true) => eprintln!("authenticated"),
-            _ => eprintln!("authentication failed"),
-        }
-        
         Ok(())
     }
 }
@@ -64,7 +61,7 @@ impl State for IkeAuthRequestSent {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,
-        sender: UnboundedSender<ControlMessage>,
+        _sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
@@ -73,7 +70,7 @@ impl State for IkeAuthRequestSent {
             Num::Assigned(ExchangeType::IKE_AUTH) => {
                 {
                     let data = data.read().await;
-                    Self::handle_ike_auth_response(&data, &response)?;
+                    Self::handle_ike_auth_response(config, &data, &response)?;
                 }
                 Ok(Box::new(state::Established {}))
             }

@@ -1,8 +1,7 @@
 use crate::{
     config::Config,
     message::{
-        self,
-        Message,
+        self, Message,
         num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
@@ -22,11 +21,7 @@ use tokio::sync::RwLock;
 pub(crate) struct IkeSaInitResponseSent {}
 
 impl IkeSaInitResponseSent {
-    fn handle_ike_auth_request<D>(
-        config: &Config,
-        data: &D,
-        request: &Message,
-    ) -> Result<Message>
+    fn handle_ike_auth_request<D>(config: &Config, data: &D, request: &Message) -> Result<Message>
     where
         D: Deref<Target = StateData>,
     {
@@ -74,18 +69,8 @@ impl IkeSaInitResponseSent {
             .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
         let ts_r: &payload::Ts = ts_r.try_into()?;
 
-        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
-        let prf = chosen_proposal.prf();
-        let keys = data.keys.as_ref().unwrap();
-
-        let signed_data = data.initiator_signed_data(&id_i)?;
-        match prf.verify(prf.prf(b"foo", message::KEY_PAD)?, &signed_data, auth.auth_data()) {
-            Ok(true) => eprintln!("authenticated"),
-            _ => eprintln!("authentication failed"),
-        }
-
-        let signed_data = data.responder_signed_data(config.id())?;
-        let auth_data = prf.prf(prf.prf(b"foo", message::KEY_PAD)?, &signed_data)?;
+        data.verify(config, id_i, auth)?;
+        let auth_data = data.sign(config)?;
 
         let mut message = Message::new(
             request.spi_i(),
@@ -115,7 +100,10 @@ impl IkeSaInitResponseSent {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::AUTH),
-                payload::Content::Auth(payload::Auth::new(Num::Assigned(AuthType::PSK), &auth_data)),
+                payload::Content::Auth(payload::Auth::new(
+                    Num::Assigned(AuthType::PSK),
+                    &auth_data,
+                )),
                 true,
             ),
             Payload::new(
@@ -124,6 +112,9 @@ impl IkeSaInitResponseSent {
                 true,
             ),
         ];
+
+        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
+        let keys = data.keys.as_ref().unwrap();
 
         message.add_payloads([Payload::new(
             Num::Assigned(PayloadType::SK),
@@ -152,8 +143,7 @@ impl State for IkeSaInitResponseSent {
             Num::Assigned(ExchangeType::IKE_AUTH) => {
                 let inner = data.read().await;
 
-                let response =
-                    Self::handle_ike_auth_request(config, &inner, &request)?;
+                let response = Self::handle_ike_auth_request(config, &inner, &request)?;
                 drop(inner);
 
                 let len = response.size()?;
