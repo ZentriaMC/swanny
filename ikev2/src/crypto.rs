@@ -1,5 +1,5 @@
 use crate::message::{
-    num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, Protocol, TransformType},
+    num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
     transform::{Attribute, AttributeFormat, Transform, TransformId},
 };
 use anyhow::Result;

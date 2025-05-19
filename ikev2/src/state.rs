@@ -13,7 +13,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
-use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

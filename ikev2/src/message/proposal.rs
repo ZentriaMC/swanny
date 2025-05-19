@@ -5,7 +5,6 @@ use crate::message::{
 };
 use anyhow::Result;
 use bytes::{Buf, BufMut};
-use tracing::debug;
 
 pub const HEADER_SIZE: usize = 4;
 
