@@ -22,6 +22,12 @@ use tracing::debug;
 
 pub(crate) struct Initial {}
 
+impl std::fmt::Display for Initial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        f.debug_struct("Initial").finish()
+    }
+}
+
 impl Initial {
     fn generate_ike_sa_init_request<D>(
         config: &Config,
@@ -30,7 +36,7 @@ impl Initial {
     where
         D: Deref<Target = StateData>,
     {
-        let proposals: Vec<_> = config.ike_proposals(&data.spi).collect();
+        let proposals: Vec<_> = config.ike_proposals(None).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
@@ -40,7 +46,10 @@ impl Initial {
         let mut nonce = vec![0u8; 32];
         crypto::rand_bytes(&mut nonce[..])?;
 
-        let private_key = chosen_proposal.group().generate_key()?;
+        let group = chosen_proposal
+            .group()
+            .ok_or_else(|| anyhow::anyhow!("group is not set"))?;
+        let private_key = group.generate_key()?;
         let public_key = private_key.public_key()?;
 
         let mut message = Message::new(
@@ -64,10 +73,7 @@ impl Initial {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::KE),
-                payload::Content::Ke(payload::Ke::new(
-                    Num::Assigned(chosen_proposal.group().id()),
-                    &public_key,
-                )),
+                payload::Content::Ke(payload::Ke::new(Num::Assigned(group.id()), &public_key)),
                 true,
             ),
         ]);
@@ -95,16 +101,18 @@ impl Initial {
             .get(PayloadType::NONCE)
             .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
 
-        let proposals: Vec<_> = config.ike_proposals(request.spi_i()).collect();
+        let proposals: Vec<_> = config.ike_proposals(None).collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let proposal = IkeSa::choose_proposal(&proposals, sa.proposals())
+        let chosen_proposal = IkeSa::choose_proposal(&proposals, sa.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
 
-        let chosen_proposal = ChosenProposal::new(&proposal)?;
-        let private_key = chosen_proposal.group().generate_key()?;
+        let group = chosen_proposal
+            .group()
+            .ok_or_else(|| anyhow::anyhow!("group not set"))?;
+        let private_key = group.generate_key()?;
         let public_key = private_key.public_key()?;
 
         let mut nonce_r = vec![0u8; 32];
@@ -146,6 +154,9 @@ impl Initial {
         D: Deref<Target = StateData>,
     {
         let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
+        let group = chosen_proposal
+            .group()
+            .ok_or_else(|| anyhow::anyhow!("group not set"))?;
         let nonce_r = data.nonce_r.as_ref().unwrap();
 
         let mut message = Message::new(
@@ -159,19 +170,16 @@ impl Initial {
         message.add_payloads([
             Payload::new(
                 Num::Assigned(PayloadType::KE),
-                payload::Content::Ke(payload::Ke::new(
-                    Num::Assigned(chosen_proposal.group().id()),
-                    &public_key,
-                )),
+                payload::Content::Ke(payload::Ke::new(Num::Assigned(group.id()), &public_key)),
                 true,
             ),
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::Sa(payload::Sa::new([chosen_proposal.proposal(
+                payload::Content::Sa(payload::Sa::new(Some(chosen_proposal.proposal(
                     1,
                     Num::Assigned(Protocol::IKE),
                     b"",
-                )])),
+                )))),
                 true,
             ),
             Payload::new(

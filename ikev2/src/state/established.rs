@@ -13,6 +13,12 @@ use tokio::sync::RwLock;
 #[derive(Debug)]
 pub(crate) struct Established {}
 
+impl std::fmt::Display for Established {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        f.debug_struct("Established").finish()
+    }
+}
+
 #[async_trait]
 impl State for Established {
     async fn handle_message(

@@ -13,6 +13,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
+use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -32,7 +33,7 @@ mod established;
 pub(crate) use established::Established;
 
 #[async_trait]
-pub(crate) trait State: Send + Sync {
+pub(crate) trait State: Send + Sync + std::fmt::Display {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,
@@ -158,7 +159,7 @@ impl StateData {
         }
     }
 
-    fn verify(&self, config: &Config, id: &Id, auth: &Auth) -> Result<()> {
+    fn verify(&self, config: &Config, id: &Id, auth: &Auth) -> Result<bool> {
         let chosen_proposal = self
             .chosen_proposal
             .as_ref()
@@ -175,20 +176,14 @@ impl StateData {
         };
 
         let prf = chosen_proposal.prf();
-        let res = if let Some(psk) = config.psk() {
-            prf.verify(
+        if let Some(psk) = config.psk() {
+            Ok(prf.verify(
                 prf.prf(psk, message::KEY_PAD)?,
                 &signed_data,
                 auth.auth_data(),
-            )?
+            )?)
         } else {
             return Err(anyhow::anyhow!("PSK not set"));
-        };
-
-        if res {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("authentication failed"))
         }
     }
 }

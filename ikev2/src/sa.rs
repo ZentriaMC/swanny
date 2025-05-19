@@ -15,6 +15,7 @@ use bytes::Buf;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, info};
 
 #[derive(Debug)]
 pub enum ControlMessage {
@@ -51,18 +52,30 @@ impl IkeSa {
     pub(crate) fn choose_proposal<'a, 'b>(
         this: impl IntoIterator<Item = &'a Proposal>,
         other: impl IntoIterator<Item = &'b Proposal>,
-    ) -> Option<Proposal> {
+    ) -> Option<ChosenProposal> {
         let mut this = this.into_iter();
         let mut other = other.into_iter();
-        this.find_map(|px| other.find_map(|py| px.intersection(py)))
+        if let Some(proposal) = this.find_map(|px| other.find_map(|py| px.intersection(py))) {
+            match ChosenProposal::new(&proposal) {
+                Ok(proposal) => Some(proposal),
+                Err(e) => {
+                    debug!(error = %e, "error");
+                    None
+                }
+            }
+        } else {
+            None
+        }
     }
 
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {
         let mut state = self.state.lock().await;
-        if let Some(s) = state.take() {
+        if let Some(old_state) = state.take() {
             drop(state);
 
-            let s = s
+            let old_state_name = old_state.to_string();
+
+            let new_state = old_state
                 .handle_message(
                     &self.config,
                     self.sender.clone(),
@@ -70,8 +83,13 @@ impl IkeSa {
                     message.as_ref(),
                 )
                 .await?;
+
+            let new_state_name = new_state.to_string();
+
             let mut state = self.state.lock().await;
-            *state = Some(s);
+            *state = Some(new_state);
+
+            info!("state transitioned from {old_state_name} to {new_state_name}");
         }
 
         Ok(())
@@ -84,10 +102,12 @@ impl IkeSa {
         index: u32,
     ) -> Result<()> {
         let mut state = self.state.lock().await;
-        if let Some(s) = state.take() {
+        if let Some(old_state) = state.take() {
             drop(state);
 
-            let s = s
+            let old_state_name = old_state.to_string();
+
+            let new_state = old_state
                 .handle_acquire(
                     &self.config,
                     self.sender.clone(),
@@ -97,8 +117,13 @@ impl IkeSa {
                     index,
                 )
                 .await?;
+
+            let new_state_name = new_state.to_string();
+
             let mut state = self.state.lock().await;
-            *state = Some(s);
+            *state = Some(new_state);
+
+            info!("state transitioned from {old_state_name} to {new_state_name}");
         }
 
         Ok(())
@@ -106,10 +131,11 @@ impl IkeSa {
 }
 
 pub(crate) struct ChosenProposal {
+    protocol: Protocol,
     cipher: Cipher,
     prf: Prf,
     integ: Option<Integ>,
-    group: Group,
+    group: Option<Group>,
 }
 
 impl ChosenProposal {
@@ -145,12 +171,22 @@ impl ChosenProposal {
 
         let transform = proposal
             .transforms()
-            .find(|t| t.ty() == Num::Assigned(TransformType::DH))
-            .ok_or_else(|| anyhow::anyhow!("DH transform not found"))?;
-        let id: DhId = transform.id().try_into()?;
-        let group = Group::new(id)?;
+            .find(|t| t.ty() == Num::Assigned(TransformType::DH));
+        let group = match transform {
+            Some(transform) => {
+                let id: DhId = transform.id().try_into()?;
+                Some(Group::new(id)?)
+            }
+            None => match proposal.protocol() {
+                Num::Assigned(Protocol::IKE) => {
+                    return Err(anyhow::anyhow!("DH transform not found"));
+                }
+                _ => None,
+            },
+        };
 
         Ok(Self {
+            protocol: proposal.protocol().try_into()?,
             cipher,
             prf,
             integ,
@@ -170,8 +206,8 @@ impl ChosenProposal {
         self.integ.as_ref()
     }
 
-    pub fn group(&self) -> &Group {
-        &self.group
+    pub fn group(&self) -> Option<&Group> {
+        self.group.as_ref()
     }
 
     pub fn generate_keys(
@@ -238,7 +274,9 @@ impl ChosenProposal {
         if let Some(integ) = self.integ() {
             transforms.push(integ.into());
         }
-        transforms.push(self.group().into());
+        if let Some(group) = self.group() {
+            transforms.push(group.into());
+        }
 
         Proposal::new(number, protocol, spi.as_ref(), transforms)
     }

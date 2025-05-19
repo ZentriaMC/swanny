@@ -5,6 +5,7 @@ use crate::message::{
 };
 use anyhow::Result;
 use bytes::{Buf, BufMut};
+use tracing::debug;
 
 pub const HEADER_SIZE: usize = 4;
 
@@ -54,7 +55,13 @@ impl Proposal {
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         let transforms: Vec<_> = self
             .transforms()
-            .filter_map(|tx| other.transforms().find(|&ty| *tx == *ty))
+            .filter_map(|tx| {
+                if other.transforms().find(|&ty| ty.ty() == tx.ty()).is_none() {
+                    Some(tx)
+                } else {
+                    other.transforms().find(|&ty| *tx == *ty)
+                }
+            })
             .map(ToOwned::to_owned)
             .collect();
 

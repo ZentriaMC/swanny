@@ -17,6 +17,7 @@ VETH2="$NS2-veth"
 
 ip netns exec "$NS1" ip xfrm policy add \
    src 192.168.1.1 dst 192.168.1.2 \
+   proto icmp \
    dev "$VETH1" \
    dir out \
    priority 1000 \
@@ -24,6 +25,7 @@ ip netns exec "$NS1" ip xfrm policy add \
 
 ip netns exec "$NS1" ip xfrm policy add \
    src 192.168.1.1 dst 192.168.1.2 \
+   proto icmp \
    dev "$VETH1" \
    dir in \
    priority 1000 \
@@ -31,6 +33,7 @@ ip netns exec "$NS1" ip xfrm policy add \
 
 ip netns exec "$NS2" ip xfrm policy add \
    src 192.168.1.1 dst 192.168.1.2 \
+   proto icmp \
    dev "$VETH2" \
    dir out \
    priority 1000 \
@@ -38,6 +41,7 @@ ip netns exec "$NS2" ip xfrm policy add \
 
 ip netns exec "$NS2" ip xfrm policy add \
    src 192.168.1.1 dst 192.168.1.2 \
+   proto icmp \
    dev "$VETH2" \
    dir in \
    priority 1000 \

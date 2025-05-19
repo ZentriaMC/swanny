@@ -122,6 +122,17 @@ impl From<Protocol> for u8 {
     }
 }
 
+impl TryFrom<Num<u8, Protocol>> for Protocol {
+    type Error = anyhow::Error;
+
+    fn try_from(other: Num<u8, Protocol>) -> std::result::Result<Self, Self::Error> {
+        match other {
+            Num::Assigned(id) => Ok(id),
+            _ => Err(anyhow::anyhow!("no matching protocol")),
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum TransformType {

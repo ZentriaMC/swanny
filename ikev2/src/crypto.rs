@@ -321,7 +321,7 @@ impl Cipher {
         let (cipher, is_aead) = match (id, key_size) {
             (EncrId::ENCR_AES_CBC, Some(128)) => (symm::Cipher::aes_128_cbc(), false),
             (EncrId::ENCR_AES_CBC, Some(256)) => (symm::Cipher::aes_256_cbc(), false),
-            _ => return Err(anyhow::anyhow!("unsupported cipher")),
+            e => return Err(anyhow::anyhow!("unsupported cipher {:?}", e)),
         };
         Ok(Self {
             id,
@@ -399,7 +399,7 @@ impl From<&Cipher> for Transform {
             Num::Assigned(TransformId::Encr(Num::Assigned(other.id))),
             [Attribute::new(
                 Num::Assigned(AttributeType::KeyLength),
-                &other.key_size().to_be_bytes()[..],
+                &((other.key_size() * 8) as u16).to_be_bytes()[..],
                 AttributeFormat::TV,
             )],
         )

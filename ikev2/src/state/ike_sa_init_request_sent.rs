@@ -22,6 +22,12 @@ use tracing::debug;
 
 pub(crate) struct IkeSaInitRequestSent {}
 
+impl std::fmt::Display for IkeSaInitRequestSent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        f.debug_struct("IkeSaInitRequestSent").finish()
+    }
+}
+
 impl IkeSaInitRequestSent {
     fn handle_ike_sa_init_response<D>(
         data: &D,

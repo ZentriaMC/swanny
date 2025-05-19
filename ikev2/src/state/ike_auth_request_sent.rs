@@ -16,8 +16,15 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::info;
 
 pub(crate) struct IkeAuthRequestSent {}
+
+impl std::fmt::Display for IkeAuthRequestSent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        f.debug_struct("IkeAuthRequestSent").finish()
+    }
+}
 
 impl IkeAuthRequestSent {
     fn handle_ike_auth_response<D>(config: &Config, data: &D, response: &Message) -> Result<()>
@@ -50,7 +57,14 @@ impl IkeAuthRequestSent {
             .ok_or_else(|| anyhow::anyhow!("no IDr payload"))?;
         let id_r: &payload::Id = id_r.try_into()?;
 
-        data.verify(config, id_r, auth)?;
+        if data.verify(config, id_r, auth)? {
+            info!(
+                spi = &data.peer_spi.as_ref().unwrap()[..],
+                "initiator authenticated responder"
+            );
+        } else {
+            return Err(anyhow::anyhow!("authentication failed"));
+        }
 
         Ok(())
     }

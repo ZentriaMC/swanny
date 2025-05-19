@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     message::{
         Message,
-        num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
+        num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType, Protocol},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
@@ -17,8 +17,15 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 pub(crate) struct IkeSaInitResponseSent {}
+
+impl std::fmt::Display for IkeSaInitResponseSent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        f.debug_struct("IkeSaInitResponseSent").finish()
+    }
+}
 
 impl IkeSaInitResponseSent {
     fn handle_ike_auth_request<D>(config: &Config, data: &D, request: &Message) -> Result<Message>
@@ -69,7 +76,15 @@ impl IkeSaInitResponseSent {
             .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
         let ts_r: &payload::Ts = ts_r.try_into()?;
 
-        data.verify(config, id_i, auth)?;
+        if data.verify(config, id_i, auth)? {
+            info!(
+                spi = &data.peer_spi.as_ref().unwrap()[..],
+                "responder authenticated initiator"
+            );
+        } else {
+            return Err(anyhow::anyhow!("authentication failed"));
+        }
+
         let auth_data = data.sign(config)?;
 
         let mut message = Message::new(
@@ -89,13 +104,19 @@ impl IkeSaInitResponseSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let proposal = IkeSa::choose_proposal(&proposals, sa_i.proposals())
+        debug!("proposals: {:?}", &proposals);
+        debug!("proposals: {:?}", sa_i.proposals().collect::<Vec<_>>());
+        let chosen_proposal = IkeSa::choose_proposal(&proposals, sa_i.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
 
         let payloads = [
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::Sa(payload::Sa::new(Some(proposal))),
+                payload::Content::Sa(payload::Sa::new(Some(chosen_proposal.proposal(
+                    1,
+                    Num::Assigned(Protocol::IKE),
+                    b"",
+                )))),
                 true,
             ),
             Payload::new(
@@ -141,10 +162,11 @@ impl State for IkeSaInitResponseSent {
         let request = Message::deserialize(&mut message)?;
         match request.exchange() {
             Num::Assigned(ExchangeType::IKE_AUTH) => {
-                let inner = data.read().await;
+                let response = {
+                    let data = data.read().await;
 
-                let response = Self::handle_ike_auth_request(config, &inner, &request)?;
-                drop(inner);
+                    Self::handle_ike_auth_request(config, &data, &request)?
+                };
 
                 let len = response.size()?;
                 let mut buf = BytesMut::with_capacity(len);
