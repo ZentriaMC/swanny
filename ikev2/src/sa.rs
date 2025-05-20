@@ -424,17 +424,48 @@ impl ChildSa {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        config,
-        message::{
-            Message,
-            num::{Num, TrafficSelectorType},
-            traffic_selector,
-        },
-    };
-    use futures::{
-        SinkExt,
-        channel::mpsc,
-        stream::{FuturesUnordered, StreamExt},
-    };
+    use crate::{config, message::traffic_selector};
+    use futures::stream::StreamExt;
+    use std::net::IpAddr;
+
+    #[tokio::test]
+    async fn test_sa() {
+        let config = config::tests::create_config(b"initiator");
+        let (initiator, mut messages_i) = IkeSa::new(&config).expect("unable to create IKE SA");
+
+        let config = config::tests::create_config(b"responder");
+        let (responder, mut messages_r) = IkeSa::new(&config).expect("unable to create IKE SA");
+
+        let initiator2 = initiator.clone();
+
+        tokio::spawn(async move {
+            let initiator_addr: IpAddr = "192.168.1.2".parse().unwrap();
+            let responder_addr: IpAddr = "192.168.1.3".parse().unwrap();
+            let ts_i = traffic_selector::tests::create_traffic_selector(&initiator_addr);
+            let ts_r = traffic_selector::tests::create_traffic_selector(&responder_addr);
+            initiator2
+                .handle_acquire(ts_i, ts_r, 1)
+                .await
+                .expect("unable to handle acquire");
+        });
+
+        let message = match messages_i.next().await {
+            Some(ControlMessage::IkeMessage(message)) => message,
+            _ => panic!("unexpected message"),
+        };
+
+        let responder2 = responder.clone();
+
+        tokio::spawn(async move {
+            responder2
+                .handle_message(message)
+                .await
+                .expect("unable to handle message");
+        });
+
+        let _message = match messages_r.next().await {
+            Some(ControlMessage::IkeMessage(message)) => message,
+            _ => panic!("unexpected message"),
+        };
+    }
 }

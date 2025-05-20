@@ -155,15 +155,13 @@ pub(crate) mod tests {
     use crate::message::serialize::{Deserialize, Serialize};
     use bytes::BytesMut;
     use std::net::IpAddr;
-    use std::str::FromStr;
 
-    pub(crate) fn create_traffic_selector() -> TrafficSelector {
-        let src_address = IpAddr::from_str("192.168.1.2").unwrap();
+    pub(crate) fn create_traffic_selector(address: &IpAddr) -> TrafficSelector {
         TrafficSelector::new(
             Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
             0,
-            &src_address,
-            &src_address,
+            &address,
+            &address,
             0,
             0,
         )
@@ -171,7 +169,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_traffic_selector() {
-        let traffic_selector = create_traffic_selector();
+        let traffic_selector = create_traffic_selector(&"192.168.1.2".parse().unwrap());
 
         let len = traffic_selector
             .size()

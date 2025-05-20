@@ -215,8 +215,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::message::{num::IdType, payload::Id};
 
-    pub(crate) fn create_config() -> Config {
-        let mut builder = ConfigBuilder::default();
+    pub(crate) fn create_config(id: impl AsRef<[u8]>) -> Config {
+        let builder = ConfigBuilder::default();
         builder
             .ike_proposal(|pc| {
                 pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
@@ -243,16 +243,16 @@ pub(crate) mod tests {
                     .dh(DhId::MODP2048)
             })
             .psk(b"test test test")
-            .build(Id::new(Num::Assigned(IdType::ID_KEY_ID), b""))
+            .build(Id::new(Num::Assigned(IdType::ID_KEY_ID), id.as_ref()))
     }
 
     #[test]
     fn test_config_builder() {
-        let config = create_config();
+        let config = create_config(b"initiator");
 
         assert_eq!(
             config
-                .ike_proposals(&Spi::default())
+                .ike_proposals(Some(&Spi::default()))
                 .collect::<Vec<_>>()
                 .len(),
             2

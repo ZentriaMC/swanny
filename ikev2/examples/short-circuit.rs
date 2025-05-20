@@ -1,10 +1,5 @@
 use anyhow::Result;
-use bytes::Buf;
-use futures::{
-    SinkExt,
-    channel::mpsc,
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::net::IpAddr;
 use swanny_ikev2::{
     config::{Config, ConfigBuilder},
@@ -20,7 +15,7 @@ use swanny_ikev2::{
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 fn create_config(id: impl AsRef<[u8]>) -> Config {
-    let mut builder = ConfigBuilder::default();
+    let builder = ConfigBuilder::default();
     builder
         .ike_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(256))
@@ -59,19 +54,19 @@ async fn main() -> Result<()> {
         .try_init()?;
 
     let config = create_config(b"initiator");
-    let (mut initiator, mut messages_i) = IkeSa::new(&config).expect("unable to create IKE SA");
+    let (initiator, mut messages_i) = IkeSa::new(&config).expect("unable to create IKE SA");
 
     let config = create_config(b"responder");
-    let (mut responder, mut messages_r) = IkeSa::new(&config).expect("unable to create IKE SA");
+    let (responder, mut messages_r) = IkeSa::new(&config).expect("unable to create IKE SA");
 
-    let mut initiator2 = initiator.clone();
-    let mut responder2 = responder.clone();
+    let initiator2 = initiator.clone();
+    let responder2 = responder.clone();
 
     let handle = tokio::spawn(async move {
         let mut pending_operations = FuturesUnordered::new();
 
         loop {
-            let res = futures::select! {
+            futures::select! {
                 message = messages_i.select_next_some() => {
                     match message {
                         ControlMessage::IkeMessage(message) => {
@@ -79,12 +74,12 @@ async fn main() -> Result<()> {
                             let mut buf = serialized_message;
                             let message = Message::deserialize(&mut buf)
                                 .expect("unable to deserialize message");
+                            eprintln!("INITIATOR: {:?}", message);
                             pending_operations.push(responder2.handle_message(serialized_message.to_vec()));
-                        },
-                        ControlMessage::CreateChildSa(child_sa) => {
-                            eprintln!("Initiator created Child SA {:?}", child_sa);
                         }
-                        _ => {},
+                        ControlMessage::CreateChildSa(child_sa) => {
+                            eprintln!("INITIATOR: created Child SA {:?}", child_sa);
+                        }
                     }
                 },
                 message = messages_r.select_next_some() => {
@@ -94,12 +89,12 @@ async fn main() -> Result<()> {
                             let mut buf = serialized_message;
                             let message = Message::deserialize(&mut buf)
                                 .expect("unable to deserialize message");
+                            eprintln!("RESPONDER: {:?}", message);
                             pending_operations.push(initiator2.handle_message(serialized_message.to_vec()));
-                        },
-                        ControlMessage::CreateChildSa(child_sa) => {
-                            eprintln!("Responder created Child SA {:?}", child_sa);
                         }
-                        _ => {},
+                        ControlMessage::CreateChildSa(child_sa) => {
+                            eprintln!("RESPONDER: created Child SA {:?}", child_sa);
+                        }
                     }
                 },
                 res = pending_operations.select_next_some() => {
