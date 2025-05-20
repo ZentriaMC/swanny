@@ -21,7 +21,7 @@ use swanny_ikev2::{
     config::Config,
     crypto::{Cipher, Integ},
     message::{
-        num::{EncrId, IdType, IntegId, Num, TrafficSelectorType},
+        num::{EncrId, IdType, IntegId, Num, Protocol, TrafficSelectorType},
         payload::Id,
         traffic_selector::TrafficSelector,
         EspSpi,
@@ -142,6 +142,7 @@ fn create_modify_message(
     src_address: &IpAddr,
     dst_address: &IpAddr,
     protocol: u8,
+    ipsec_protocol: Protocol,
     spi: &EspSpi,
     integ: Option<&Integ>,
     integ_key: Option<impl AsRef<[u8]>>,
@@ -150,9 +151,10 @@ fn create_modify_message(
 ) -> Result<ModifyMessage> {
     let mut message = ModifyMessage::default();
     message.user_sa_info.source(src_address);
-    message.user_sa_info.mode = 0; // transport
-    message.user_sa_info.family = 2; // AF_INET
-    message.user_sa_info.reqid = 42;
+    message.user_sa_info.family = match src_address {
+        IpAddr::V4(_) => libc::AF_INET.try_into()?,
+        IpAddr::V6(_) => libc::AF_INET6.try_into()?,
+    };
 
     message.user_sa_info.selector.source_prefix(src_address, 32);
     message
@@ -162,10 +164,17 @@ fn create_modify_message(
     message.user_sa_info.selector.sport = 0;
     message.user_sa_info.selector.dport = 0;
     message.user_sa_info.selector.proto = protocol;
-    message.user_sa_info.selector.family = 2; // AF_INET
+    message.user_sa_info.selector.family = match dst_address {
+        IpAddr::V4(_) => libc::AF_INET.try_into()?,
+        IpAddr::V6(_) => libc::AF_INET6.try_into()?,
+    };
 
     message.user_sa_info.id.daddr = Address::from_ip(dst_address);
-    message.user_sa_info.id.proto = 50; // IPPROTO_ESP
+    message.user_sa_info.id.proto = match ipsec_protocol {
+        Protocol::AH => libc::IPPROTO_AH.try_into()?,
+        Protocol::ESP => libc::IPPROTO_ESP.try_into()?,
+        _ => return Err(anyhow::anyhow!("unsupported IPsec protocol")),
+    };
     message.user_sa_info.id.spi = u32::from_be_bytes(*spi);
     message.user_sa_info.lifetime_cfg.soft_byte_limit = 0xFFFFFFFFFFFFFFFF;
     message.user_sa_info.lifetime_cfg.hard_byte_limit = 0xFFFFFFFFFFFFFFFF;
@@ -190,6 +199,7 @@ async fn create_sa(
     src_address: &IpAddr,
     dst_address: &IpAddr,
     protocol: u8,
+    ipsec_protocol: Protocol,
     spi: &EspSpi,
     integ: Option<&Integ>,
     integ_key: Option<impl AsRef<[u8]>>,
@@ -200,6 +210,7 @@ async fn create_sa(
         src_address,
         dst_address,
         protocol,
+        ipsec_protocol,
         spi,
         integ,
         integ_key,
@@ -226,6 +237,7 @@ async fn create_child_sa(
         child_sa.ts_i().start_address(),
         child_sa.ts_r().start_address(),
         child_sa.ts_i().ip_proto(),
+        child_sa.chosen_proposal().protocol(),
         child_sa.spi(),
         child_sa.chosen_proposal().integ(),
         if is_initiator {
@@ -247,6 +259,7 @@ async fn create_child_sa(
         child_sa.ts_r().start_address(),
         child_sa.ts_i().start_address(),
         child_sa.ts_r().ip_proto(),
+        child_sa.chosen_proposal().protocol(),
         child_sa.chosen_proposal().spi().try_into().unwrap(),
         child_sa.chosen_proposal().integ(),
         if is_initiator {

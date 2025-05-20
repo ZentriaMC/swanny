@@ -10,6 +10,7 @@ anyhow.workspace = true
 bytes.workspace = true
 clap = { workspace = true, features = ["cargo", "derive"] }
 futures.workspace = true
+libc.workspace = true
 netlink-packet-core.workspace = true
 netlink-packet-xfrm.workspace = true
 netlink-proto.workspace = true
