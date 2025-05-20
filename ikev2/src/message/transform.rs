@@ -71,22 +71,12 @@ create_try_from!(EncrId, Encr);
 create_try_from!(PrfId, Prf);
 create_try_from!(IntegId, Integ);
 create_try_from!(DhId, Dh);
-
-impl TryFrom<TransformId> for EsnId {
-    type Error = anyhow::Error;
-
-    fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
-        match other {
-            TransformId::Esn(Num::Assigned(esn_id)) => Ok(esn_id),
-            _ => Err(anyhow::anyhow!("no matching EsnId")),
-        }
-    }
-}
+create_try_from!(EsnId, Esn);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AttributeFormat {
-    TV = 0,
-    TLV = 1,
+    TV,
+    TLV,
 }
 
 #[derive(Clone, Debug, PartialEq)]
