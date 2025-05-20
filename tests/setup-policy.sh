@@ -16,33 +16,49 @@ VETH1="$NS1-veth"
 VETH2="$NS2-veth"
 
 ip netns exec "$NS1" ip xfrm policy add \
-   src 192.168.1.1 dst 192.168.1.2 \
+   src 192.168.1.2/32 dst 192.168.1.1/32 \
    proto icmp \
-   dev "$VETH1" \
-   dir out \
+   dir fwd \
    priority 1000 \
-   tmpl proto "esp" reqid "42"
+   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" reqid "42" \
+   mode transport
 
 ip netns exec "$NS1" ip xfrm policy add \
-   src 192.168.1.1 dst 192.168.1.2 \
+   src 192.168.1.1/32 dst 192.168.1.2/32 \
    proto icmp \
-   dev "$VETH1" \
-   dir in \
-   priority 1000 \
-   tmpl proto "esp" reqid "42"
-
-ip netns exec "$NS2" ip xfrm policy add \
-   src 192.168.1.1 dst 192.168.1.2 \
-   proto icmp \
-   dev "$VETH2" \
    dir out \
    priority 1000 \
-   tmpl proto "esp" reqid "42"
+   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" reqid "42" \
+   mode transport
 
-ip netns exec "$NS2" ip xfrm policy add \
-   src 192.168.1.1 dst 192.168.1.2 \
+ip netns exec "$NS1" ip xfrm policy add \
+   src 192.168.1.2/32 dst 192.168.1.1/32 \
    proto icmp \
-   dev "$VETH2" \
    dir in \
    priority 1000 \
-   tmpl proto "esp" reqid "42"
+   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" reqid "42" \
+   mode transport
+
+ip netns exec "$NS2" ip xfrm policy add \
+   src 192.168.1.1/32 dst 192.168.1.2/32 \
+   proto icmp \
+   dir fwd \
+   priority 1000 \
+   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" reqid "42" \
+   mode transport
+
+ip netns exec "$NS2" ip xfrm policy add \
+   src 192.168.1.2/32 dst 192.168.1.1/32 \
+   proto icmp \
+   dir out \
+   priority 1000 \
+   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" reqid "42" \
+   mode transport
+
+ip netns exec "$NS2" ip xfrm policy add \
+   src 192.168.1.1/32 dst 192.168.1.2/32 \
+   proto icmp \
+   dir in \
+   priority 1000 \
+   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" reqid "42" \
+   mode transport

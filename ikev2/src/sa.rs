@@ -50,6 +50,14 @@ impl IkeSa {
         ))
     }
 
+    pub async fn is_initiator(&self) -> bool {
+        let data = self.data.read().await;
+        match data.initiator {
+            Some(true) => true,
+            _ => false,
+        }
+    }
+
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
@@ -255,11 +263,16 @@ impl ChosenProposal {
         let mut er = vec![0; self.cipher.key_size()];
         buf.try_copy_to_slice(&mut er)?;
 
-        let mut ai = vec![0; integ_key_size];
-        buf.try_copy_to_slice(&mut ai)?;
+        let (ai, ar) = if self.integ.is_some() {
+            let mut ai = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ai)?;
 
-        let mut ar = vec![0; integ_key_size];
-        buf.try_copy_to_slice(&mut ar)?;
+            let mut ar = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ar)?;
+            (Some(ai), Some(ar))
+        } else {
+            (None, None)
+        };
 
         let mut pi = vec![0; self.prf.size()];
         buf.try_copy_to_slice(&mut pi)?;
@@ -311,8 +324,8 @@ pub struct DerivingKeys {
 pub struct ProtectingKeys {
     pub ei: Vec<u8>,
     pub er: Vec<u8>,
-    pub ai: Vec<u8>,
-    pub ar: Vec<u8>,
+    pub ai: Option<Vec<u8>>,
+    pub ar: Option<Vec<u8>>,
 }
 
 pub(crate) struct LarvalChildSa {
@@ -393,11 +406,16 @@ impl ChildSa {
         let mut er = vec![0; self.chosen_proposal.cipher().key_size()];
         buf.try_copy_to_slice(&mut er)?;
 
-        let mut ai = vec![0; integ_key_size];
-        buf.try_copy_to_slice(&mut ai)?;
+        let (ai, ar) = if self.chosen_proposal.integ().is_some() {
+            let mut ai = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ai)?;
 
-        let mut ar = vec![0; integ_key_size];
-        buf.try_copy_to_slice(&mut ar)?;
+            let mut ar = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ar)?;
+            (Some(ai), Some(ar))
+        } else {
+            (None, None)
+        };
 
         self.keys = Some(ProtectingKeys { ei, er, ai, ar });
 
@@ -418,6 +436,10 @@ impl ChildSa {
 
     pub fn chosen_proposal(&self) -> &ChosenProposal {
         &self.chosen_proposal
+    }
+
+    pub fn keys(&self) -> Option<&ProtectingKeys> {
+        self.keys.as_ref()
     }
 }
 

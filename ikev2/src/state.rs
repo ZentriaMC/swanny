@@ -55,7 +55,7 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
 
 #[derive(Default)]
 pub(crate) struct StateData {
-    initiator: Option<bool>,
+    pub(crate) initiator: Option<bool>,
     spi: Spi,
     peer_spi: Option<Spi>,
     message_id: u32,
@@ -212,7 +212,7 @@ impl StateData {
         };
 
         let integ = chosen_proposal.integ().unwrap();
-        Ok(Some(integ.sign(key, message.as_ref())?))
+        Ok(Some(integ.sign(key.as_ref().unwrap(), message.as_ref())?))
     }
 
     fn message_verify(&self, message: impl AsRef<[u8]>) -> Result<bool> {
@@ -244,6 +244,6 @@ impl StateData {
         let (message, checksum) = message
             .as_ref()
             .split_at(message.as_ref().len() - integ.output_size());
-        Ok(integ.verify(key, message, checksum)?)
+        Ok(integ.verify(key.as_ref().unwrap(), message, checksum)?)
     }
 }

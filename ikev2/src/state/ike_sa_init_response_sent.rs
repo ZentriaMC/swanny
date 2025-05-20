@@ -101,8 +101,8 @@ impl IkeSaInitResponseSent {
 
         let larval_child_sa = LarvalChildSa::new(
             config,
-            ts_i.traffic_selectors().next().unwrap(),
             ts_r.traffic_selectors().next().unwrap(),
+            ts_i.traffic_selectors().next().unwrap(),
         )?;
         let proposals: Vec<_> = config
             .ipsec_proposals(&larval_child_sa.spi.as_ref().unwrap())

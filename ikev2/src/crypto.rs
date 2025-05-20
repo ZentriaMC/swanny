@@ -125,7 +125,7 @@ impl Integ {
         let (md, output_size) = match id {
             IntegId::AUTH_HMAC_MD5_96 => (MessageDigest::md5(), 12),
             IntegId::AUTH_HMAC_SHA1_96 => (MessageDigest::sha1(), 12),
-            _ => return Err(anyhow::anyhow!("unsupported integrity checking")),
+            _ => return Err(anyhow::anyhow!("unsupported integrity checking algorithm")),
         };
 
         Ok(Self {
@@ -133,6 +133,10 @@ impl Integ {
             md,
             output_size,
         })
+    }
+
+    pub fn id(&self) -> IntegId {
+        self.id
     }
 
     pub fn sign(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Vec<u8>> {
@@ -392,6 +396,10 @@ impl Cipher {
 
     pub fn is_aead(&self) -> bool {
         self.is_aead
+    }
+
+    pub fn id(&self) -> EncrId {
+        self.id
     }
 
     pub fn encrypt(&self, key: impl AsRef<[u8]>, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
