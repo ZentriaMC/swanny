@@ -20,7 +20,7 @@ ip netns exec "$NS1" ip xfrm policy add \
    proto icmp \
    dir fwd \
    priority 1000 \
-   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" reqid "42" \
+   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" \
    mode transport
 
 ip netns exec "$NS1" ip xfrm policy add \
@@ -28,7 +28,7 @@ ip netns exec "$NS1" ip xfrm policy add \
    proto icmp \
    dir out \
    priority 1000 \
-   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" reqid "42" \
+   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" \
    mode transport
 
 ip netns exec "$NS1" ip xfrm policy add \
@@ -36,7 +36,7 @@ ip netns exec "$NS1" ip xfrm policy add \
    proto icmp \
    dir in \
    priority 1000 \
-   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" reqid "42" \
+   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" \
    mode transport
 
 ip netns exec "$NS2" ip xfrm policy add \
@@ -44,7 +44,7 @@ ip netns exec "$NS2" ip xfrm policy add \
    proto icmp \
    dir fwd \
    priority 1000 \
-   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" reqid "42" \
+   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" \
    mode transport
 
 ip netns exec "$NS2" ip xfrm policy add \
@@ -52,7 +52,7 @@ ip netns exec "$NS2" ip xfrm policy add \
    proto icmp \
    dir out \
    priority 1000 \
-   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" reqid "42" \
+   tmpl src 192.168.1.2 dst 192.168.1.1 proto "esp" \
    mode transport
 
 ip netns exec "$NS2" ip xfrm policy add \
@@ -60,5 +60,5 @@ ip netns exec "$NS2" ip xfrm policy add \
    proto icmp \
    dir in \
    priority 1000 \
-   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" reqid "42" \
+   tmpl src 192.168.1.1 dst 192.168.1.2 proto "esp" \
    mode transport

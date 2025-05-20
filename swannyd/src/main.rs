@@ -151,6 +151,7 @@ fn create_modify_message(
 ) -> Result<ModifyMessage> {
     let mut message = ModifyMessage::default();
     message.user_sa_info.source(src_address);
+    message.user_sa_info.mode = 0;
     message.user_sa_info.family = match src_address {
         IpAddr::V4(_) => libc::AF_INET.try_into()?,
         IpAddr::V6(_) => libc::AF_INET6.try_into()?,
