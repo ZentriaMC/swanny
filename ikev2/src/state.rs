@@ -7,7 +7,7 @@ use crate::{
         serialize::Serialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, Keys},
+    sa::{ChosenProposal, ControlMessage, Keys, LarvalChildSa},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -65,7 +65,7 @@ pub(crate) struct StateData {
     nonce_r: Option<Vec<u8>>,
     ike_sa_init_request: Option<Vec<u8>>,
     ike_sa_init_response: Option<Vec<u8>>,
-    larval_child_sa: Option<ChildSa>,
+    larval_child_sa: Option<LarvalChildSa>,
 }
 
 impl StateData {

@@ -32,9 +32,7 @@ pub struct Prf {
 
 impl std::fmt::Debug for Prf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Prf")
-            .field("id", &self.id)
-            .finish()
+        f.debug_struct("Prf").field("id", &self.id).finish()
     }
 }
 
@@ -282,9 +280,7 @@ pub struct Group {
 
 impl std::fmt::Debug for Group {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Group")
-            .field("id", &self.id)
-            .finish()
+        f.debug_struct("Group").field("id", &self.id).finish()
     }
 }
 
@@ -346,9 +342,7 @@ pub struct Cipher {
 
 impl std::fmt::Debug for Cipher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Cipher")
-            .field("id", &self.id)
-            .finish()
+        f.debug_struct("Cipher").field("id", &self.id).finish()
     }
 }
 

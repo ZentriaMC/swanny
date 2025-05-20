@@ -81,6 +81,9 @@ async fn main() -> Result<()> {
                                 .expect("unable to deserialize message");
                             pending_operations.push(responder2.handle_message(serialized_message.to_vec()));
                         },
+                        ControlMessage::CreateChildSa(child_sa) => {
+                            eprintln!("Initiator created Child SA {:?}", child_sa);
+                        }
                         _ => {},
                     }
                 },
@@ -93,6 +96,9 @@ async fn main() -> Result<()> {
                                 .expect("unable to deserialize message");
                             pending_operations.push(initiator2.handle_message(serialized_message.to_vec()));
                         },
+                        ControlMessage::CreateChildSa(child_sa) => {
+                            eprintln!("Responder created Child SA {:?}", child_sa);
+                        }
                         _ => {},
                     }
                 },

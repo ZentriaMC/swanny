@@ -7,7 +7,7 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::ControlMessage,
+    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa},
     state::{self, State, StateData},
 };
 use anyhow::Result;
@@ -27,7 +27,11 @@ impl std::fmt::Display for IkeAuthRequestSent {
 }
 
 impl IkeAuthRequestSent {
-    fn handle_ike_auth_response<D>(config: &Config, data: &D, response: &Message) -> Result<()>
+    fn handle_ike_auth_response<D>(
+        config: &Config,
+        data: &D,
+        response: &Message,
+    ) -> Result<ChosenProposal>
     where
         D: Deref<Target = StateData>,
     {
@@ -40,9 +44,11 @@ impl IkeAuthRequestSent {
         }
         let sk: &payload::Sk = last.try_into()?;
 
+        let keys = data.keys.as_ref().unwrap();
+
         let payloads = sk.decrypt(
             data.chosen_proposal.as_ref().unwrap().cipher(),
-            &data.keys.as_ref().unwrap().protecting.er,
+            &keys.protecting.er,
         )?;
 
         let auth = payloads
@@ -57,6 +63,12 @@ impl IkeAuthRequestSent {
             .ok_or_else(|| anyhow::anyhow!("no IDr payload"))?;
         let id_r: &payload::Id = id_r.try_into()?;
 
+        let sa_r = payloads
+            .iter()
+            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
+            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
+        let sa_r: &payload::Sa = sa_r.try_into()?;
+
         if data.verify(config, id_r, auth)? {
             info!(
                 spi = &data.peer_spi.as_ref().unwrap()[..],
@@ -66,7 +78,33 @@ impl IkeAuthRequestSent {
             return Err(anyhow::anyhow!("authentication failed"));
         }
 
-        Ok(())
+        let proposals = data
+            .larval_child_sa
+            .as_ref()
+            .unwrap()
+            .proposals
+            .as_ref()
+            .unwrap();
+
+        Ok(ChosenProposal::negotiate(proposals, sa_r.proposals())
+            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?)
+    }
+
+    fn create_child_sa<D>(
+        data: &D,
+        chosen_proposal: &ChosenProposal,
+        larval_child_sa: LarvalChildSa,
+    ) -> Result<ChildSa>
+    where
+        D: Deref<Target = StateData>,
+    {
+        let keys = data.keys.as_ref().unwrap();
+        Ok(larval_child_sa.build(
+            &chosen_proposal,
+            &keys.deriving.d,
+            &data.nonce_i.as_ref().unwrap(),
+            &data.nonce_r.as_ref().unwrap(),
+        )?)
     }
 }
 
@@ -75,17 +113,26 @@ impl State for IkeAuthRequestSent {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,
-        _sender: UnboundedSender<ControlMessage>,
+        sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
         let response = Message::deserialize(&mut message)?;
         match response.exchange() {
             Num::Assigned(ExchangeType::IKE_AUTH) => {
-                {
+                let chosen_proposal = {
                     let data = data.read().await;
-                    Self::handle_ike_auth_response(config, &data, &response)?;
-                }
+                    Self::handle_ike_auth_response(config, &data, &response)?
+                };
+                let larval_child_sa = {
+                    let mut data = data.write().await;
+                    data.larval_child_sa.take().unwrap()
+                };
+                let child_sa = {
+                    let data = data.read().await;
+                    Self::create_child_sa(&data, &chosen_proposal, larval_child_sa)?
+                };
+                sender.unbounded_send(ControlMessage::CreateChildSa(child_sa))?;
                 Ok(Box::new(state::Established {}))
             }
             exchange => {

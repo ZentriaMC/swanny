@@ -96,7 +96,7 @@ impl IkeSaInitRequestSent {
         );
 
         let larval_child_sa = data.larval_child_sa.as_ref().unwrap();
-        let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi()).collect();
+        let proposals = larval_child_sa.proposals.as_ref().unwrap();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
@@ -106,7 +106,7 @@ impl IkeSaInitRequestSent {
         let payloads = [
             Payload::new(
                 Num::Assigned(PayloadType::SA),
-                payload::Content::Sa(payload::Sa::new(proposals)),
+                payload::Content::Sa(payload::Sa::new(proposals.clone())),
                 true,
             ),
             Payload::new(
@@ -124,12 +124,16 @@ impl IkeSaInitRequestSent {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::TSi),
-                payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_i().clone()))),
+                payload::Content::Ts(payload::Ts::new(Some(
+                    larval_child_sa.ts_i.as_ref().unwrap().clone(),
+                ))),
                 true,
             ),
             Payload::new(
                 Num::Assigned(PayloadType::TSr),
-                payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r().clone()))),
+                payload::Content::Ts(payload::Ts::new(Some(
+                    larval_child_sa.ts_r.as_ref().unwrap().clone(),
+                ))),
                 true,
             ),
         ];

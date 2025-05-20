@@ -153,6 +153,9 @@ async fn main() -> Result<()> {
                         let peer_address: std::net::SocketAddr = (config.peer_address, 500).into();
                         outgoing_framed.send((message, peer_address)).await?;
                     },
+                    ControlMessage::CreateChildSa(child_sa) => {
+                        eprintln!("Created Child SA {:?}", &child_sa);
+                    }
                 }
             },
             result = incoming_framed.select_next_some() => {

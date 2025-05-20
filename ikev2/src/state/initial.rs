@@ -8,7 +8,7 @@ use crate::{
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, IkeSa},
+    sa::{ChosenProposal, ControlMessage, LarvalChildSa},
     state::{self, Keys, State, StateData},
 };
 use anyhow::Result;
@@ -274,7 +274,7 @@ impl State for Initial {
             data.private_key = Some(private_key);
             data.nonce_i = Some(nonce);
             data.message_id = request.id();
-            data.larval_child_sa = Some(ChildSa::new(ts_i, ts_r)?);
+            data.larval_child_sa = Some(LarvalChildSa::new(config, ts_i, ts_r)?);
             data.ike_sa_init_request = Some(buf.to_vec());
         }
 

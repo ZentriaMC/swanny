@@ -2,12 +2,12 @@ use crate::{
     config::Config,
     message::{
         Message,
-        num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType, Protocol},
+        num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, IkeSa},
+    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa},
     state::{self, State, StateData},
 };
 use anyhow::Result;
@@ -17,7 +17,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::info;
 
 pub struct IkeSaInitResponseSent;
 
@@ -28,7 +28,11 @@ impl std::fmt::Display for IkeSaInitResponseSent {
 }
 
 impl IkeSaInitResponseSent {
-    fn handle_ike_auth_request<D>(config: &Config, data: &D, request: &Message) -> Result<Message>
+    fn handle_ike_auth_request<D>(
+        config: &Config,
+        data: &D,
+        request: &Message,
+    ) -> Result<(Message, ChildSa)>
     where
         D: Deref<Target = StateData>,
     {
@@ -41,9 +45,11 @@ impl IkeSaInitResponseSent {
         }
         let sk: &payload::Sk = last.try_into()?;
 
+        let keys = data.keys.as_ref().unwrap();
+
         let payloads = sk.decrypt(
             data.chosen_proposal.as_ref().unwrap().cipher(),
-            &data.keys.as_ref().unwrap().protecting.ei,
+            &keys.protecting.ei,
         )?;
 
         let auth = payloads
@@ -95,23 +101,28 @@ impl IkeSaInitResponseSent {
             request.id(),
         );
 
-        let mut child_sa = ChildSa::new(
+        let larval_child_sa = LarvalChildSa::new(
+            config,
             ts_i.traffic_selectors().next().unwrap(),
             ts_r.traffic_selectors().next().unwrap(),
         )?;
-        let proposals: Vec<_> = config.ipsec_proposals(&child_sa.spi()).collect();
+        let proposals: Vec<_> = config
+            .ipsec_proposals(&larval_child_sa.spi.as_ref().unwrap())
+            .collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
         let chosen_proposal = ChosenProposal::negotiate(&proposals, sa_i.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
-        let proposal = chosen_proposal.proposal(
-            1,
-            Num::Assigned(chosen_proposal.protocol()),
-            chosen_proposal.spi(),
-        );
-        child_sa.set_chosen_proposal(&chosen_proposal);
+        let child_sa = larval_child_sa.build(
+            &chosen_proposal,
+            &keys.deriving.d,
+            &data.nonce_i.as_ref().unwrap(),
+            &data.nonce_r.as_ref().unwrap(),
+        )?;
+        let proposal =
+            chosen_proposal.proposal(1, Num::Assigned(chosen_proposal.protocol()), child_sa.spi());
 
         let payloads = [
             Payload::new(
@@ -134,9 +145,6 @@ impl IkeSaInitResponseSent {
             ),
         ];
 
-        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
-        let keys = data.keys.as_ref().unwrap();
-
         message.add_payloads([Payload::new(
             Num::Assigned(PayloadType::SK),
             payload::Content::Sk(payload::Sk::encrypt(
@@ -146,7 +154,7 @@ impl IkeSaInitResponseSent {
             )?),
             true,
         )]);
-        Ok(message)
+        Ok((message, child_sa))
     }
 }
 
@@ -162,7 +170,7 @@ impl State for IkeSaInitResponseSent {
         let request = Message::deserialize(&mut message)?;
         match request.exchange() {
             Num::Assigned(ExchangeType::IKE_AUTH) => {
-                let response = {
+                let (response, child_sa) = {
                     let data = data.read().await;
 
                     Self::handle_ike_auth_request(config, &data, &request)?
@@ -173,6 +181,7 @@ impl State for IkeSaInitResponseSent {
                 response.serialize(&mut buf)?;
 
                 sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                sender.unbounded_send(ControlMessage::CreateChildSa(child_sa))?;
                 Ok(Box::new(state::Established {}))
             }
             exchange => {

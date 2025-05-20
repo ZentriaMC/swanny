@@ -113,7 +113,7 @@ impl IkeSa {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ChosenProposal {
+pub struct ChosenProposal {
     protocol: Protocol,
     spi: Vec<u8>,
     cipher: Cipher,
@@ -225,13 +225,13 @@ impl ChosenProposal {
     pub fn generate_keys(
         &self,
         skeyseed: impl AsRef<[u8]>,
-        n_i: impl AsRef<[u8]>,
-        n_r: impl AsRef<[u8]>,
+        nonce_i: impl AsRef<[u8]>,
+        nonce_r: impl AsRef<[u8]>,
         spi_i: &Spi,
         spi_r: &Spi,
     ) -> Result<Keys> {
-        let mut buf = n_i.as_ref().to_vec();
-        buf.extend_from_slice(n_r.as_ref());
+        let mut buf = nonce_i.as_ref().to_vec();
+        buf.extend_from_slice(nonce_r.as_ref());
         buf.extend_from_slice(&spi_i[..]);
         buf.extend_from_slice(&spi_r[..]);
         let integ_key_size = self
@@ -295,24 +295,65 @@ impl ChosenProposal {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Keys {
+pub struct Keys {
     pub deriving: DerivingKeys,
     pub protecting: ProtectingKeys,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DerivingKeys {
+pub struct DerivingKeys {
     pub d: Vec<u8>,
     pub pi: Vec<u8>,
     pub pr: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProtectingKeys {
+pub struct ProtectingKeys {
     pub ei: Vec<u8>,
     pub er: Vec<u8>,
     pub ai: Vec<u8>,
     pub ar: Vec<u8>,
+}
+
+pub(crate) struct LarvalChildSa {
+    pub ts_i: Option<TrafficSelector>,
+    pub ts_r: Option<TrafficSelector>,
+    pub spi: Option<EspSpi>,
+    pub proposals: Option<Vec<Proposal>>,
+}
+
+impl LarvalChildSa {
+    pub fn new(config: &Config, ts_i: &TrafficSelector, ts_r: &TrafficSelector) -> Result<Self> {
+        let mut spi = EspSpi::default();
+        crypto::rand_bytes(&mut spi)?;
+
+        let proposals: Vec<_> = config.ipsec_proposals(&spi).collect();
+
+        Ok(Self {
+            ts_i: Some(ts_i.to_owned()),
+            ts_r: Some(ts_r.to_owned()),
+            spi: Some(spi),
+            proposals: Some(proposals),
+        })
+    }
+
+    pub fn build(
+        mut self,
+        chosen_proposal: &ChosenProposal,
+        d: impl AsRef<[u8]>,
+        nonce_i: impl AsRef<[u8]>,
+        nonce_r: impl AsRef<[u8]>,
+    ) -> Result<ChildSa> {
+        let mut child_sa = ChildSa {
+            ts_i: self.ts_i.take().unwrap(),
+            ts_r: self.ts_r.take().unwrap(),
+            spi: self.spi.take().unwrap(),
+            chosen_proposal: chosen_proposal.to_owned(),
+            keys: None,
+        };
+        child_sa.generate_keys(d.as_ref(), nonce_i.as_ref(), nonce_r.as_ref())?;
+        Ok(child_sa)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -320,22 +361,47 @@ pub struct ChildSa {
     ts_i: TrafficSelector,
     ts_r: TrafficSelector,
     spi: EspSpi,
-    chosen_proposal: Option<ChosenProposal>,
+    chosen_proposal: ChosenProposal,
     keys: Option<ProtectingKeys>,
 }
 
 impl ChildSa {
-    pub fn new(ts_i: &TrafficSelector, ts_r: &TrafficSelector) -> Result<Self> {
-        let mut spi = EspSpi::default();
-        crypto::rand_bytes(&mut spi)?;
+    pub fn generate_keys(
+        &mut self,
+        d: impl AsRef<[u8]>,
+        nonce_i: impl AsRef<[u8]>,
+        nonce_r: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let mut buf = nonce_i.as_ref().to_vec();
+        buf.extend_from_slice(nonce_r.as_ref());
+        let integ_key_size = self
+            .chosen_proposal
+            .integ()
+            .as_ref()
+            .map(|integ| integ.key_size())
+            .unwrap_or(0);
+        let buf = self.chosen_proposal.prf().prfplus(
+            d.as_ref(),
+            &buf,
+            self.chosen_proposal.cipher().key_size() * 2 + integ_key_size * 2,
+        )?;
+        let mut buf = buf.as_slice();
 
-        Ok(Self {
-            ts_i: ts_i.to_owned(),
-            ts_r: ts_r.to_owned(),
-            spi,
-            chosen_proposal: None,
-            keys: None,
-        })
+        let mut ei = vec![0; self.chosen_proposal.cipher().key_size()];
+        buf.try_copy_to_slice(&mut ei)?;
+
+        let mut er = vec![0; self.chosen_proposal.cipher().key_size()];
+        buf.try_copy_to_slice(&mut er)?;
+
+        let mut ai = vec![0; integ_key_size];
+        buf.try_copy_to_slice(&mut ai)?;
+
+        let mut ar = vec![0; integ_key_size];
+        buf.try_copy_to_slice(&mut ar)?;
+
+        self.keys = Some(ProtectingKeys { ei, er, ai, ar });
+
+        Ok(())
     }
 
     pub fn ts_i(&self) -> &TrafficSelector {
@@ -350,12 +416,8 @@ impl ChildSa {
         &self.spi
     }
 
-    pub fn chosen_proposal(&self) -> Option<&ChosenProposal> {
-        self.chosen_proposal.as_ref()
-    }
-
-    pub fn set_chosen_proposal(&mut self, chosen_proposal: &ChosenProposal) {
-        self.chosen_proposal = Some(chosen_proposal.to_owned())
+    pub fn chosen_proposal(&self) -> &ChosenProposal {
+        &self.chosen_proposal
     }
 }
 
