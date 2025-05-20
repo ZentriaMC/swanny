@@ -135,6 +135,24 @@ impl Integ {
         })
     }
 
+    pub fn sign(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        let pkey = PKey::hmac(key.as_ref())?;
+        let mut signer = Signer::new(self.md, &pkey)?;
+        signer.update(data.as_ref())?;
+        let mut signature = signer.sign_to_vec()?;
+        signature.truncate(self.output_size);
+        Ok(signature)
+    }
+
+    pub fn verify(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+        signature: impl AsRef<[u8]>,
+    ) -> Result<bool> {
+        Ok(memcmp::eq(&self.sign(key, data)?, signature.as_ref()))
+    }
+
     pub fn key_size(&self) -> usize {
         self.md.size()
     }

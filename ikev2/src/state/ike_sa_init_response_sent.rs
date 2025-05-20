@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     message::{
         Message,
-        num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
+        num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
@@ -17,7 +17,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct IkeSaInitResponseSent;
 
@@ -82,7 +82,7 @@ impl IkeSaInitResponseSent {
             .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
         let ts_r: &payload::Ts = ts_r.try_into()?;
 
-        if data.verify(config, id_i, auth)? {
+        if data.auth_verify(config, id_i, auth)? {
             info!(
                 spi = &data.peer_spi.as_ref().unwrap()[..],
                 "responder authenticated initiator"
@@ -90,8 +90,6 @@ impl IkeSaInitResponseSent {
         } else {
             return Err(anyhow::anyhow!("authentication failed"));
         }
-
-        let auth_data = data.sign(config)?;
 
         let mut message = Message::new(
             request.spi_i(),
@@ -132,10 +130,7 @@ impl IkeSaInitResponseSent {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::AUTH),
-                payload::Content::Auth(payload::Auth::new(
-                    Num::Assigned(AuthType::PSK),
-                    &auth_data,
-                )),
+                payload::Content::Auth(data.auth_sign(config)?),
                 true,
             ),
             Payload::new(
@@ -167,9 +162,19 @@ impl State for IkeSaInitResponseSent {
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
+        let serialized_request = message;
         let request = Message::deserialize(&mut message)?;
         match request.exchange() {
             Num::Assigned(ExchangeType::IKE_AUTH) => {
+                {
+                    let data = data.read().await;
+                    if data.message_verify(serialized_request)? {
+                        debug!("checksum verified");
+                    } else {
+                        return Err(anyhow::anyhow!("checksum mismatch"));
+                    }
+                }
+
                 let (response, child_sa) = {
                     let data = data.read().await;
 
@@ -179,6 +184,13 @@ impl State for IkeSaInitResponseSent {
                 let len = response.size()?;
                 let mut buf = BytesMut::with_capacity(len);
                 response.serialize(&mut buf)?;
+
+                {
+                    let data = data.read().await;
+                    if let Some(checksum) = data.message_sign(&buf)? {
+                        buf.extend_from_slice(&checksum);
+                    }
+                }
 
                 sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
                 sender.unbounded_send(ControlMessage::CreateChildSa(child_sa))?;

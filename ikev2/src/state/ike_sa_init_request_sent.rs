@@ -3,7 +3,7 @@ use crate::{
     crypto,
     message::{
         Message, Spi,
-        num::{AuthType, ExchangeType, MessageFlags, Num, PayloadType},
+        num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
@@ -101,8 +101,6 @@ impl IkeSaInitRequestSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let auth_data = data.sign(config)?;
-
         let payloads = [
             Payload::new(
                 Num::Assigned(PayloadType::SA),
@@ -116,10 +114,7 @@ impl IkeSaInitRequestSent {
             ),
             Payload::new(
                 Num::Assigned(PayloadType::AUTH),
-                payload::Content::Auth(payload::Auth::new(
-                    Num::Assigned(AuthType::PSK),
-                    &auth_data,
-                )),
+                payload::Content::Auth(data.auth_sign(config)?),
                 true,
             ),
             Payload::new(
@@ -195,6 +190,14 @@ impl State for IkeSaInitRequestSent {
                 let len = request.size()?;
                 let mut buf = BytesMut::with_capacity(len);
                 request.serialize(&mut buf)?;
+
+                {
+                    let data = data.read().await;
+                    if let Some(checksum) = data.message_sign(&buf)? {
+                        buf.extend_from_slice(&checksum);
+                    }
+                }
+
                 sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
                 Ok(Box::new(state::IkeAuthRequestSent {}))

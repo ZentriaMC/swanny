@@ -112,6 +112,9 @@ impl Payload {
         let len = len
             .checked_sub(HEADER_SIZE)
             .ok_or_else(|| anyhow::anyhow!("invalid payload length"))?;
+        if len > buf.remaining() {
+            return Err(anyhow::anyhow!("invalid payload length"));
+        }
 
         let content = match payload_type {
             Num::Assigned(PayloadType::SA) => {
@@ -618,6 +621,9 @@ pub fn deserialize_payloads(
     while buf.has_remaining() {
         let (payload, next_type) = Payload::deserialize(payload_type, buf)?;
         payloads.push(payload);
+        if payload_type == Num::Assigned(PayloadType::SK) {
+            break;
+        }
         payload_type = next_type;
     }
     Ok(payloads)

@@ -16,7 +16,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct IkeAuthRequestSent;
 
@@ -69,7 +69,7 @@ impl IkeAuthRequestSent {
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
         let sa_r: &payload::Sa = sa_r.try_into()?;
 
-        if data.verify(config, id_r, auth)? {
+        if data.auth_verify(config, id_r, auth)? {
             info!(
                 spi = &data.peer_spi.as_ref().unwrap()[..],
                 "initiator authenticated responder"
@@ -117,9 +117,18 @@ impl State for IkeAuthRequestSent {
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
+        let serialized_response = message;
         let response = Message::deserialize(&mut message)?;
         match response.exchange() {
             Num::Assigned(ExchangeType::IKE_AUTH) => {
+                {
+                    let data = data.read().await;
+                    if data.message_verify(serialized_response)? {
+                        debug!("checksum verified");
+                    } else {
+                        return Err(anyhow::anyhow!("checksum mismatch"));
+                    }
+                }
                 let chosen_proposal = {
                     let data = data.read().await;
                     Self::handle_ike_auth_response(config, &data, &response)?
