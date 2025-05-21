@@ -220,6 +220,10 @@ pub enum PrfId {
     PRF_HMAC_MD5 = 1,
     PRF_HMAC_SHA1 = 2,
     PRF_HMAC_TIGER = 3,
+    PRF_AES128_XCBC = 4,
+    PRF_HMAC_SHA2_256 = 5,
+    PRF_HMAC_SHA2_384 = 6,
+    PRF_HMAC_SHA2_512 = 7
 }
 
 impl From<PrfId> for u16 {

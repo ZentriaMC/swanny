@@ -41,6 +41,9 @@ impl Prf {
         let md = match id {
             PrfId::PRF_HMAC_MD5 => MessageDigest::md5(),
             PrfId::PRF_HMAC_SHA1 => MessageDigest::sha1(),
+            PrfId::PRF_HMAC_SHA2_256 => MessageDigest::sha256(),
+            PrfId::PRF_HMAC_SHA2_384 => MessageDigest::sha384(),
+            PrfId::PRF_HMAC_SHA2_512 => MessageDigest::sha512(),
             _ => return Err(anyhow::anyhow!("unsupported PRF")),
         };
 
