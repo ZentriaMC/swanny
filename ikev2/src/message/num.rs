@@ -241,6 +241,15 @@ pub enum IntegId {
     AUTH_DES_MAC = 3,
     AUTH_KPDK_MD5 = 4,
     AUTH_AES_XCBC_96 = 5,
+    AUTH_HMAC_MD5_128 = 6,
+    AUTH_HMAC_SHA1_160 = 7,
+    AUTH_AES_CMAC_96 = 8,
+    AUTH_AES_128_GMAC = 9,
+    AUTH_AES_192_GMAC = 10,
+    AUTH_AES_256_GMAC = 11,
+    AUTH_HMAC_SHA2_256_128 = 12,
+    AUTH_HMAC_SHA2_384_192 = 13,
+    AUTH_HMAC_SHA2_512_256 = 14,
 }
 
 impl From<IntegId> for u16 {

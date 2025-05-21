@@ -128,6 +128,9 @@ impl Integ {
         let (md, output_size) = match id {
             IntegId::AUTH_HMAC_MD5_96 => (MessageDigest::md5(), 12),
             IntegId::AUTH_HMAC_SHA1_96 => (MessageDigest::sha1(), 12),
+            IntegId::AUTH_HMAC_SHA2_256_128 => (MessageDigest::sha256(), 16),
+            IntegId::AUTH_HMAC_SHA2_384_192 => (MessageDigest::sha384(), 24),
+            IntegId::AUTH_HMAC_SHA2_512_256 => (MessageDigest::sha512(), 32),
             _ => return Err(anyhow::anyhow!("unsupported integrity checking algorithm")),
         };
 
