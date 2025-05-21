@@ -57,7 +57,7 @@ impl IkeSaInitRequestSent {
         let chosen_proposal = ChosenProposal::new(proposal)?;
 
         let private_key = data.private_key.as_ref().unwrap();
-        if ke_r.dh_group() != Num::Assigned(private_key.group().id()) {
+        if ke_r.dh_group() != Num::Assigned(private_key.group().id().into()) {
             return Err(anyhow::anyhow!("unmatched DH group"));
         }
 
@@ -90,7 +90,7 @@ impl IkeSaInitRequestSent {
         let mut message = Message::new(
             &data.spi,
             spi_r,
-            Num::Assigned(ExchangeType::IKE_AUTH),
+            Num::Assigned(ExchangeType::IKE_AUTH.into()),
             MessageFlags::I,
             data.message_id.wrapping_add(1),
         );
@@ -103,29 +103,29 @@ impl IkeSaInitRequestSent {
 
         let payloads = [
             Payload::new(
-                Num::Assigned(PayloadType::SA),
+                Num::Assigned(PayloadType::SA.into()),
                 payload::Content::Sa(payload::Sa::new(proposals.clone())),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::IDi),
+                Num::Assigned(PayloadType::IDi.into()),
                 payload::Content::Id(config.id().clone()),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::AUTH),
+                Num::Assigned(PayloadType::AUTH.into()),
                 payload::Content::Auth(data.auth_sign(config)?),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::TSi),
+                Num::Assigned(PayloadType::TSi.into()),
                 payload::Content::Ts(payload::Ts::new(Some(
                     larval_child_sa.ts_i.as_ref().unwrap().clone(),
                 ))),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::TSr),
+                Num::Assigned(PayloadType::TSr.into()),
                 payload::Content::Ts(payload::Ts::new(Some(
                     larval_child_sa.ts_r.as_ref().unwrap().clone(),
                 ))),
@@ -137,7 +137,7 @@ impl IkeSaInitRequestSent {
         let keys = data.keys.as_ref().unwrap();
 
         message.add_payloads([Payload::new(
-            Num::Assigned(PayloadType::SK),
+            Num::Assigned(PayloadType::SK.into()),
             payload::Content::Sk(payload::Sk::encrypt(
                 chosen_proposal.cipher(),
                 &keys.protecting.ei,
@@ -160,8 +160,8 @@ impl State for IkeSaInitRequestSent {
     ) -> Result<Box<dyn State>> {
         let serialized_response = message;
         let response = Message::deserialize(&mut message)?;
-        match response.exchange() {
-            Num::Assigned(ExchangeType::IKE_SA_INIT) => {
+        match response.exchange().assigned() {
+            Some(ExchangeType::IKE_SA_INIT) => {
                 let (chosen_proposal, keys, nonce_r) = {
                     let data = data.read().await;
                     Self::handle_ike_sa_init_response(&data, &response)?

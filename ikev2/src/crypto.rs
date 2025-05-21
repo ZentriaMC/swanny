@@ -97,8 +97,8 @@ impl Prf {
 impl From<&Prf> for Transform {
     fn from(other: &Prf) -> Self {
         Transform::new(
-            Num::Assigned(TransformType::PRF),
-            Num::Assigned(TransformId::Prf(Num::Assigned(other.id))),
+            Num::Assigned(TransformType::PRF.into()),
+            Num::Assigned(TransformId::Prf(Num::Assigned(other.id.into())).into()),
             None::<Attribute>,
         )
     }
@@ -169,8 +169,8 @@ impl Integ {
 impl From<&Integ> for Transform {
     fn from(other: &Integ) -> Self {
         Transform::new(
-            Num::Assigned(TransformType::INTEG),
-            Num::Assigned(TransformId::Integ(Num::Assigned(other.id))),
+            Num::Assigned(TransformType::INTEG.into()),
+            Num::Assigned(TransformId::Integ(Num::Assigned(other.id.into())).into()),
             None::<Attribute>,
         )
     }
@@ -348,8 +348,8 @@ impl Group {
 impl From<&Group> for Transform {
     fn from(other: &Group) -> Self {
         Transform::new(
-            Num::Assigned(TransformType::DH),
-            Num::Assigned(TransformId::Dh(Num::Assigned(other.id))),
+            Num::Assigned(TransformType::DH.into()),
+            Num::Assigned(TransformId::Dh(Num::Assigned(other.id.into())).into()),
             None::<Attribute>,
         )
     }
@@ -451,10 +451,10 @@ impl Cipher {
 impl From<&Cipher> for Transform {
     fn from(other: &Cipher) -> Self {
         Transform::new(
-            Num::Assigned(TransformType::ENCR),
-            Num::Assigned(TransformId::Encr(Num::Assigned(other.id))),
+            Num::Assigned(TransformType::ENCR.into()),
+            Num::Assigned(TransformId::Encr(Num::Assigned(other.id.into())).into()),
             [Attribute::new(
-                Num::Assigned(AttributeType::KeyLength),
+                Num::Assigned(AttributeType::KeyLength.into()),
                 &((other.key_size() * 8) as u16).to_be_bytes()[..],
                 AttributeFormat::TV,
             )],

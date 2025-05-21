@@ -30,13 +30,13 @@ impl From<TransformId> for u16 {
 
 impl Num<u16, TransformId> {
     pub fn from_u16(ty: Num<u8, TransformType>, value: u16) -> Self {
-        match ty {
-            Num::Assigned(TransformType::ENCR) => Num::Assigned(TransformId::Encr(value.into())),
-            Num::Assigned(TransformType::PRF) => Num::Assigned(TransformId::Prf(value.into())),
-            Num::Assigned(TransformType::INTEG) => Num::Assigned(TransformId::Integ(value.into())),
-            Num::Assigned(TransformType::DH) => Num::Assigned(TransformId::Dh(value.into())),
-            Num::Assigned(TransformType::ESN) => Num::Assigned(TransformId::Esn(value.into())),
-            Num::Unassigned(_) => Num::Unassigned(value),
+        match ty.assigned() {
+            Some(TransformType::ENCR) => Num::Assigned(TransformId::Encr(value.into()).into()),
+            Some(TransformType::PRF) => Num::Assigned(TransformId::Prf(value.into()).into()),
+            Some(TransformType::INTEG) => Num::Assigned(TransformId::Integ(value.into()).into()),
+            Some(TransformType::DH) => Num::Assigned(TransformId::Dh(value.into()).into()),
+            Some(TransformType::ESN) => Num::Assigned(TransformId::Esn(value.into()).into()),
+            None => Num::Unassigned(value.into()),
         }
     }
 }
@@ -48,7 +48,7 @@ macro_rules! create_try_from {
 
             fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
                 match other {
-                    TransformId::$ce(Num::Assigned(id)) => Ok(id),
+                    TransformId::$ce(Num::Assigned(id)) => Ok(id.into_inner()),
                     _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
                 }
             }
@@ -58,8 +58,8 @@ macro_rules! create_try_from {
             type Error = anyhow::Error;
 
             fn try_from(other: Num<u16, TransformId>) -> std::result::Result<Self, Self::Error> {
-                match other {
-                    Num::Assigned(TransformId::$ce(Num::Assigned(id))) => Ok(id),
+                match other.assigned() {
+                    Some(TransformId::$ce(Num::Assigned(id))) => Ok(id.into_inner()),
                     _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
                 }
             }

@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     message::{
         Message,
-        num::{ExchangeType, Num, PayloadType},
+        num::{ExchangeType, PayloadType},
         payload,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
@@ -39,7 +39,7 @@ impl IkeAuthRequestSent {
             .payloads()
             .last()
             .ok_or_else(|| anyhow::anyhow!("no payload"))?;
-        if last.ty() != Num::Assigned(PayloadType::SK) {
+        if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
             return Err(anyhow::anyhow!("no SK payload"));
         }
         let sk: &payload::Sk = last.try_into()?;
@@ -53,19 +53,19 @@ impl IkeAuthRequestSent {
 
         let auth = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::AUTH))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::AUTH)))
             .ok_or_else(|| anyhow::anyhow!("no AUTH payload"))?;
         let auth: &payload::Auth = auth.try_into()?;
 
         let id_r = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::IDr))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::IDr)))
             .ok_or_else(|| anyhow::anyhow!("no IDr payload"))?;
         let id_r: &payload::Id = id_r.try_into()?;
 
         let sa_r = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::SA)))
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
         let sa_r: &payload::Sa = sa_r.try_into()?;
 
@@ -119,8 +119,8 @@ impl State for IkeAuthRequestSent {
     ) -> Result<Box<dyn State>> {
         let serialized_response = message;
         let response = Message::deserialize(&mut message)?;
-        match response.exchange() {
-            Num::Assigned(ExchangeType::IKE_AUTH) => {
+        match response.exchange().assigned() {
+            Some(ExchangeType::IKE_AUTH) => {
                 {
                     let data = data.read().await;
                     if data.message_verify(serialized_response)? {

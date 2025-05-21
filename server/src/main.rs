@@ -39,8 +39,8 @@ fn create_ike_sa_config(address: &IpAddr, psk: impl AsRef<[u8]>) -> Config {
     use swanny_ikev2::message::num::{DhId, EncrId, IntegId, PrfId, Protocol};
 
     let id = match address {
-        IpAddr::V4(v4) => Id::new(Num::Assigned(IdType::ID_IPV4_ADDR), &v4.octets()[..]),
-        IpAddr::V6(v6) => Id::new(Num::Assigned(IdType::ID_IPV6_ADDR), &v6.octets()[..]),
+        IpAddr::V4(v4) => Id::new(Num::Assigned(IdType::ID_IPV4_ADDR.into()), &v4.octets()[..]),
+        IpAddr::V6(v6) => Id::new(Num::Assigned(IdType::ID_IPV6_ADDR.into()), &v6.octets()[..]),
     };
     ConfigBuilder::default()
         .ike_proposal(|pc| {
@@ -68,7 +68,7 @@ fn create_traffic_selector(
 ) -> Result<TrafficSelector> {
     match family {
         2 => Ok(TrafficSelector::new(
-            Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
+            Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE.into()),
             proto,
             &IpAddr::V4(address.to_ipv4()),
             &IpAddr::V4(address.to_ipv4()),
@@ -76,7 +76,7 @@ fn create_traffic_selector(
             port,
         )),
         10 => Ok(TrafficSelector::new(
-            Num::Assigned(TrafficSelectorType::TS_IPV6_ADDR_RANGE),
+            Num::Assigned(TrafficSelectorType::TS_IPV6_ADDR_RANGE.into()),
             proto,
             &IpAddr::V6(address.to_ipv6()),
             &IpAddr::V6(address.to_ipv6()),

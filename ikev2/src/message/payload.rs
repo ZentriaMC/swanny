@@ -116,29 +116,23 @@ impl Payload {
             return Err(anyhow::anyhow!("invalid payload length"));
         }
 
-        let content = match payload_type {
-            Num::Assigned(PayloadType::SA) => {
-                Content::Sa(Sa::deserialize(&mut &buf.chunk()[..len])?)
-            }
-            Num::Assigned(PayloadType::KE) => {
-                Content::Ke(Ke::deserialize(&mut &buf.chunk()[..len])?)
-            }
-            Num::Assigned(PayloadType::AUTH) => {
-                Content::Auth(Auth::deserialize(&mut &buf.chunk()[..len])?)
-            }
-            Num::Assigned(PayloadType::NONCE) => {
+        let content = match payload_type.assigned() {
+            Some(PayloadType::SA) => Content::Sa(Sa::deserialize(&mut &buf.chunk()[..len])?),
+            Some(PayloadType::KE) => Content::Ke(Ke::deserialize(&mut &buf.chunk()[..len])?),
+            Some(PayloadType::AUTH) => Content::Auth(Auth::deserialize(&mut &buf.chunk()[..len])?),
+            Some(PayloadType::NONCE) => {
                 Content::Nonce(Nonce::deserialize(&mut &buf.chunk()[..len])?)
             }
-            Num::Assigned(PayloadType::NOTIFY) => {
+            Some(PayloadType::NOTIFY) => {
                 Content::Notify(Notify::deserialize(&mut &buf.chunk()[..len])?)
             }
-            Num::Assigned(PayloadType::IDi | PayloadType::IDr) => {
+            Some(PayloadType::IDi | PayloadType::IDr) => {
                 Content::Id(Id::deserialize(&mut &buf.chunk()[..len])?)
             }
-            Num::Assigned(PayloadType::TSi | PayloadType::TSr) => {
+            Some(PayloadType::TSi | PayloadType::TSr) => {
                 Content::Ts(Ts::deserialize(&mut &buf.chunk()[..len])?)
             }
-            Num::Assigned(PayloadType::SK) => Content::Sk(Sk::deserialize(
+            Some(PayloadType::SK) => Content::Sk(Sk::deserialize(
                 next_payload_type,
                 &mut &buf.chunk()[..len],
             )?),
@@ -159,8 +153,8 @@ macro_rules! create_try_from {
             type Error = anyhow::Error;
 
             fn try_from(other: &'a Payload) -> std::result::Result<Self, Self::Error> {
-                match (other.ty(), other.content()) {
-                    (Num::Assigned($pe), Content::$ce(content)) => Ok(content),
+                match (other.ty().assigned(), other.content()) {
+                    (Some($pe), Content::$ce(content)) => Ok(content),
                     _ => Err(anyhow::anyhow!("unable to convert payload")),
                 }
             }
@@ -594,15 +588,14 @@ pub fn serialize_payloads<'a>(
     buf: &mut dyn BufMut,
 ) -> Result<()> {
     let payloads: Vec<_> = payloads.into_iter().collect();
-    let trailer = if let Some(Payload {
-        ty: Num::Assigned(PayloadType::SK),
-        content: Content::Sk(sk),
-        ..
-    }) = payloads.last()
-    {
+    let last = payloads.last().map(|p| match p.ty().assigned() {
+        Some(PayloadType::SK) => Some(p.content()),
+        _ => None,
+    });
+    let trailer = if let Some(Some(Content::Sk(sk))) = last {
         sk.inner
     } else {
-        Num::Unassigned(0)
+        0.into()
     };
     let trailer: Vec<Num<u8, PayloadType>> = vec![trailer; 1];
     let mut next_types = payloads.iter().map(|p| p.ty()).chain(trailer);
@@ -621,7 +614,7 @@ pub fn deserialize_payloads(
     while buf.has_remaining() {
         let (payload, next_type) = Payload::deserialize(payload_type, buf)?;
         payloads.push(payload);
-        if payload_type == Num::Assigned(PayloadType::SK) {
+        if let Some(PayloadType::SK) = payload_type.assigned() {
             break;
         }
         payload_type = next_type;
@@ -662,10 +655,7 @@ impl Sk {
         payloads: impl IntoIterator<Item = &'a Payload>,
     ) -> Result<Self> {
         let payloads: Vec<_> = payloads.into_iter().collect();
-        let inner = payloads
-            .first()
-            .map(|p| p.ty())
-            .unwrap_or(Num::Unassigned(0));
+        let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         serialize_payloads(payloads, &mut plaintext)?;
         let ciphertext = cipher.encrypt(&key, &plaintext)?;

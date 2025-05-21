@@ -4,19 +4,61 @@ use bitflags::bitflags;
 use num_traits::FromPrimitive;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Num<P, E>
-where
-    P: From<E>,
-{
-    Assigned(E),
-    Unassigned(P),
+pub struct Enum<E>(E);
+
+impl<E> Enum<E> {
+    pub fn into_inner(self) -> E {
+        self.0
+    }
 }
 
-struct Primitive<P>(P);
+impl<E> From<E> for Enum<E> {
+    fn from(other: E) -> Self {
+        Self(other)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Primitive<P>(P);
 
 impl<P> Primitive<P> {
     pub fn into_inner(self) -> P {
         self.0
+    }
+}
+
+impl<P> From<P> for Primitive<P> {
+    fn from(other: P) -> Self {
+        Self(other)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Num<P, E>
+where
+    P: From<E>,
+{
+    Assigned(Enum<E>),
+    Unassigned(Primitive<P>),
+}
+
+impl<P, E> Num<P, E>
+where
+    P: From<E>,
+{
+    pub fn from_enum(e: E) -> Self {
+        Self::Assigned(Enum(e))
+    }
+
+    pub fn from_primitive(p: P) -> Self {
+        Self::Unassigned(Primitive(p))
+    }
+
+    pub fn assigned(self) -> Option<E> {
+        match self {
+            Self::Assigned(e) => Some(e.into_inner()),
+            _ => None,
+        }
     }
 }
 
@@ -26,8 +68,8 @@ where
 {
     fn from(value: Num<P, E>) -> Self {
         match value {
-            Num::Assigned(e) => Primitive(e.into()),
-            Num::Unassigned(p) => Primitive(p),
+            Num::Assigned(e) => Primitive(e.into_inner().into()),
+            Num::Unassigned(p) => p,
         }
     }
 }
@@ -57,8 +99,8 @@ where
 {
     fn from(value: P) -> Self {
         match E::from_u64(value.into()) {
-            Some(n) => Num::Assigned(n),
-            None => Num::Unassigned(value),
+            Some(n) => Num::Assigned(Enum(n)),
+            None => Num::Unassigned(Primitive(value)),
         }
     }
 }
@@ -127,7 +169,7 @@ impl TryFrom<Num<u8, Protocol>> for Protocol {
 
     fn try_from(other: Num<u8, Protocol>) -> std::result::Result<Self, Self::Error> {
         match other {
-            Num::Assigned(id) => Ok(id),
+            Num::Assigned(id) => Ok(id.into_inner()),
             _ => Err(anyhow::anyhow!("no matching protocol")),
         }
     }

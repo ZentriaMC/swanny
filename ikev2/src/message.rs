@@ -86,7 +86,7 @@ impl Message {
         if let Some(p) = self
             .payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(ty))
+            .find(|payload| matches!(payload.ty().assigned(), Some(other) if other == ty))
         {
             TryInto::<C>::try_into(p).ok()
         } else {

@@ -154,7 +154,7 @@ impl StateData {
         let prf = chosen_proposal.prf();
         if let Some(psk) = config.psk() {
             Ok(payload::Auth::new(
-                Num::Assigned(AuthType::PSK),
+                Num::Assigned(AuthType::PSK.into()),
                 prf.prf(prf.prf(psk, message::KEY_PAD)?, &signed_data)?,
             ))
         } else {

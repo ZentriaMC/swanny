@@ -55,25 +55,28 @@ impl Initial {
         let mut message = Message::new(
             &data.spi,
             &Spi::default(),
-            Num::Assigned(ExchangeType::IKE_SA_INIT),
+            Num::Assigned(ExchangeType::IKE_SA_INIT.into()),
             MessageFlags::I,
             1,
         );
 
         message.add_payloads([
             Payload::new(
-                Num::Assigned(PayloadType::SA),
+                Num::Assigned(PayloadType::SA.into()),
                 payload::Content::Sa(payload::Sa::new(proposals)),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::NONCE),
+                Num::Assigned(PayloadType::NONCE.into()),
                 payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::KE),
-                payload::Content::Ke(payload::Ke::new(Num::Assigned(group.id()), &public_key)),
+                Num::Assigned(PayloadType::KE.into()),
+                payload::Content::Ke(payload::Ke::new(
+                    Num::Assigned(group.id().into()),
+                    &public_key,
+                )),
                 true,
             ),
         ]);
@@ -162,28 +165,31 @@ impl Initial {
         let mut message = Message::new(
             data.peer_spi.as_ref().unwrap(),
             &data.spi,
-            Num::Assigned(ExchangeType::IKE_SA_INIT),
+            Num::Assigned(ExchangeType::IKE_SA_INIT.into()),
             MessageFlags::R,
             message_id,
         );
 
         message.add_payloads([
             Payload::new(
-                Num::Assigned(PayloadType::KE),
-                payload::Content::Ke(payload::Ke::new(Num::Assigned(group.id()), &public_key)),
+                Num::Assigned(PayloadType::KE.into()),
+                payload::Content::Ke(payload::Ke::new(
+                    Num::Assigned(group.id().into()),
+                    &public_key,
+                )),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::SA),
+                Num::Assigned(PayloadType::SA.into()),
                 payload::Content::Sa(payload::Sa::new(Some(chosen_proposal.proposal(
                     1,
-                    Num::Assigned(Protocol::IKE),
+                    Num::Assigned(Protocol::IKE.into()),
                     b"",
                 )))),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::NONCE),
+                Num::Assigned(PayloadType::NONCE.into()),
                 payload::Content::Nonce(payload::Nonce::new(&nonce_r[..])),
                 true,
             ),
@@ -204,8 +210,8 @@ impl State for Initial {
     ) -> Result<Box<dyn State>> {
         let serialized_request = message;
         let request = Message::deserialize(&mut message)?;
-        match request.exchange() {
-            Num::Assigned(ExchangeType::IKE_SA_INIT) => {
+        match request.exchange().assigned() {
+            Some(ExchangeType::IKE_SA_INIT) => {
                 let (chosen_proposal, public_key, keys, nonce_i, nonce_r) = {
                     let data = data.read().await;
 

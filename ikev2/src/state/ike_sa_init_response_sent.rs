@@ -40,7 +40,8 @@ impl IkeSaInitResponseSent {
             .payloads()
             .last()
             .ok_or_else(|| anyhow::anyhow!("no payload"))?;
-        if last.ty() != Num::Assigned(PayloadType::SK) {
+        eprintln!("{:?}", last.ty().assigned());
+        if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
             return Err(anyhow::anyhow!("no SK payload"));
         }
         let sk: &payload::Sk = last.try_into()?;
@@ -54,31 +55,31 @@ impl IkeSaInitResponseSent {
 
         let auth = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::AUTH))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::AUTH)))
             .ok_or_else(|| anyhow::anyhow!("no AUTH payload"))?;
         let auth: &payload::Auth = auth.try_into()?;
 
         let id_i = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::IDi))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::IDi)))
             .ok_or_else(|| anyhow::anyhow!("no ID payload"))?;
         let id_i: &payload::Id = id_i.try_into()?;
 
         let sa_i = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::SA))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::SA)))
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
         let sa_i: &payload::Sa = sa_i.try_into()?;
 
         let ts_i = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::TSi))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::TSi)))
             .ok_or_else(|| anyhow::anyhow!("no TSi payload"))?;
         let ts_i: &payload::Ts = ts_i.try_into()?;
 
         let ts_r = payloads
             .iter()
-            .find(|payload| payload.ty() == Num::Assigned(PayloadType::TSr))
+            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::TSr)))
             .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
         let ts_r: &payload::Ts = ts_r.try_into()?;
 
@@ -94,7 +95,7 @@ impl IkeSaInitResponseSent {
         let mut message = Message::new(
             request.spi_i(),
             &data.spi,
-            Num::Assigned(ExchangeType::IKE_AUTH),
+            Num::Assigned(ExchangeType::IKE_AUTH.into()),
             MessageFlags::R,
             request.id(),
         );
@@ -119,29 +120,32 @@ impl IkeSaInitResponseSent {
             data.nonce_i.as_ref().unwrap(),
             data.nonce_r.as_ref().unwrap(),
         )?;
-        let proposal =
-            chosen_proposal.proposal(1, Num::Assigned(chosen_proposal.protocol()), child_sa.spi());
+        let proposal = chosen_proposal.proposal(
+            1,
+            Num::Assigned(chosen_proposal.protocol().into()),
+            child_sa.spi(),
+        );
 
         let payloads = [
             Payload::new(
-                Num::Assigned(PayloadType::SA),
+                Num::Assigned(PayloadType::SA.into()),
                 payload::Content::Sa(payload::Sa::new(Some(proposal))),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::AUTH),
+                Num::Assigned(PayloadType::AUTH.into()),
                 payload::Content::Auth(data.auth_sign(config)?),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::IDr),
+                Num::Assigned(PayloadType::IDr.into()),
                 payload::Content::Id(config.id().clone()),
                 true,
             ),
         ];
 
         message.add_payloads([Payload::new(
-            Num::Assigned(PayloadType::SK),
+            Num::Assigned(PayloadType::SK.into()),
             payload::Content::Sk(payload::Sk::encrypt(
                 chosen_proposal.cipher(),
                 &keys.protecting.er,
@@ -164,8 +168,8 @@ impl State for IkeSaInitResponseSent {
     ) -> Result<Box<dyn State>> {
         let serialized_request = message;
         let request = Message::deserialize(&mut message)?;
-        match request.exchange() {
-            Num::Assigned(ExchangeType::IKE_AUTH) => {
+        match request.exchange().assigned() {
+            Some(ExchangeType::IKE_AUTH) => {
                 {
                     let data = data.read().await;
                     if data.message_verify(serialized_request)? {

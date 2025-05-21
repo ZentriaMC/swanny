@@ -131,18 +131,18 @@ impl ChosenProposal {
     pub fn new(proposal: &Proposal) -> Result<Self> {
         let transform = proposal
             .transforms()
-            .find(|t| t.ty() == Num::Assigned(TransformType::ENCR))
+            .find(|t| t.ty() == Num::Assigned(TransformType::ENCR.into()))
             .ok_or_else(|| anyhow::anyhow!("ENCR transform not found"))?;
         let id: EncrId = transform.id().try_into()?;
         let attribute = transform
             .attributes()
-            .find(|a| a.ty() == Num::Assigned(AttributeType::KeyLength))
+            .find(|a| a.ty() == Num::Assigned(AttributeType::KeyLength.into()))
             .ok_or_else(|| anyhow::anyhow!("KeyLength attribute not found"))?;
         let cipher = Cipher::new(id, Some(u16::from_be_bytes(attribute.value().try_into()?)))?;
 
         let transform = proposal
             .transforms()
-            .find(|t| t.ty() == Num::Assigned(TransformType::PRF))
+            .find(|t| t.ty() == Num::Assigned(TransformType::PRF.into()))
             .ok_or_else(|| anyhow::anyhow!("PRF transform not found"))?;
         let id: PrfId = transform.id().try_into()?;
         let prf = Prf::new(id)?;
@@ -152,7 +152,7 @@ impl ChosenProposal {
         } else {
             let transform = proposal
                 .transforms()
-                .find(|t| t.ty() == Num::Assigned(TransformType::INTEG))
+                .find(|t| t.ty() == Num::Assigned(TransformType::INTEG.into()))
                 .ok_or_else(|| anyhow::anyhow!("INTEG transform not found"))?;
             let id: IntegId = transform.id().try_into()?;
             Some(Integ::new(id)?)
@@ -160,14 +160,14 @@ impl ChosenProposal {
 
         let transform = proposal
             .transforms()
-            .find(|t| t.ty() == Num::Assigned(TransformType::DH));
+            .find(|t| t.ty() == Num::Assigned(TransformType::DH.into()));
         let group = match transform {
             Some(transform) => {
                 let id: DhId = transform.id().try_into()?;
                 Some(Group::new(id)?)
             }
-            None => match proposal.protocol() {
-                Num::Assigned(Protocol::IKE) => {
+            None => match proposal.protocol().assigned() {
+                Some(Protocol::IKE) => {
                     return Err(anyhow::anyhow!("DH transform not found"));
                 }
                 _ => None,
