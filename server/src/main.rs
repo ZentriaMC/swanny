@@ -1,18 +1,18 @@
 use anyhow::Result;
 use bytes::Bytes;
 use futures::{
+    SinkExt,
     future::Either,
     stream::{FuturesUnordered, StreamExt},
-    SinkExt,
 };
-use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_REQUEST};
+use netlink_packet_core::{NLM_F_ACK, NLM_F_REQUEST, NetlinkMessage, NetlinkPayload};
 use netlink_packet_xfrm::{
-    address::Address, state::ModifyMessage, Alg, AlgAuth, XfrmAttrs, XfrmMessage,
-    XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XFRM_ALG_AUTH_NAME_LEN, XFRM_ALG_NAME_LEN,
+    Alg, AlgAuth, XFRM_ALG_AUTH_NAME_LEN, XFRM_ALG_NAME_LEN, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE,
+    XfrmAttrs, XfrmMessage, address::Address, state::ModifyMessage,
 };
 use netlink_proto::{
-    sys::{protocols::NETLINK_XFRM, AsyncSocket, SocketAddr},
     ConnectionHandle,
+    sys::{AsyncSocket, SocketAddr, protocols::NETLINK_XFRM},
 };
 use std::ffi::CString;
 use std::net::IpAddr;
@@ -21,17 +21,17 @@ use swanny_ikev2::{
     config::Config,
     crypto::{Cipher, Integ},
     message::{
+        EspSpi,
         num::{EncrId, IdType, IntegId, Num, Protocol, TrafficSelectorType},
         payload::Id,
         traffic_selector::TrafficSelector,
-        EspSpi,
     },
     sa::{ChildSa, ControlMessage, IkeSa},
 };
 use tokio::net::UdpSocket;
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, info};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 mod config;
 
 fn create_ike_sa_config(address: &IpAddr, psk: impl AsRef<[u8]>) -> Config {
@@ -95,7 +95,7 @@ fn create_alg_auth(integ: &Integ, key: impl AsRef<[u8]>) -> Result<AlgAuth> {
             return Err(anyhow::anyhow!(
                 "unsupported integrity checking algorithm {:?}",
                 id
-            ))
+            ));
         }
     };
 

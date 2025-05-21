@@ -4,15 +4,15 @@ use std::net::IpAddr;
 use swanny_ikev2::{
     config::{Config, ConfigBuilder},
     message::{
+        Message,
         num::{DhId, EncrId, EsnId, IdType, IntegId, Num, PrfId, Protocol, TrafficSelectorType},
         payload::Id,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
-        Message,
     },
     sa::{ControlMessage, IkeSa},
 };
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 fn create_config(id: impl AsRef<[u8]>) -> Config {
     let builder = ConfigBuilder::default();

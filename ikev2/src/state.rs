@@ -2,12 +2,11 @@ use crate::{
     config::Config,
     crypto::GroupPrivateKey,
     message::{
-        self,
+        self, Spi,
         num::{AuthType, Num},
         payload::{self, Auth, Id},
         serialize::Serialize,
         traffic_selector::TrafficSelector,
-        Spi,
     },
     sa::{ChosenProposal, ControlMessage, Keys, LarvalChildSa},
 };

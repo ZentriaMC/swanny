@@ -94,7 +94,7 @@ impl Payload {
     }
 
     pub fn size(&self) -> Result<usize> {
-        4usize
+        HEADER_SIZE
             .checked_add(self.content.size()?)
             .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
     }
@@ -632,18 +632,9 @@ pub fn deserialize_payloads(
 pub fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> Result<usize> {
     let sizes: Result<Vec<_>> = payloads.into_iter().map(|p| p.size()).collect();
 
-    let sizes: Result<Vec<_>> = sizes?
-        .iter()
-        .map(|s| {
-            HEADER_SIZE
-                .checked_add(*s)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
-        })
-        .collect();
-
     sizes?
         .into_iter()
-        .try_fold(HEADER_SIZE, |acc, x| acc.checked_add(x))
+        .try_fold(0usize, |acc, x| acc.checked_add(x))
         .ok_or_else(|| anyhow::anyhow!("exceeded maximum message size"))
 }
 
