@@ -25,7 +25,7 @@ This will create a network topology like:
        +------------------------------------------+
        |                                          |
       ns1                                        ns2
-  192.168.1.1                                 192.168.1.2
+  192.168.1.1                                192.168.1.2
 ```
 
 ### Installing XFRM policies
