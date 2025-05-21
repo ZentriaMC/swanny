@@ -231,6 +231,8 @@ impl GroupVariant {
     fn ecdh(id: DhId) -> Result<Self> {
         let nid = match id {
             DhId::SECP256R1 => Nid::X9_62_PRIME256V1,
+            DhId::SECP384R1 => Nid::SECP384R1,
+            DhId::SECP521R1 => Nid::SECP521R1,
             _ => return Err(anyhow::anyhow!("unsupported ECDH group")),
         };
         Ok(Self::Ecdh(ec::EcGroup::from_curve_name(nid)?))
@@ -244,7 +246,7 @@ impl GroupVariant {
             | DhId::MODP2048
             | DhId::MODP3072
             | DhId::MODP4096 => Self::ffdh(id),
-            DhId::SECP256R1 => Self::ecdh(id),
+            DhId::SECP256R1 | DhId::SECP384R1 | DhId::SECP521R1 => Self::ecdh(id),
             _ => Err(anyhow::anyhow!("unsupported MODP group")),
         }
     }

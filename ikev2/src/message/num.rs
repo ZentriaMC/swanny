@@ -223,7 +223,7 @@ pub enum PrfId {
     PRF_AES128_XCBC = 4,
     PRF_HMAC_SHA2_256 = 5,
     PRF_HMAC_SHA2_384 = 6,
-    PRF_HMAC_SHA2_512 = 7
+    PRF_HMAC_SHA2_512 = 7,
 }
 
 impl From<PrfId> for u16 {
@@ -271,6 +271,8 @@ pub enum DhId {
     MODP6144 = 17,
     MODP8192 = 18,
     SECP256R1 = 19,
+    SECP384R1 = 20,
+    SECP521R1 = 21,
 }
 
 impl From<DhId> for u16 {
