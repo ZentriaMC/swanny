@@ -18,12 +18,12 @@ $ sudo tests/setup-policies.sh ns1 ns2
 
 On one terminal:
 ```console
-$ RUST_LOG=debug sudo -E ip netns exec ns1 target/debug/swannyd --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret
+$ RUST_LOG=debug sudo -E ip netns exec ns1 target/debug/swanny --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret
 ```
 
 On another terminal:
 ```console
-$ RUST_LOG=debug sudo -E ip netns exec ns2 target/debug/swannyd --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret
+$ RUST_LOG=debug sudo -E ip netns exec ns2 target/debug/swanny --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret
 ```
 
 Ping from each other:
@@ -35,4 +35,4 @@ $ sudo ip netns exec ns2 ping 192.168.1.1
 ## License
 
 - ikev2: LGPL-2.1-or-later
-- swannyd: GPL-2.0-or-later
+- server: GPL-2.0-or-later

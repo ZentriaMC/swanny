@@ -1,9 +1,13 @@
 [package]
-name = "swannyd"
+name = "swanny-server"
 description = "Experimental IKEv2 server"
 version.workspace = true
 edition.workspace = true
 license = "GPL-2.0-or-later"
+
+[[bin]]
+name = "swanny"
+path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true

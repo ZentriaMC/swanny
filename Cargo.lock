@@ -736,7 +736,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "swannyd"
+name = "swanny-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
