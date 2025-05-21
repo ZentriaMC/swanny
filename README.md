@@ -37,7 +37,7 @@ $ sudo tests/setup-policies.sh ns1 ns2
 This will install policies to require protection of ICMP traffic
 between ns1 and ns2.
 
-### Running the IKEv2 server
+### Running the server
 
 On one terminal:
 ```console
