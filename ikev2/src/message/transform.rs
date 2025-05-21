@@ -117,12 +117,12 @@ impl serialize::Serialize for Attribute {
         let ty: u16 = self.ty.into();
         match self.format {
             AttributeFormat::TLV => {
-                buf.put_u16(ty | 0x8000);
+                buf.put_u16(ty);
                 buf.put_u16(self.value.len().try_into()?);
                 buf.put_slice(&self.value);
             }
             AttributeFormat::TV => {
-                buf.put_u16(ty);
+                buf.put_u16(ty | 0x8000);
                 buf.put_u8(self.value[0]);
                 buf.put_u8(self.value[1]);
             }
@@ -146,7 +146,7 @@ impl serialize::Deserialize for Attribute {
         Self: Sized,
     {
         let mut ty = buf.try_get_u16()?;
-        let (format, len) = if (ty & 0x8000) == 0 {
+        let (format, len) = if (ty & 0x8000) != 0 {
             (AttributeFormat::TV, 2)
         } else {
             (AttributeFormat::TLV, buf.try_get_u16()?)
