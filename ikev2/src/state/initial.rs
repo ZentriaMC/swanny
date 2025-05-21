@@ -214,7 +214,7 @@ impl State for Initial {
 
                 {
                     let mut data = data.write().await;
-                    data.initiator = Some(false);
+                    data.is_initiator = Some(false);
                     data.chosen_proposal = Some(chosen_proposal);
                     data.keys = Some(keys);
                     data.nonce_i = Some(nonce_i);
@@ -269,7 +269,7 @@ impl State for Initial {
 
         {
             let mut data = data.write().await;
-            data.initiator = Some(true);
+            data.is_initiator = Some(true);
             data.chosen_proposal = Some(chosen_proposal);
             data.private_key = Some(private_key);
             data.nonce_i = Some(nonce);

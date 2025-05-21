@@ -52,7 +52,7 @@ impl IkeSa {
 
     pub async fn is_initiator(&self) -> Option<bool> {
         let data = self.data.read().await;
-        data.initiator
+        data.is_initiator
     }
 
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {

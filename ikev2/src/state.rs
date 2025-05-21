@@ -55,7 +55,7 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
 
 #[derive(Default)]
 pub(crate) struct StateData {
-    pub(crate) initiator: Option<bool>,
+    pub(crate) is_initiator: Option<bool>,
     spi: Spi,
     peer_spi: Option<Spi>,
     message_id: u32,
@@ -145,7 +145,7 @@ impl StateData {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
 
-        let signed_data = match self.initiator {
+        let signed_data = match self.is_initiator {
             Some(true) => self.initiator_signed_data(chosen_proposal, keys, config.id())?,
             Some(false) => self.responder_signed_data(chosen_proposal, keys, config.id())?,
             _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
@@ -172,7 +172,7 @@ impl StateData {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
 
-        let signed_data = match self.initiator {
+        let signed_data = match self.is_initiator {
             Some(true) => self.responder_signed_data(chosen_proposal, keys, id)?,
             Some(false) => self.initiator_signed_data(chosen_proposal, keys, id)?,
             _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
@@ -205,7 +205,7 @@ impl StateData {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
 
-        let key = match self.initiator {
+        let key = match self.is_initiator {
             Some(true) => &keys.protecting.ai,
             Some(false) => &keys.protecting.ar,
             _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
@@ -230,7 +230,7 @@ impl StateData {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
 
-        let key = match self.initiator {
+        let key = match self.is_initiator {
             Some(true) => &keys.protecting.ar,
             Some(false) => &keys.protecting.ai,
             _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
