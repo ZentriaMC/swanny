@@ -105,7 +105,7 @@ impl IkeSaInitResponseSent {
             ts_i.traffic_selectors().next().unwrap(),
         )?;
         let proposals: Vec<_> = config
-            .ipsec_proposals(&larval_child_sa.spi.as_ref().unwrap())
+            .ipsec_proposals(larval_child_sa.spi.as_ref().unwrap())
             .collect();
         if proposals.is_empty() {
             return Err(anyhow::anyhow!("no proposal to send"));
@@ -116,8 +116,8 @@ impl IkeSaInitResponseSent {
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
             &keys.deriving.d,
-            &data.nonce_i.as_ref().unwrap(),
-            &data.nonce_r.as_ref().unwrap(),
+            data.nonce_i.as_ref().unwrap(),
+            data.nonce_r.as_ref().unwrap(),
         )?;
         let proposal =
             chosen_proposal.proposal(1, Num::Assigned(chosen_proposal.protocol()), child_sa.spi());
@@ -193,7 +193,7 @@ impl State for IkeSaInitResponseSent {
                 }
 
                 sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
-                sender.unbounded_send(ControlMessage::CreateChildSa(child_sa))?;
+                sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
                 Ok(Box::new(state::Established {}))
             }
             exchange => {

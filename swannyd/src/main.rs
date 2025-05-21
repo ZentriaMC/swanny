@@ -361,7 +361,7 @@ async fn main() -> Result<()> {
                         create_child_sa(
                             handle.clone(),
                             &child_sa,
-                            ike_sa.is_initiator().await,
+                            ike_sa.is_initiator().await.unwrap(),
                         ).await?;
                     }
                 }
@@ -371,7 +371,9 @@ async fn main() -> Result<()> {
                     Ok((message, _peer_address)) => {
                         pending_operations.push(Either::Right(ike_sa.handle_message(message.to_vec())));
                     },
-                    _ => {},
+                    Err(e) => {
+                        debug!(error = %e, "error receiving IKEv2 message");
+                    },
                 }
             }
             result = pending_operations.select_next_some() => {

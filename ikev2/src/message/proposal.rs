@@ -55,7 +55,7 @@ impl Proposal {
         let transforms: Vec<_> = self
             .transforms()
             .filter_map(|tx| {
-                if other.transforms().find(|&ty| ty.ty() == tx.ty()).is_none() {
+                if !other.transforms().any(|ty| ty.ty() == tx.ty()) {
                     Some(tx)
                 } else {
                     other.transforms().find(|&ty| *tx == *ty)

@@ -20,7 +20,7 @@ use tracing::{debug, info};
 #[derive(Debug)]
 pub enum ControlMessage {
     IkeMessage(Vec<u8>),
-    CreateChildSa(ChildSa),
+    CreateChildSa(Box<ChildSa>),
 }
 
 #[derive(Clone)]
@@ -50,12 +50,9 @@ impl IkeSa {
         ))
     }
 
-    pub async fn is_initiator(&self) -> bool {
+    pub async fn is_initiator(&self) -> Option<bool> {
         let data = self.data.read().await;
-        match data.initiator {
-            Some(true) => true,
-            _ => false,
-        }
+        data.initiator
     }
 
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {

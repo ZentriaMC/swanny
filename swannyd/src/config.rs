@@ -61,17 +61,17 @@ impl Config {
 
         let address = config
             .get("address")
-            .with_context(|| format!("address not speficied"))?;
+            .with_context(|| "address not speficied".to_string())?;
         let address = ip_addr_from_value(address)?;
 
         let peer_address = config
             .get("peer_address")
-            .with_context(|| format!("peer_address not speficied"))?;
+            .with_context(|| "peer_address not speficied".to_string())?;
         let peer_address = ip_addr_from_value(peer_address)?;
 
         let psk = config
             .get("psk")
-            .with_context(|| format!("psk not speficied"))?
+            .with_context(|| "psk not speficied".to_string())?
             .as_str()
             .ok_or_else(|| anyhow!("value must be string"))?
             .as_bytes()
@@ -85,11 +85,8 @@ impl Config {
     }
 
     fn from_matches(matches: &ArgMatches) -> Result<Self> {
-        let address = matches.try_get_one::<IpAddr>("address")?.unwrap().clone();
-        let peer_address = matches
-            .try_get_one::<IpAddr>("peer-address")?
-            .unwrap()
-            .clone();
+        let address = *matches.try_get_one::<IpAddr>("address")?.unwrap();
+        let peer_address = *matches.try_get_one::<IpAddr>("peer-address")?.unwrap();
         let psk = matches.try_get_one::<String>("psk")?.unwrap().clone();
         Ok(Self {
             address,

@@ -86,8 +86,8 @@ impl IkeAuthRequestSent {
             .as_ref()
             .unwrap();
 
-        Ok(ChosenProposal::negotiate(proposals, sa_r.proposals())
-            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?)
+        ChosenProposal::negotiate(proposals, sa_r.proposals())
+            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))
     }
 
     fn create_child_sa<D>(
@@ -99,12 +99,12 @@ impl IkeAuthRequestSent {
         D: Deref<Target = StateData>,
     {
         let keys = data.keys.as_ref().unwrap();
-        Ok(larval_child_sa.build(
-            &chosen_proposal,
+        larval_child_sa.build(
+            chosen_proposal,
             &keys.deriving.d,
-            &data.nonce_i.as_ref().unwrap(),
-            &data.nonce_r.as_ref().unwrap(),
-        )?)
+            data.nonce_i.as_ref().unwrap(),
+            data.nonce_r.as_ref().unwrap(),
+        )
     }
 }
 
@@ -141,7 +141,7 @@ impl State for IkeAuthRequestSent {
                     let data = data.read().await;
                     Self::create_child_sa(&data, &chosen_proposal, larval_child_sa)?
                 };
-                sender.unbounded_send(ControlMessage::CreateChildSa(child_sa))?;
+                sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
                 Ok(Box::new(state::Established {}))
             }
             exchange => {

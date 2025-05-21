@@ -186,7 +186,7 @@ impl StateData {
                 auth.auth_data(),
             )?)
         } else {
-            return Err(anyhow::anyhow!("PSK not set"));
+            Err(anyhow::anyhow!("PSK not set"))
         }
     }
 
@@ -244,6 +244,6 @@ impl StateData {
         let (message, checksum) = message
             .as_ref()
             .split_at(message.as_ref().len() - integ.output_size());
-        Ok(integ.verify(key.as_ref().unwrap(), message, checksum)?)
+        integ.verify(key.as_ref().unwrap(), message, checksum)
     }
 }

@@ -166,7 +166,7 @@ impl ConfigBuilder {
             ike_proposals: self.ike_proposals,
             ipsec_protocol: self.ipsec_protocol.take().unwrap_or(Protocol::ESP),
             ipsec_proposals: self.ipsec_proposals,
-            id: id,
+            id,
             psk: self.psk.take(),
         }
     }
