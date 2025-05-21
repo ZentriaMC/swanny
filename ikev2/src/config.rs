@@ -1,9 +1,9 @@
 use crate::message::{
-    EspSpi, Spi,
     num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType},
     payload::Id,
     proposal::Proposal,
     transform::{Attribute, AttributeFormat, Transform, TransformId},
+    EspSpi, Spi,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -182,7 +182,10 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn ike_proposals(&self, spi: Option<&Spi>) -> impl Iterator<Item = Proposal> {
+    pub fn ike_proposals<'a, 'b>(
+        &'a self,
+        spi: Option<&'b Spi>,
+    ) -> impl Iterator<Item = Proposal> + use<'a, 'b> {
         let spi = spi.map(|spi| &spi[..]).unwrap_or_else(|| b"");
         self.ike_proposals
             .iter()
@@ -194,7 +197,10 @@ impl Config {
         self.ipsec_protocol
     }
 
-    pub fn ipsec_proposals(&self, spi: &EspSpi) -> impl Iterator<Item = Proposal> {
+    pub fn ipsec_proposals<'a, 'b>(
+        &'a self,
+        spi: &'b EspSpi,
+    ) -> impl Iterator<Item = Proposal> + use<'a, 'b> {
         self.ipsec_proposals
             .iter()
             .enumerate()

@@ -1,8 +1,9 @@
 [package]
 name = "swanny-ikev2"
 description = "IKEv2 message handling"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license = "LGPL-2.1-or-later"
 
 [dependencies]
 anyhow.workspace = true

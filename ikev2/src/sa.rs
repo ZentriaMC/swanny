@@ -2,17 +2,17 @@ use crate::{
     config::Config,
     crypto::{self, Cipher, Group, Integ, Prf},
     message::{
-        EspSpi, Spi,
         num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, Protocol, TransformType},
         proposal::Proposal,
         traffic_selector::TrafficSelector,
         transform::Transform,
+        EspSpi, Spi,
     },
     state::{self, State, StateData},
 };
 use anyhow::Result;
 use bytes::Buf;
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info};

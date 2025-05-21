@@ -2,11 +2,11 @@ use crate::{
     config::Config,
     crypto::{self, GroupPrivateKey},
     message::{
-        Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
+        Message, Spi,
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa},
     state::{self, Keys, State, StateData},

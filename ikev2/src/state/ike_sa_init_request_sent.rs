@@ -2,11 +2,11 @@ use crate::{
     config::Config,
     crypto,
     message::{
-        Message, Spi,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
+        Message, Spi,
     },
     sa::{ChosenProposal, ControlMessage, Keys},
     state::{self, State, StateData},

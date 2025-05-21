@@ -3,7 +3,7 @@ name = "swannyd"
 description = "Experimental IKEv2 server"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "GPL-2.0-or-later"
 
 [dependencies]
 anyhow.workspace = true

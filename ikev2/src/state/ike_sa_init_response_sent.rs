@@ -1,11 +1,11 @@
 use crate::{
     config::Config,
     message::{
-        Message,
         num::{ExchangeType, MessageFlags, Num, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
+        Message,
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa},
     state::{self, State, StateData},
