@@ -45,16 +45,16 @@ fn create_ike_sa_config(address: &IpAddr, psk: impl AsRef<[u8]>) -> Config {
     ConfigBuilder::default()
         .ike_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
-                .prf(PrfId::PRF_HMAC_SHA1)
-                .integrity(IntegId::AUTH_HMAC_SHA1_96)
-                .dh(DhId::MODP2048)
+                .prf(PrfId::PRF_HMAC_SHA2_256)
+                .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
+                .dh(DhId::SECP256R1)
         })
         .ipsec_protocol(Protocol::ESP)
         .ipsec_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
-                .prf(PrfId::PRF_HMAC_SHA1)
-                .integrity(IntegId::AUTH_HMAC_SHA1_96)
-                .dh(DhId::MODP2048)
+                .prf(PrfId::PRF_HMAC_SHA2_256)
+                .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
+                .dh(DhId::SECP256R1)
         })
         .psk(psk.as_ref())
         .build(id)
@@ -91,6 +91,9 @@ fn create_alg_auth(integ: &Integ, key: impl AsRef<[u8]>) -> Result<AlgAuth> {
     let (alg_name, trunc_len) = match integ.id() {
         IntegId::AUTH_HMAC_MD5_96 => ("hmac(md5)", 12),
         IntegId::AUTH_HMAC_SHA1_96 => ("hmac(sha1)", 12),
+        IntegId::AUTH_HMAC_SHA2_256_128 => ("hmac(sha256)", 16),
+        IntegId::AUTH_HMAC_SHA2_384_192 => ("hmac(sha384)", 24),
+        IntegId::AUTH_HMAC_SHA2_512_256 => ("hmac(sha512)", 32),
         id => {
             return Err(anyhow::anyhow!(
                 "unsupported integrity checking algorithm {:?}",
