@@ -11,10 +11,33 @@ $ cargo build
 
 ## Testing
 
+### Setting up a network with network namespaces
+
 ```console
-$ sudo tests/setup-netns.sh ns1 ns2
+$ sudo tests/setup-netns.sh ns1 ns2 bridge
+```
+
+This will create a network topology like:
+
+```
+                          bridge
+                      192.168.1.0/24
+       +------------------------------------------+
+       |                                          |
+      ns1                                        ns2
+  192.168.1.1                                 192.168.1.2
+```
+
+### Installing XFRM policies
+
+```console
 $ sudo tests/setup-policies.sh ns1 ns2
 ```
+
+This will install policies to require protection of ICMP traffic
+between ns1 and ns2.
+
+### Running the IKEv2 server
 
 On one terminal:
 ```console
