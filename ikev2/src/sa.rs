@@ -1,8 +1,10 @@
 //! Security associations
 //!
 //! This module deals with security associations (SA) both for IKE and
-//! IPsec. `IkeSa` is the main entry point to this module and can be
-//! used in a `select!` loop with other event sources.
+//! IPsec. The main entry point to this module is `IkeSa`, which
+//! maintains state transitions of an IKE SA, triggered by external
+//! event sources, such as IKE messages from the peer, Netlink XFRM
+//! messages, and timers.
 //!
 //! # Examples
 //!
@@ -15,10 +17,10 @@
 //! loop {
 //!     futures::select! {
 //!         message = udp_messages.select_next_some() => {
-//!             ike_sa.handle_message(...);
+//!             ike_sa.handle_message(/* ... */).await;
 //!         },
 //!         message = xfrm_messages.select_next_some() => {
-//!             ike_sa.handle_acquire(...);
+//!             ike_sa.handle_acquire(/* ... */).await;
 //!         },
 //!         message = ike_messages.select_next_some() => {
 //!             match message {
