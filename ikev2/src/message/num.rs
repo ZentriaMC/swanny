@@ -348,7 +348,7 @@ impl Num<u16, TransformId> {
     }
 }
 
-macro_rules! create_try_from {
+macro_rules! emit_try_from_transform_id {
     ( $id:ident, $ce:ident ) => {
         impl TryFrom<TransformId> for $id {
             type Error = anyhow::Error;
@@ -374,11 +374,11 @@ macro_rules! create_try_from {
     };
 }
 
-create_try_from!(EncrId, Encr);
-create_try_from!(PrfId, Prf);
-create_try_from!(IntegId, Integ);
-create_try_from!(DhId, Dh);
-create_try_from!(EsnId, Esn);
+emit_try_from_transform_id!(EncrId, Encr);
+emit_try_from_transform_id!(PrfId, Prf);
+emit_try_from_transform_id!(IntegId, Integ);
+emit_try_from_transform_id!(DhId, Dh);
+emit_try_from_transform_id!(EsnId, Esn);
 
 #[allow(non_camel_case_types)]
 #[repr(u8)]

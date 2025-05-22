@@ -147,7 +147,7 @@ impl Payload {
     }
 }
 
-macro_rules! create_try_from {
+macro_rules! emit_try_from_payload {
     ( $pe:pat, $ce:ident ) => {
         impl<'a> TryFrom<&'a Payload> for &'a $ce {
             type Error = anyhow::Error;
@@ -155,21 +155,25 @@ macro_rules! create_try_from {
             fn try_from(other: &'a Payload) -> std::result::Result<Self, Self::Error> {
                 match (other.ty().assigned(), other.content()) {
                     (Some($pe), Content::$ce(content)) => Ok(content),
-                    _ => Err(anyhow::anyhow!("unable to convert payload")),
+                    _ => Err(anyhow::anyhow!(
+                        "no matching content for {} {}",
+                        stringify!($pe),
+                        stringify!($ce)
+                    )),
                 }
             }
         }
     };
 }
 
-create_try_from!(PayloadType::SA, Sa);
-create_try_from!(PayloadType::KE, Ke);
-create_try_from!(PayloadType::IDi | PayloadType::IDr, Id);
-create_try_from!(PayloadType::AUTH, Auth);
-create_try_from!(PayloadType::NONCE, Nonce);
-create_try_from!(PayloadType::NOTIFY, Notify);
-create_try_from!(PayloadType::TSi | PayloadType::TSr, Ts);
-create_try_from!(PayloadType::SK, Sk);
+emit_try_from_payload!(PayloadType::SA, Sa);
+emit_try_from_payload!(PayloadType::KE, Ke);
+emit_try_from_payload!(PayloadType::IDi | PayloadType::IDr, Id);
+emit_try_from_payload!(PayloadType::AUTH, Auth);
+emit_try_from_payload!(PayloadType::NONCE, Nonce);
+emit_try_from_payload!(PayloadType::NOTIFY, Notify);
+emit_try_from_payload!(PayloadType::TSi | PayloadType::TSr, Ts);
+emit_try_from_payload!(PayloadType::SK, Sk);
 
 #[derive(Debug, PartialEq)]
 pub struct Sa {
