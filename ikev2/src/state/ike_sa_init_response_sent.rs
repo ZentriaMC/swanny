@@ -147,7 +147,7 @@ impl IkeSaInitResponseSent {
         message.add_payloads([Payload::new(
             Num::Assigned(PayloadType::SK.into()),
             payload::Content::Sk(payload::Sk::encrypt(
-                chosen_proposal.cipher(),
+                data.chosen_proposal.as_ref().unwrap().cipher(),
                 &keys.protecting.er,
                 &payloads,
             )?),
