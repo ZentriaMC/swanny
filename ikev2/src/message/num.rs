@@ -206,6 +206,12 @@ pub enum EncrId {
     ENCR_NULL = 11,
     ENCR_AES_CBC = 12,
     ENCR_AES_CTR = 13,
+    ENCR_AES_CCM_8 = 14,
+    ENCR_AES_CCM_12 = 15,
+    ENCR_AES_CCM_16 = 16,
+    ENCR_AES_GCM_8 = 18,
+    ENCR_AES_GCM_12 = 19,
+    ENCR_AES_GCM_16 = 20,
 }
 
 impl From<EncrId> for u16 {
