@@ -18,6 +18,7 @@ impl From<PayloadType> for u8 {
     }
 }
 
+/// Content variants
 #[derive(Debug)]
 pub enum Content {
     Sa(Sa),
@@ -58,6 +59,13 @@ impl Serialize for Content {
     }
 }
 
+/// Message payload
+///
+/// A message payload contains a generic payload headerr followed by a
+/// [`Content`] variant.
+///
+/// [`Content`]: crate::message::payload::Content
+///
 #[derive(Debug)]
 pub struct Payload {
     critical: bool,
@@ -66,6 +74,7 @@ pub struct Payload {
 }
 
 impl Payload {
+    /// Creates a new `Payload` with given type and content variant
     pub fn new(ty: Num<u8, PayloadType>, content: Content, critical: bool) -> Self {
         Self {
             ty,
@@ -74,14 +83,17 @@ impl Payload {
         }
     }
 
+    /// Returns the payload type
     pub fn ty(&self) -> Num<u8, PayloadType> {
         self.ty
     }
 
+    /// Returns the content variant
     pub fn content(&self) -> &Content {
         &self.content
     }
 
+    /// Serializes the payload, taking into account of the next payload type
     pub fn serialize(
         &self,
         next_payload_type: Num<u8, PayloadType>,
@@ -93,12 +105,14 @@ impl Payload {
         self.content.serialize(buf)
     }
 
+    /// Returns the size of serialized payload
     pub fn size(&self) -> Result<usize> {
         HEADER_SIZE
             .checked_add(self.content.size()?)
             .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
     }
 
+    /// Deserializes `buf` as a payload with given type
     pub fn deserialize(
         payload_type: Num<u8, PayloadType>,
         buf: &mut dyn Buf,
@@ -175,12 +189,14 @@ emit_try_from_payload!(PayloadType::NOTIFY, Notify);
 emit_try_from_payload!(PayloadType::TSi | PayloadType::TSr, Ts);
 emit_try_from_payload!(PayloadType::SK, Sk);
 
+/// Security Association content
 #[derive(Debug, PartialEq)]
 pub struct Sa {
     proposals: Vec<Proposal>,
 }
 
 impl Sa {
+    /// Creates a new `Sa` content with given cryptographic proposals
     pub fn new<P>(proposals: P) -> Self
     where
         P: IntoIterator,
@@ -191,6 +207,7 @@ impl Sa {
         }
     }
 
+    /// Returns an iterator over the cryptographic proposals in the `Sa` content
     pub fn proposals(&self) -> impl Iterator<Item = &Proposal> {
         self.proposals.iter()
     }
@@ -247,6 +264,7 @@ impl serialize::Deserialize for Sa {
     }
 }
 
+/// Key Exchange content
 #[derive(Debug, PartialEq)]
 pub struct Ke {
     dh_group: Num<u16, DhId>,
@@ -254,6 +272,7 @@ pub struct Ke {
 }
 
 impl Ke {
+    /// Creates a new `Ke` content, with a given group and associated data
     pub fn new(dh_group: Num<u16, DhId>, ke_data: impl AsRef<[u8]>) -> Self {
         Self {
             dh_group,
@@ -261,10 +280,12 @@ impl Ke {
         }
     }
 
+    /// Returns the group ID of the `Ke` content
     pub fn dh_group(&self) -> Num<u16, DhId> {
         self.dh_group
     }
 
+    /// Returns the data associated with the `Ke` content
     pub fn ke_data(&self) -> &[u8] {
         &self.ke_data
     }
@@ -296,6 +317,7 @@ impl serialize::Deserialize for Ke {
     }
 }
 
+/// Identification content
 #[derive(Clone, Debug, PartialEq)]
 pub struct Id {
     ty: Num<u8, IdType>,
@@ -303,6 +325,7 @@ pub struct Id {
 }
 
 impl Id {
+    /// Creates a new `Id` content with given type and data
     pub fn new(ty: Num<u8, IdType>, id_data: impl AsRef<[u8]>) -> Self {
         Self {
             ty,
@@ -310,10 +333,12 @@ impl Id {
         }
     }
 
+    /// Returns the type of the `Id` content
     pub fn ty(&self) -> Num<u8, IdType> {
         self.ty
     }
 
+    /// Returns the identification data associated with the `Id` content
     pub fn id_data(&self) -> &[u8] {
         &self.id_data
     }
@@ -347,6 +372,7 @@ impl serialize::Deserialize for Id {
     }
 }
 
+/// Authentication content
 #[derive(Debug, PartialEq)]
 pub struct Auth {
     method: Num<u8, AuthType>,
@@ -354,6 +380,7 @@ pub struct Auth {
 }
 
 impl Auth {
+    /// Creats a new `Auth` content with given method and data
     pub fn new(method: Num<u8, AuthType>, auth_data: impl AsRef<[u8]>) -> Self {
         Self {
             method,
@@ -361,10 +388,12 @@ impl Auth {
         }
     }
 
+    /// Returns the authentication method of the `Auth` content
     pub fn method(&self) -> Num<u8, AuthType> {
         self.method
     }
 
+    /// Returns the authentication data associated with the `Auth` content
     pub fn auth_data(&self) -> &[u8] {
         &self.auth_data
     }
@@ -398,18 +427,21 @@ impl serialize::Deserialize for Auth {
     }
 }
 
+/// Nonce content
 #[derive(Debug, PartialEq)]
 pub struct Nonce {
     nonce: Vec<u8>,
 }
 
 impl Nonce {
+    /// Creates a new `Nonce` content
     pub fn new(nonce: impl AsRef<[u8]>) -> Self {
         Self {
             nonce: nonce.as_ref().to_vec(),
         }
     }
 
+    /// Returns the nonce value of the `Nonce` content
     pub fn nonce(&self) -> &[u8] {
         &self.nonce
     }
@@ -435,6 +467,7 @@ impl serialize::Deserialize for Nonce {
     }
 }
 
+/// Notify content
 #[derive(Debug, PartialEq)]
 pub struct Notify {
     protocol: Num<u8, Protocol>,
@@ -444,6 +477,7 @@ pub struct Notify {
 }
 
 impl Notify {
+    /// Creates a new `Notify` content
     pub fn new(
         protocol: Num<u8, Protocol>,
         spi: Option<&[u8]>,
@@ -458,18 +492,22 @@ impl Notify {
         }
     }
 
+    /// Returns the protocol of the `Notify` content
     pub fn protocol(&self) -> Num<u8, Protocol> {
         self.protocol
     }
 
+    /// Returns the SPI of the `Notify` content
     pub fn spi(&self) -> Option<&[u8]> {
         self.spi.as_deref()
     }
 
+    /// Returns the notification type of the `Notify` content
     pub fn ty(&self) -> Num<u16, NotifyType> {
         self.ty
     }
 
+    /// Returns the notification data of the `Notify` content
     pub fn notify_data(&self) -> &[u8] {
         &self.notify_data
     }
@@ -522,12 +560,14 @@ impl serialize::Deserialize for Notify {
     }
 }
 
+/// Traffic Selector content
 #[derive(Debug, PartialEq)]
 pub struct Ts {
     traffic_selectors: Vec<TrafficSelector>,
 }
 
 impl Ts {
+    /// Creates a new `Ts` content with given traffic selectors
     pub fn new<T>(traffic_selectors: T) -> Self
     where
         T: IntoIterator,
@@ -538,6 +578,7 @@ impl Ts {
         }
     }
 
+    /// Returns the iterator over the traffic selectors in the `Ts` content
     pub fn traffic_selectors(&self) -> impl Iterator<Item = &TrafficSelector> {
         self.traffic_selectors.iter()
     }
@@ -584,6 +625,75 @@ impl serialize::Deserialize for Ts {
             return Err(anyhow::anyhow!("payload with extra data"));
         }
         Ok(Self::new(traffic_selectors))
+    }
+}
+
+/// Encrypted content
+#[derive(Debug, PartialEq)]
+pub struct Sk {
+    ciphertext: Vec<u8>,
+    inner: Num<u8, PayloadType>,
+}
+
+impl Sk {
+    /// Creates a new `Sk` content with given ciphertext and the type of the first inner payload
+    pub fn new(ciphertext: impl AsRef<[u8]>, inner: Num<u8, PayloadType>) -> Self {
+        Self {
+            ciphertext: ciphertext.as_ref().to_owned(),
+            inner,
+        }
+    }
+
+    /// Returns the ciphertext of the `Sk` content
+    pub fn ciphertext(&self) -> &[u8] {
+        &self.ciphertext
+    }
+
+    /// Encrypts payloads with given cipher and key, creates a new `Sk` content
+    pub fn encrypt<'a>(
+        cipher: &Cipher,
+        key: impl AsRef<[u8]>,
+        payloads: impl IntoIterator<Item = &'a Payload>,
+    ) -> Result<Self> {
+        let payloads: Vec<_> = payloads.into_iter().collect();
+        let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
+        let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
+        serialize_payloads(payloads, &mut plaintext)?;
+        let ciphertext = cipher.encrypt(&key, &plaintext)?;
+        Ok(Self { ciphertext, inner })
+    }
+
+    /// Decrypts payloads from the ciphertext of the `Sk` content
+    pub fn decrypt(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<Vec<Payload>> {
+        let plaintext = cipher.decrypt(key, &self.ciphertext)?;
+        let mut payload_type: Num<u8, PayloadType> = self.inner;
+        let mut plaintext = plaintext.as_slice();
+        let mut payloads = Vec::new();
+        while plaintext.has_remaining() {
+            let (payload, next_payload_type) = Payload::deserialize(payload_type, &mut plaintext)?;
+            payloads.push(payload);
+            payload_type = next_payload_type;
+        }
+        Ok(payloads)
+    }
+
+    /// Deserializes `buf` as an `Sk` content with given type
+    pub fn deserialize(payload_type: Num<u8, PayloadType>, buf: &mut dyn Buf) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self::new(buf.chunk(), payload_type))
+    }
+}
+
+impl serialize::Serialize for Sk {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        buf.put_slice(&self.ciphertext[..]);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize> {
+        Ok(self.ciphertext.len())
     }
 }
 
@@ -635,69 +745,6 @@ pub(crate) fn cumulative_size<'a>(
         .into_iter()
         .try_fold(0usize, |acc, x| acc.checked_add(x))
         .ok_or_else(|| anyhow::anyhow!("exceeded maximum message size"))
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Sk {
-    ciphertext: Vec<u8>,
-    inner: Num<u8, PayloadType>,
-}
-
-impl Sk {
-    pub fn new(ciphertext: impl AsRef<[u8]>, inner: Num<u8, PayloadType>) -> Self {
-        Self {
-            ciphertext: ciphertext.as_ref().to_owned(),
-            inner,
-        }
-    }
-
-    pub fn ciphertext(&self) -> &[u8] {
-        &self.ciphertext
-    }
-
-    pub fn encrypt<'a>(
-        cipher: &Cipher,
-        key: impl AsRef<[u8]>,
-        payloads: impl IntoIterator<Item = &'a Payload>,
-    ) -> Result<Self> {
-        let payloads: Vec<_> = payloads.into_iter().collect();
-        let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
-        let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
-        serialize_payloads(payloads, &mut plaintext)?;
-        let ciphertext = cipher.encrypt(&key, &plaintext)?;
-        Ok(Self { ciphertext, inner })
-    }
-
-    pub fn decrypt(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<Vec<Payload>> {
-        let plaintext = cipher.decrypt(key, &self.ciphertext)?;
-        let mut payload_type: Num<u8, PayloadType> = self.inner;
-        let mut plaintext = plaintext.as_slice();
-        let mut payloads = Vec::new();
-        while plaintext.has_remaining() {
-            let (payload, next_payload_type) = Payload::deserialize(payload_type, &mut plaintext)?;
-            payloads.push(payload);
-            payload_type = next_payload_type;
-        }
-        Ok(payloads)
-    }
-
-    pub fn deserialize(payload_type: Num<u8, PayloadType>, buf: &mut dyn Buf) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        Ok(Self::new(buf.chunk(), payload_type))
-    }
-}
-
-impl serialize::Serialize for Sk {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        buf.put_slice(&self.ciphertext[..]);
-        Ok(())
-    }
-
-    fn size(&self) -> Result<usize> {
-        Ok(self.ciphertext.len())
-    }
 }
 
 #[cfg(test)]

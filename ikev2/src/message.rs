@@ -1,3 +1,13 @@
+//! IKEv2 messages
+//!
+//! This module provides serialization and deserialization of IKEv2
+//! messages, following [RFC 7296]. Each IKEv2 message contains a
+//! header followed by one or payloads, represented as an array of
+//! [`Payload`].
+//!
+//! [RFC 7296]: https://www.rfc-editor.org/rfc/rfc7296.html
+//! [`Payload`]: crate::message::payload::Payload
+//!
 use anyhow::Result;
 use bytes::{Buf, BufMut};
 

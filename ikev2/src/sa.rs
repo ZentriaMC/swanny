@@ -1,7 +1,7 @@
 //! Security associations
 //!
 //! This module deals with security associations (SA) both for IKE and
-//! IPsec. The main entry point to this module is `IkeSa`, which
+//! IPsec. The main entry point to this module is [`IkeSa`], which
 //! maintains state transitions of an IKE SA, triggered by external
 //! event sources, such as IKE messages from the peer, Netlink XFRM
 //! messages, and timers.
@@ -36,6 +36,9 @@
 //! }
 //! # Ok(()) }
 //! ```
+//!
+//! [`IkeSa`]: crate::sa::IkeSa
+//!
 use crate::{
     config::Config,
     crypto::{self, Cipher, Group, Integ, Prf},
@@ -62,10 +65,10 @@ pub enum ControlMessage {
     CreateChildSa(Box<ChildSa>),
 }
 
-/// IKE SA
+/// IKE SA abstraction
 ///
-/// The `IkeSa` data structure is an opaque event handle to drive
-/// the IKEv2 state machine.
+/// The `IkeSa` data structure is an opaque handle to the IKEv2 state
+/// machine.
 #[derive(Clone)]
 pub struct IkeSa {
     data: Arc<RwLock<StateData>>,
