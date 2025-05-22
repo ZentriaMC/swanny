@@ -1,3 +1,39 @@
+//! Security associations
+//!
+//! This module deals with security associations (SA) both for IKE and
+//! IPsec. `IkeSa` is the main entry point to this module and can be
+//! used in a `select!` loop with other event sources.
+//!
+//! # Examples
+//!
+//! ```rust, no_run
+//! # async fn main() {
+//! let ike_sa_config = create_ike_sa_config(&config.address, &config.psk);
+//!
+//! let (ike_sa, mut ike_sa_messages) = IkeSa::new(&ike_sa_config)?;
+//!
+//! loop {
+//!     futures::select! {
+//!         message = udp_messages.select_next_some() => {
+//!             ike_sa.handle_message(...);
+//!         },
+//!         message = xfrm_messages.select_next_some() => {
+//!             ike_sa.handle_acquire(...);
+//!         },
+//!         message = ike_messages.select_next_some() => {
+//!             match message {
+//!                 ControlMessage::IkeMessage(message) => {
+//!                     // Send it to the peer
+//!                 }
+//!                 ControlMessage::CreateChildSa(child_sa) => {
+//!                     // Create a Child SA with XFRM
+//!                 }
+//!             }
+//!         },
+//!     }
+//! }
+//! # Ok(()) }
+//! ```
 use crate::{
     config::Config,
     crypto::{self, Cipher, Group, Integ, Prf},
