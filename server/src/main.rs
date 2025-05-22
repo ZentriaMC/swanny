@@ -7,7 +7,7 @@ use futures::{
 };
 use netlink_packet_core::{NLM_F_ACK, NLM_F_REQUEST, NetlinkMessage, NetlinkPayload};
 use netlink_packet_xfrm::{
-    Alg, AlgAuth, XFRM_ALG_AUTH_NAME_LEN, XFRM_ALG_NAME_LEN, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE,
+    Alg, AlgAead, AlgAuth, XFRM_ALG_AEAD_NAME_LEN, XFRM_ALG_AUTH_NAME_LEN, XFRM_ALG_NAME_LEN, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE,
     XfrmAttrs, XfrmMessage, address::Address, state::ModifyMessage,
 };
 use netlink_proto::{
@@ -51,10 +51,8 @@ fn create_ike_sa_config(address: &IpAddr, psk: impl AsRef<[u8]>) -> Config {
         })
         .ipsec_protocol(Protocol::ESP)
         .ipsec_proposal(|pc| {
-            pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
+            pc.encryption(EncrId::ENCR_AES_GCM_8, Some(128))
                 .prf(PrfId::PRF_HMAC_SHA2_256)
-                .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
-                .dh(DhId::SECP256R1)
         })
         .psk(psk.as_ref())
         .build(id)
@@ -116,6 +114,30 @@ fn create_alg_auth(integ: &Integ, key: impl AsRef<[u8]>) -> Result<AlgAuth> {
         alg_key: key.as_ref().to_vec(),
     };
     Ok(alg_auth)
+}
+
+fn create_alg_enc_aead(cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<AlgAead> {
+    let alg_name = match cipher.id() {
+        EncrId::ENCR_AES_GCM_8 | EncrId::ENCR_AES_GCM_12 | EncrId::ENCR_AES_GCM_16 => "rfc4106(gcm(aes))",
+        id => return Err(anyhow::anyhow!("unsupported AEAD algorithm {:?}", id)),
+    };
+
+    let mut enc_name: [u8; XFRM_ALG_AEAD_NAME_LEN] = [0; XFRM_ALG_AEAD_NAME_LEN];
+    let mut c_enc_name = CString::new(alg_name)?.into_bytes_with_nul();
+
+    if c_enc_name.len() > XFRM_ALG_AEAD_NAME_LEN {
+        c_enc_name.truncate(XFRM_ALG_AEAD_NAME_LEN);
+        c_enc_name[XFRM_ALG_AEAD_NAME_LEN - 1] = 0;
+    }
+    enc_name[0..c_enc_name.len()].copy_from_slice(c_enc_name.as_slice());
+
+    let alg_enc = AlgAead {
+        alg_name: enc_name,
+        alg_key_len: (key.as_ref().len() * 8) as u32,
+        alg_icv_len: (cipher.tag_size().unwrap() * 8) as u32,
+        alg_key: key.as_ref().to_vec(),
+    };
+    Ok(alg_enc)
 }
 
 fn create_alg_enc(cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<Alg> {
@@ -192,8 +214,13 @@ fn create_modify_message(
             .push(XfrmAttrs::AuthenticationAlgTrunc(alg_auth));
     }
 
-    let alg_enc = create_alg_enc(cipher, cipher_key.as_ref())?;
-    message.nlas.push(XfrmAttrs::EncryptionAlg(alg_enc));
+    if cipher.is_aead() {
+        let alg_enc_aead = create_alg_enc_aead(cipher, cipher_key.as_ref())?;
+        message.nlas.push(XfrmAttrs::EncryptionAlgAead(alg_enc_aead));
+    } else {
+        let alg_enc = create_alg_enc(cipher, cipher_key.as_ref())?;
+        message.nlas.push(XfrmAttrs::EncryptionAlg(alg_enc));
+    }
 
     Ok(message)
 }

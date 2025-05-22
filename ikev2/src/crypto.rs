@@ -372,6 +372,7 @@ pub struct Cipher {
     cipher: symm::Cipher,
     is_aead: bool,
     tag_size: Option<usize>,
+    salt_size: Option<usize>,
 }
 
 impl std::fmt::Debug for Cipher {
@@ -382,19 +383,19 @@ impl std::fmt::Debug for Cipher {
 
 impl Cipher {
     pub fn new(id: EncrId, key_size: Option<u16>) -> Result<Self> {
-        let (cipher, is_aead, tag_size) = match (id, key_size) {
-            (EncrId::ENCR_AES_CBC, Some(128)) => (symm::Cipher::aes_128_cbc(), false, None),
-            (EncrId::ENCR_AES_CBC, Some(192)) => (symm::Cipher::aes_192_cbc(), false, None),
-            (EncrId::ENCR_AES_CBC, Some(256)) => (symm::Cipher::aes_256_cbc(), false, None),
-            (EncrId::ENCR_AES_GCM_8, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(8)),
-            (EncrId::ENCR_AES_GCM_8, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(8)),
-            (EncrId::ENCR_AES_GCM_8, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(8)),
-            (EncrId::ENCR_AES_GCM_12, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(12)),
-            (EncrId::ENCR_AES_GCM_12, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(12)),
-            (EncrId::ENCR_AES_GCM_12, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(12)),
-            (EncrId::ENCR_AES_GCM_16, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(16)),
-            (EncrId::ENCR_AES_GCM_16, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(16)),
-            (EncrId::ENCR_AES_GCM_16, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(16)),
+        let (cipher, is_aead, tag_size, salt_size) = match (id, key_size) {
+            (EncrId::ENCR_AES_CBC, Some(128)) => (symm::Cipher::aes_128_cbc(), false, None, None),
+            (EncrId::ENCR_AES_CBC, Some(192)) => (symm::Cipher::aes_192_cbc(), false, None, None),
+            (EncrId::ENCR_AES_CBC, Some(256)) => (symm::Cipher::aes_256_cbc(), false, None, None),
+            (EncrId::ENCR_AES_GCM_8, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(8), Some(4)),
+            (EncrId::ENCR_AES_GCM_8, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(8), Some(4)),
+            (EncrId::ENCR_AES_GCM_8, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(8), Some(4)),
+            (EncrId::ENCR_AES_GCM_12, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(12), Some(4)),
+            (EncrId::ENCR_AES_GCM_12, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(12), Some(4)),
+            (EncrId::ENCR_AES_GCM_12, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(12), Some(4)),
+            (EncrId::ENCR_AES_GCM_16, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(16), Some(4)),
+            (EncrId::ENCR_AES_GCM_16, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(16), Some(4)),
+            (EncrId::ENCR_AES_GCM_16, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(16), Some(4)),
             e => return Err(anyhow::anyhow!("unsupported cipher {:?}", e)),
         };
         Ok(Self {
@@ -402,6 +403,7 @@ impl Cipher {
             cipher,
             is_aead,
             tag_size,
+            salt_size,
         })
     }
 
@@ -423,6 +425,10 @@ impl Cipher {
 
     pub fn tag_size(&self) -> Option<usize> {
         self.tag_size
+    }
+
+    pub fn salt_size(&self) -> Option<usize> {
+        self.salt_size
     }
 
     pub fn id(&self) -> EncrId {

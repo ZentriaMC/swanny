@@ -131,18 +131,18 @@ impl ChosenProposal {
     pub fn new(proposal: &Proposal) -> Result<Self> {
         let transform = proposal
             .transforms()
-            .find(|t| t.ty() == Num::Assigned(TransformType::ENCR.into()))
+            .find(|t| matches!(t.ty().assigned(), Some(TransformType::ENCR)))
             .ok_or_else(|| anyhow::anyhow!("ENCR transform not found"))?;
         let id: EncrId = transform.id().try_into()?;
         let attribute = transform
             .attributes()
-            .find(|a| a.ty() == Num::Assigned(AttributeType::KeyLength.into()))
+            .find(|a| matches!(a.ty().assigned(), Some(AttributeType::KeyLength)))
             .ok_or_else(|| anyhow::anyhow!("KeyLength attribute not found"))?;
         let cipher = Cipher::new(id, Some(u16::from_be_bytes(attribute.value().try_into()?)))?;
 
         let transform = proposal
             .transforms()
-            .find(|t| t.ty() == Num::Assigned(TransformType::PRF.into()))
+            .find(|t| matches!(t.ty().assigned(), Some(TransformType::PRF)))
             .ok_or_else(|| anyhow::anyhow!("PRF transform not found"))?;
         let id: PrfId = transform.id().try_into()?;
         let prf = Prf::new(id)?;
@@ -390,17 +390,19 @@ impl ChildSa {
             .as_ref()
             .map(|integ| integ.key_size())
             .unwrap_or(0);
+        let encryption_key_size = self.chosen_proposal.cipher().key_size() +
+            self.chosen_proposal.cipher().salt_size().unwrap_or(0);
         let buf = self.chosen_proposal.prf().prfplus(
             d.as_ref(),
             &buf,
-            self.chosen_proposal.cipher().key_size() * 2 + integ_key_size * 2,
+            encryption_key_size * 2 + integ_key_size * 2,
         )?;
         let mut buf = buf.as_slice();
 
-        let mut ei = vec![0; self.chosen_proposal.cipher().key_size()];
+        let mut ei = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut ei)?;
 
-        let mut er = vec![0; self.chosen_proposal.cipher().key_size()];
+        let mut er = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut er)?;
 
         let (ai, ar) = if self.chosen_proposal.integ().is_some() {
