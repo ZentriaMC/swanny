@@ -159,7 +159,7 @@ pub(crate) mod tests {
         let transform = transform::tests::create_transform();
         Proposal::new(
             1,
-            Num::Assigned(Protocol::IKE),
+            Num::Assigned(Protocol::IKE.into()),
             &[1, 2, 3, 4, 5, 6, 7, 8],
             [transform],
         )
@@ -181,7 +181,10 @@ pub(crate) mod tests {
             Proposal::deserialize(&mut &buf[..]).expect("unable to deserialize proposal");
 
         assert_eq!(proposal2.number(), 1);
-        assert!(matches!(proposal2.protocol(), Num::Assigned(Protocol::IKE),));
+        assert!(matches!(
+            proposal2.protocol().assigned(),
+            Some(Protocol::IKE)
+        ));
         assert_eq!(proposal2.spi(), &[1, 2, 3, 4, 5, 6, 7, 8][..]);
         assert_eq!(
             proposal2.transforms().collect::<Vec<&Transform>>(),

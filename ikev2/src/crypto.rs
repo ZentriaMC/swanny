@@ -387,15 +387,33 @@ impl Cipher {
             (EncrId::ENCR_AES_CBC, Some(128)) => (symm::Cipher::aes_128_cbc(), false, None, None),
             (EncrId::ENCR_AES_CBC, Some(192)) => (symm::Cipher::aes_192_cbc(), false, None, None),
             (EncrId::ENCR_AES_CBC, Some(256)) => (symm::Cipher::aes_256_cbc(), false, None, None),
-            (EncrId::ENCR_AES_GCM_8, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(8), Some(4)),
-            (EncrId::ENCR_AES_GCM_8, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(8), Some(4)),
-            (EncrId::ENCR_AES_GCM_8, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(8), Some(4)),
-            (EncrId::ENCR_AES_GCM_12, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(12), Some(4)),
-            (EncrId::ENCR_AES_GCM_12, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(12), Some(4)),
-            (EncrId::ENCR_AES_GCM_12, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(12), Some(4)),
-            (EncrId::ENCR_AES_GCM_16, Some(128)) => (symm::Cipher::aes_128_gcm(), true, Some(16), Some(4)),
-            (EncrId::ENCR_AES_GCM_16, Some(192)) => (symm::Cipher::aes_192_gcm(), true, Some(16), Some(4)),
-            (EncrId::ENCR_AES_GCM_16, Some(256)) => (symm::Cipher::aes_256_gcm(), true, Some(16), Some(4)),
+            (EncrId::ENCR_AES_GCM_8, Some(128)) => {
+                (symm::Cipher::aes_128_gcm(), true, Some(8), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_8, Some(192)) => {
+                (symm::Cipher::aes_192_gcm(), true, Some(8), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_8, Some(256)) => {
+                (symm::Cipher::aes_256_gcm(), true, Some(8), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_12, Some(128)) => {
+                (symm::Cipher::aes_128_gcm(), true, Some(12), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_12, Some(192)) => {
+                (symm::Cipher::aes_192_gcm(), true, Some(12), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_12, Some(256)) => {
+                (symm::Cipher::aes_256_gcm(), true, Some(12), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_16, Some(128)) => {
+                (symm::Cipher::aes_128_gcm(), true, Some(16), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_16, Some(192)) => {
+                (symm::Cipher::aes_192_gcm(), true, Some(16), Some(4))
+            }
+            (EncrId::ENCR_AES_GCM_16, Some(256)) => {
+                (symm::Cipher::aes_256_gcm(), true, Some(16), Some(4))
+            }
             e => return Err(anyhow::anyhow!("unsupported cipher {:?}", e)),
         };
         Ok(Self {

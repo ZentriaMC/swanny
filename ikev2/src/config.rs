@@ -257,7 +257,10 @@ pub(crate) mod tests {
                     .dh(DhId::MODP2048)
             })
             .psk(b"test test test")
-            .build(Id::new(Num::Assigned(IdType::ID_KEY_ID), id.as_ref()))
+            .build(Id::new(
+                Num::Assigned(IdType::ID_KEY_ID.into()),
+                id.as_ref(),
+            ))
     }
 
     #[test]

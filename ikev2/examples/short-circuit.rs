@@ -32,12 +32,15 @@ fn create_config(id: impl AsRef<[u8]>) -> Config {
                 .integrity(IntegId::AUTH_HMAC_SHA1_96)
         })
         .psk(b"test test test")
-        .build(Id::new(Num::Assigned(IdType::ID_KEY_ID), id.as_ref()))
+        .build(Id::new(
+            Num::Assigned(IdType::ID_KEY_ID.into()),
+            id.as_ref(),
+        ))
 }
 
 fn create_traffic_selector(address: &IpAddr) -> TrafficSelector {
     TrafficSelector::new(
-        Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE),
+        Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE.into()),
         0,
         &address,
         &address,

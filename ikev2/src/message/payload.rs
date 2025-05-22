@@ -626,7 +626,9 @@ pub(crate) fn deserialize_payloads(
     Ok(payloads)
 }
 
-pub(crate) fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> Result<usize> {
+pub(crate) fn cumulative_size<'a>(
+    payloads: impl IntoIterator<Item = &'a Payload>,
+) -> Result<usize> {
     let sizes: Result<Vec<_>> = payloads.into_iter().map(|p| p.size()).collect();
 
     sizes?
@@ -711,7 +713,7 @@ pub(crate) mod tests {
 
     pub(crate) fn create_ke() -> Ke {
         const DATA: &'static [u8] = b"key exchange data";
-        Ke::new(Num::Assigned(DhId::MODP4096), DATA)
+        Ke::new(Num::Assigned(DhId::MODP4096.into()), DATA)
     }
 
     #[test]

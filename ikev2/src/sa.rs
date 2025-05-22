@@ -407,8 +407,8 @@ impl ChildSa {
             .as_ref()
             .map(|integ| integ.key_size())
             .unwrap_or(0);
-        let encryption_key_size = self.chosen_proposal.cipher().key_size() +
-            self.chosen_proposal.cipher().salt_size().unwrap_or(0);
+        let encryption_key_size = self.chosen_proposal.cipher().key_size()
+            + self.chosen_proposal.cipher().salt_size().unwrap_or(0);
         let buf = self.chosen_proposal.prf().prfplus(
             d.as_ref(),
             &buf,

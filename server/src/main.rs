@@ -7,8 +7,9 @@ use futures::{
 };
 use netlink_packet_core::{NLM_F_ACK, NLM_F_REQUEST, NetlinkMessage, NetlinkPayload};
 use netlink_packet_xfrm::{
-    Alg, AlgAead, AlgAuth, XFRM_ALG_AEAD_NAME_LEN, XFRM_ALG_AUTH_NAME_LEN, XFRM_ALG_NAME_LEN, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE,
-    XfrmAttrs, XfrmMessage, address::Address, state::ModifyMessage,
+    Alg, AlgAead, AlgAuth, XFRM_ALG_AEAD_NAME_LEN, XFRM_ALG_AUTH_NAME_LEN, XFRM_ALG_NAME_LEN,
+    XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmAttrs, XfrmMessage, address::Address,
+    state::ModifyMessage,
 };
 use netlink_proto::{
     ConnectionHandle,
@@ -118,7 +119,9 @@ fn create_alg_auth(integ: &Integ, key: impl AsRef<[u8]>) -> Result<AlgAuth> {
 
 fn create_alg_enc_aead(cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<AlgAead> {
     let alg_name = match cipher.id() {
-        EncrId::ENCR_AES_GCM_8 | EncrId::ENCR_AES_GCM_12 | EncrId::ENCR_AES_GCM_16 => "rfc4106(gcm(aes))",
+        EncrId::ENCR_AES_GCM_8 | EncrId::ENCR_AES_GCM_12 | EncrId::ENCR_AES_GCM_16 => {
+            "rfc4106(gcm(aes))"
+        }
         id => return Err(anyhow::anyhow!("unsupported AEAD algorithm {:?}", id)),
     };
 
@@ -216,7 +219,9 @@ fn create_modify_message(
 
     if cipher.is_aead() {
         let alg_enc_aead = create_alg_enc_aead(cipher, cipher_key.as_ref())?;
-        message.nlas.push(XfrmAttrs::EncryptionAlgAead(alg_enc_aead));
+        message
+            .nlas
+            .push(XfrmAttrs::EncryptionAlgAead(alg_enc_aead));
     } else {
         let alg_enc = create_alg_enc(cipher, cipher_key.as_ref())?;
         message.nlas.push(XfrmAttrs::EncryptionAlg(alg_enc));

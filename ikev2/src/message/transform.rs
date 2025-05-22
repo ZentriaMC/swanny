@@ -159,12 +159,15 @@ impl serialize::Deserialize for Transform {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::message::serialize::{Deserialize, Serialize};
+    use crate::message::{
+        num::EncrId,
+        serialize::{Deserialize, Serialize},
+    };
     use bytes::BytesMut;
 
     fn create_attribute() -> Attribute {
         Attribute::new(
-            Num::Assigned(AttributeType::KeyLength),
+            Num::Assigned(AttributeType::KeyLength.into()),
             &128u16.to_be_bytes()[..],
             AttributeFormat::TV,
         )
@@ -173,8 +176,8 @@ pub(crate) mod tests {
     pub(crate) fn create_transform() -> Transform {
         let attr = create_attribute();
         Transform::new(
-            Num::Assigned(TransformType::ENCR),
-            Num::Assigned(TransformId::Encr(Num::Assigned(EncrId::ENCR_AES_CTR))),
+            Num::Assigned(TransformType::ENCR.into()),
+            Num::Assigned(TransformId::Encr(Num::Assigned(EncrId::ENCR_AES_CTR.into())).into()),
             [attr],
         )
     }
@@ -209,12 +212,12 @@ pub(crate) mod tests {
             Transform::deserialize(&mut &buf[..]).expect("unable to deserialize transform");
 
         assert!(matches!(
-            transform2.ty(),
-            Num::Assigned(TransformType::ENCR)
+            transform2.ty().assigned(),
+            Some(TransformType::ENCR)
         ));
         assert!(matches!(
-            transform2.id(),
-            Num::Assigned(TransformId::Encr(Num::Assigned(EncrId::ENCR_AES_CTR)))
+            transform2.id().assigned(),
+            Some(TransformId::Encr(_))
         ));
         assert_eq!(
             transform2.attributes().collect::<Vec<&Attribute>>(),
