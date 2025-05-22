@@ -26,8 +26,8 @@ pub enum ControlMessage {
 
 /// IKE SA
 ///
-/// The `IkeSa` data structure represents an opaque event source and
-/// sink to drive IKEv2 state machine.
+/// The `IkeSa` data structure is an opaque event handle to drive
+/// the IKEv2 state machine.
 #[derive(Clone)]
 pub struct IkeSa {
     data: Arc<RwLock<StateData>>,
@@ -138,6 +138,7 @@ pub struct ChosenProposal {
 }
 
 impl ChosenProposal {
+    /// Creates a new `ChosenProposal` from a proposal on the wire
     pub fn new(proposal: &Proposal) -> Result<Self> {
         let transform = proposal
             .transforms()
@@ -213,31 +214,37 @@ impl ChosenProposal {
         }
     }
 
+    /// Returns the protocol (IKE, ESP, or AH)
     pub fn protocol(&self) -> Protocol {
         self.protocol
     }
 
+    /// Returns the SPI
     pub fn spi(&self) -> &[u8] {
         &self.spi
     }
 
+    /// Returns the cipher algorithm
     pub fn cipher(&self) -> &Cipher {
         &self.cipher
     }
 
+    /// Returns the PRF algorithm
     pub fn prf(&self) -> &Prf {
         &self.prf
     }
 
+    /// Returns the integrity checking algorithm
     pub fn integ(&self) -> Option<&Integ> {
         self.integ.as_ref()
     }
 
+    /// Returns the key exchange group
     pub fn group(&self) -> Option<&Group> {
         self.group.as_ref()
     }
 
-    pub fn generate_keys(
+    pub(crate) fn generate_keys(
         &self,
         skeyseed: impl AsRef<[u8]>,
         nonce_i: impl AsRef<[u8]>,
@@ -293,6 +300,7 @@ impl ChosenProposal {
         })
     }
 
+    /// Turns this into a `Proposal` data structure sent over the wire
     pub fn proposal(
         &self,
         number: u8,
@@ -393,7 +401,8 @@ pub struct ChildSa {
 }
 
 impl ChildSa {
-    pub fn generate_keys(
+    /// Generates key materials used by this Child SA
+    pub(crate) fn generate_keys(
         &mut self,
         d: impl AsRef<[u8]>,
         nonce_i: impl AsRef<[u8]>,
@@ -438,22 +447,27 @@ impl ChildSa {
         Ok(())
     }
 
+    /// Returns the intiator's traffic selector
     pub fn ts_i(&self) -> &TrafficSelector {
         &self.ts_i
     }
 
+    /// Returns the responder's traffic selector
     pub fn ts_r(&self) -> &TrafficSelector {
         &self.ts_r
     }
 
+    /// Returns the SPI
     pub fn spi(&self) -> &EspSpi {
         &self.spi
     }
 
+    /// Returns the cryptographic proposal chosen
     pub fn chosen_proposal(&self) -> &ChosenProposal {
         &self.chosen_proposal
     }
 
+    /// Returns the key materials
     pub fn keys(&self) -> Option<&ProtectingKeys> {
         self.keys.as_ref()
     }
