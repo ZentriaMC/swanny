@@ -1,83 +1,11 @@
 use crate::message::{
-    num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, TransformType},
+    num::{AttributeFormat, AttributeType, Num, TransformId, TransformType},
     serialize,
 };
 use anyhow::Result;
 use bytes::{Buf, BufMut};
 
 pub const HEADER_SIZE: usize = 4;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TransformId {
-    Encr(Num<u16, EncrId>),
-    Prf(Num<u16, PrfId>),
-    Integ(Num<u16, IntegId>),
-    Dh(Num<u16, DhId>),
-    Esn(Num<u16, EsnId>),
-}
-
-impl From<TransformId> for u16 {
-    fn from(value: TransformId) -> Self {
-        match value {
-            TransformId::Encr(id) => id.into(),
-            TransformId::Prf(id) => id.into(),
-            TransformId::Integ(id) => id.into(),
-            TransformId::Dh(id) => id.into(),
-            TransformId::Esn(id) => id.into(),
-        }
-    }
-}
-
-impl Num<u16, TransformId> {
-    pub fn from_u16(ty: Num<u8, TransformType>, value: u16) -> Self {
-        match ty.assigned() {
-            Some(TransformType::ENCR) => Num::Assigned(TransformId::Encr(value.into()).into()),
-            Some(TransformType::PRF) => Num::Assigned(TransformId::Prf(value.into()).into()),
-            Some(TransformType::INTEG) => Num::Assigned(TransformId::Integ(value.into()).into()),
-            Some(TransformType::DH) => Num::Assigned(TransformId::Dh(value.into()).into()),
-            Some(TransformType::ESN) => Num::Assigned(TransformId::Esn(value.into()).into()),
-            None => Num::Unassigned(value.into()),
-        }
-    }
-}
-
-macro_rules! create_try_from {
-    ( $id:ident, $ce:ident ) => {
-        impl TryFrom<TransformId> for $id {
-            type Error = anyhow::Error;
-
-            fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
-                match other {
-                    TransformId::$ce(Num::Assigned(id)) => Ok(id.into_inner()),
-                    _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
-                }
-            }
-        }
-
-        impl TryFrom<Num<u16, TransformId>> for $id {
-            type Error = anyhow::Error;
-
-            fn try_from(other: Num<u16, TransformId>) -> std::result::Result<Self, Self::Error> {
-                match other.assigned() {
-                    Some(TransformId::$ce(Num::Assigned(id))) => Ok(id.into_inner()),
-                    _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
-                }
-            }
-        }
-    };
-}
-
-create_try_from!(EncrId, Encr);
-create_try_from!(PrfId, Prf);
-create_try_from!(IntegId, Integ);
-create_try_from!(DhId, Dh);
-create_try_from!(EsnId, Esn);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum AttributeFormat {
-    TV,
-    TLV,
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attribute {

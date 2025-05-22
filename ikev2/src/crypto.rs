@@ -1,6 +1,9 @@
 use crate::message::{
-    num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformType},
-    transform::{Attribute, AttributeFormat, Transform, TransformId},
+    num::{
+        AttributeFormat, AttributeType, DhId, EncrId, IntegId, Num, PrfId, TransformId,
+        TransformType,
+    },
+    transform::{Attribute, Transform},
 };
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};

@@ -1,9 +1,12 @@
 use crate::message::{
     EspSpi, Spi,
-    num::{AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol, TransformType},
+    num::{
+        AttributeFormat, AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol,
+        TransformId, TransformType,
+    },
     payload::Id,
     proposal::Proposal,
-    transform::{Attribute, AttributeFormat, Transform, TransformId},
+    transform::{Attribute, Transform},
 };
 
 #[derive(Clone, Debug, Default)]
