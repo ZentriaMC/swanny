@@ -1,3 +1,11 @@
+//! IKE SA configuration
+//!
+//! This module provides functions and data structures to configure a
+//! new IKE SA. The main entry point to this module is
+//! [`ConfigBuilder`].
+//!
+//! [`ConfigBuilder`]: crate::config::ConfigBuilder
+//!
 use crate::message::{
     EspSpi, Spi,
     num::{
@@ -9,6 +17,7 @@ use crate::message::{
     transform::{Attribute, Transform},
 };
 
+/// Builder to create a cryptographic proposal
 #[derive(Clone, Debug, Default)]
 pub struct ProposalBuilder {
     encryption: Vec<(EncrId, Option<u16>)>,
@@ -19,31 +28,37 @@ pub struct ProposalBuilder {
 }
 
 impl ProposalBuilder {
+    /// Sets the encryption algorithm and key size
     pub fn encryption(mut self, id: EncrId, key_size: Option<u16>) -> Self {
         self.encryption.push((id, key_size));
         self
     }
 
+    /// Sets the PRF algorithm
     pub fn prf(mut self, id: PrfId) -> Self {
         self.prf.push(id);
         self
     }
 
+    /// Sets the integrity checking algorithm
     pub fn integrity(mut self, id: IntegId) -> Self {
         self.integrity.push(id);
         self
     }
 
+    /// Sets the Diffie-Hellman group
     pub fn dh(mut self, id: DhId) -> Self {
         self.dh.push(id);
         self
     }
 
+    /// Sets the ESN option
     pub fn esn(mut self, id: EsnId) -> Self {
         self.esn.push(id);
         self
     }
 
+    /// Turn this `ProposalBuilder` into an actual `Proposal`
     pub fn build(&self, number: u8, protocol: Protocol, spi: impl AsRef<[u8]>) -> Proposal {
         let mut transforms = Vec::new();
 
@@ -134,6 +149,7 @@ impl ProposalBuilder {
     }
 }
 
+/// Builder to create an IKE SA configuration
 #[derive(Default)]
 pub struct ConfigBuilder {
     ike_proposals: Vec<ProposalBuilder>,
@@ -143,6 +159,7 @@ pub struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
+    /// Adds an IKE proposal
     pub fn ike_proposal<F>(mut self, func: F) -> Self
     where
         F: FnOnce(ProposalBuilder) -> ProposalBuilder,
@@ -151,11 +168,13 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the IPsec protocol (ESP or AH)
     pub fn ipsec_protocol(mut self, protocol: Protocol) -> Self {
         self.ipsec_protocol = Some(protocol);
         self
     }
 
+    /// Adds an IPsec proposal
     pub fn ipsec_proposal<F>(mut self, func: F) -> Self
     where
         F: FnOnce(ProposalBuilder) -> ProposalBuilder,
@@ -164,11 +183,13 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the PSK for authentication
     pub fn psk(mut self, psk: impl AsRef<[u8]>) -> Self {
         self.psk = Some(psk.as_ref().to_vec());
         self
     }
 
+    /// Turn this `ConfigBuilder` into an actual `Config`
     pub fn build(mut self, id: Id) -> Config {
         Config {
             ike_proposals: self.ike_proposals,
@@ -180,6 +201,7 @@ impl ConfigBuilder {
     }
 }
 
+/// IKE SA configuration
 #[derive(Clone, Debug)]
 pub struct Config {
     ike_proposals: Vec<ProposalBuilder>,
@@ -190,6 +212,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Returns an interator over configured IKE proposals
     pub fn ike_proposals<'a, 'b>(
         &'a self,
         spi: Option<&'b Spi>,
@@ -201,10 +224,12 @@ impl Config {
             .map(move |(i, pb)| pb.build(i as u8 + 1, Protocol::IKE, spi))
     }
 
+    /// Returns the IPsec protocol (ESP or AH)
     pub fn ipsec_protocol(&self) -> Protocol {
         self.ipsec_protocol
     }
 
+    /// Returns an interator over configured IPsec proposals
     pub fn ipsec_proposals<'a, 'b>(
         &'a self,
         spi: &'b EspSpi,
@@ -215,10 +240,12 @@ impl Config {
             .map(|(i, pb)| pb.build(i as u8 + 1, self.ipsec_protocol, spi.as_ref()))
     }
 
+    /// Returns the identity of IKE SA
     pub fn id(&self) -> &Id {
         &self.id
     }
 
+    /// Returns the PSK for authentication if set
     pub fn psk(&self) -> Option<&[u8]> {
         self.psk.as_deref()
     }
