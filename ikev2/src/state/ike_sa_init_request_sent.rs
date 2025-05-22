@@ -69,7 +69,7 @@ impl IkeSaInitRequestSent {
             private_key,
             ke_r.ke_data(),
         )?;
-        debug!("SKEYSEED generated: {:?}", &skeyseed);
+        debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
 
         let keys = chosen_proposal.generate_keys(
             &skeyseed,
@@ -78,7 +78,7 @@ impl IkeSaInitRequestSent {
             response.spi_i(),
             response.spi_r(),
         )?;
-        debug!("Keys generated: {:?}", &keys);
+        debug!(keys = ?&keys, "keys generated");
 
         Ok((chosen_proposal, keys, nonce_r.nonce().to_vec()))
     }

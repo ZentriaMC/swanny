@@ -128,7 +128,7 @@ impl Initial {
             &private_key,
             ke.ke_data(),
         )?;
-        debug!("SKEYSEED generated: {:?}", &skeyseed);
+        debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
 
         let keys = chosen_proposal.generate_keys(
             &skeyseed,
@@ -137,7 +137,7 @@ impl Initial {
             request.spi_i(),
             &data.spi,
         )?;
-        debug!("Keys generated: {:?}", &keys);
+        debug!(keys = ?&keys, "keys generated");
 
         Ok((
             chosen_proposal,

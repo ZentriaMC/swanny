@@ -40,7 +40,6 @@ impl IkeSaInitResponseSent {
             .payloads()
             .last()
             .ok_or_else(|| anyhow::anyhow!("no payload"))?;
-        eprintln!("{:?}", last.ty().assigned());
         if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
             return Err(anyhow::anyhow!("no SK payload"));
         }
@@ -52,6 +51,8 @@ impl IkeSaInitResponseSent {
             data.chosen_proposal.as_ref().unwrap().cipher(),
             &keys.protecting.ei,
         )?;
+
+        debug!(payloads = ?&payloads, "encrypted payloads");
 
         let auth = payloads
             .iter()
@@ -184,6 +185,8 @@ impl State for IkeSaInitResponseSent {
 
                     Self::handle_ike_auth_request(config, &data, &request)?
                 };
+
+                debug!(child_sa = ?&child_sa, "Child SA created");
 
                 let len = response.size()?;
                 let mut buf = BytesMut::with_capacity(len);

@@ -51,6 +51,8 @@ impl IkeAuthRequestSent {
             &keys.protecting.er,
         )?;
 
+        debug!(payloads = ?payloads, "encrypted payloads");
+
         let auth = payloads
             .iter()
             .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::AUTH)))
@@ -141,6 +143,9 @@ impl State for IkeAuthRequestSent {
                     let data = data.read().await;
                     Self::create_child_sa(&data, &chosen_proposal, larval_child_sa)?
                 };
+
+                debug!(child_sa = ?&child_sa, "Child SA created");
+
                 sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
                 Ok(Box::new(state::Established {}))
             }

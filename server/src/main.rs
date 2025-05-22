@@ -250,10 +250,10 @@ async fn create_sa(
     )?;
     let mut request = NetlinkMessage::from(XfrmMessage::AddSa(message));
     request.header.flags = NLM_F_REQUEST | NLM_F_ACK;
-    debug!("sending netlink request {:?}", &request);
+    debug!(request = ?&request, "sending netlink request");
     let mut response = handle.request(request, SocketAddr::new(0, 0))?;
     while let Some(message) = response.next().await {
-        debug!("netlink ack {:?}", message);
+        debug!(message = ?message, "received netlink response");
     }
     Ok(())
 }
@@ -284,7 +284,7 @@ async fn create_child_sa(
         },
     )
     .await?;
-    debug!("created inbound SA");
+    debug!("created inbound state");
     create_sa(
         handle.clone(),
         child_sa.ts_r().start_address(),
@@ -306,7 +306,7 @@ async fn create_child_sa(
         },
     )
     .await?;
-    debug!("created outbound SA");
+    debug!("created outbound state");
     Ok(())
 }
 
@@ -356,7 +356,6 @@ async fn main() -> Result<()> {
                 if let NetlinkPayload::InnerMessage(xfrm_message) = payload {
                     match xfrm_message {
                         XfrmMessage::Acquire(acquire) => {
-                            debug!("acquire");
                             let ts_i = create_traffic_selector(
                                 acquire.acquire.selector.family,
                                 acquire.acquire.selector.proto,
@@ -387,7 +386,6 @@ async fn main() -> Result<()> {
                         outgoing_framed.send((message, peer_address)).await?;
                     },
                     ControlMessage::CreateChildSa(child_sa) => {
-                        eprintln!("Created Child SA {:?}", &child_sa);
                         create_child_sa(
                             handle.clone(),
                             &child_sa,
@@ -407,7 +405,7 @@ async fn main() -> Result<()> {
                 }
             }
             result = pending_operations.select_next_some() => {
-                debug!("result: {:?}", result);
+                debug!(result = ?result, "pending operation completed");
             }
         }
     }
