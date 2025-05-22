@@ -495,7 +495,7 @@ impl From<&Cipher> for Transform {
     }
 }
 
-pub fn generate_skeyseed(
+pub(crate) fn generate_skeyseed(
     prf: &Prf,
     n_i: impl AsRef<[u8]>,
     n_r: impl AsRef<[u8]>,

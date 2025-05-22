@@ -15,8 +15,9 @@ pub mod transform;
 pub type Spi = [u8; 8];
 pub type EspSpi = [u8; 4];
 
-pub const KEY_PAD: &[u8] = b"Key Pad for IKEv2";
+pub(crate) const KEY_PAD: &[u8] = b"Key Pad for IKEv2";
 
+/// IKEv2 message
 #[derive(Debug)]
 pub struct Message {
     spi_i: Spi,
@@ -28,6 +29,7 @@ pub struct Message {
 }
 
 impl Message {
+    /// Creates a new `Message` with required fields
     pub fn new(
         spi_i: &Spi,
         spi_r: &Spi,
@@ -45,30 +47,37 @@ impl Message {
         }
     }
 
+    /// Returns the initiator SPI
     pub fn spi_i(&self) -> &Spi {
         &self.spi_i
     }
 
+    /// Returns the responder SPI
     pub fn spi_r(&self) -> &Spi {
         &self.spi_r
     }
 
+    /// Returns the exchange type
     pub fn exchange(&self) -> Num<u8, ExchangeType> {
         self.exchange
     }
 
+    /// Returns the flags set in the current message
     pub fn flags(&self) -> &MessageFlags {
         &self.flags
     }
 
+    /// Returns the message ID
     pub fn id(&self) -> u32 {
         self.id
     }
 
+    /// Returns an iterator over payloads inside this message
     pub fn payloads(&self) -> impl Iterator<Item = &Payload> {
         self.payloads.iter()
     }
 
+    /// Appends new payloads into this message
     pub fn add_payloads<P>(&mut self, payloads: P)
     where
         P: IntoIterator,
@@ -79,6 +88,7 @@ impl Message {
         }
     }
 
+    /// Finds a payload in this message by `PayloadType`
     pub fn get<'a, C>(&'a self, ty: PayloadType) -> Option<C>
     where
         C: TryFrom<&'a Payload>,

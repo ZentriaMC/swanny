@@ -17,12 +17,17 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info};
 
+/// Control message `IkeSa` may asynchronously send to the caller event loop
 #[derive(Debug)]
 pub enum ControlMessage {
     IkeMessage(Vec<u8>),
     CreateChildSa(Box<ChildSa>),
 }
 
+/// IKE SA
+///
+/// The `IkeSa` data structure represents an opaque event source and
+/// sink to drive IKEv2 state machine.
 #[derive(Clone)]
 pub struct IkeSa {
     data: Arc<RwLock<StateData>>,
@@ -32,6 +37,7 @@ pub struct IkeSa {
 }
 
 impl IkeSa {
+    /// Create a new IkeSa from the given configuration
     pub fn new(config: &Config) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
         let mut spi = Spi::default();
         crypto::rand_bytes(&mut spi)?;
@@ -50,11 +56,13 @@ impl IkeSa {
         ))
     }
 
+    /// Returns the initiator/responder status if it has been determined
     pub async fn is_initiator(&self) -> Option<bool> {
         let data = self.data.read().await;
         data.is_initiator
     }
 
+    /// Processes IKE message
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
@@ -82,6 +90,7 @@ impl IkeSa {
         Ok(())
     }
 
+    /// Processes XFRM acquire message
     pub async fn handle_acquire(
         &self,
         ts_i: TrafficSelector,
@@ -117,6 +126,7 @@ impl IkeSa {
     }
 }
 
+/// Cryptograhic proposal negotiated with the peer
 #[derive(Clone, Debug)]
 pub struct ChosenProposal {
     protocol: Protocol,
@@ -304,12 +314,14 @@ impl ChosenProposal {
     }
 }
 
+/// Key materials generated and used by the current IKE SA
 #[derive(Clone, Debug)]
 pub struct Keys {
     pub deriving: DerivingKeys,
     pub protecting: ProtectingKeys,
 }
 
+/// Key materials used for key derivation
 #[derive(Clone, Debug)]
 pub struct DerivingKeys {
     pub d: Vec<u8>,
@@ -317,6 +329,7 @@ pub struct DerivingKeys {
     pub pr: Vec<u8>,
 }
 
+/// Key materials used for encryption and authentication
 #[derive(Clone, Debug)]
 pub struct ProtectingKeys {
     pub ei: Vec<u8>,
@@ -366,6 +379,10 @@ impl LarvalChildSa {
     }
 }
 
+/// IPsec SA
+///
+/// The `ChildSa` data structure holds information about the
+/// established IPsec SA.
 #[derive(Clone, Debug)]
 pub struct ChildSa {
     ts_i: TrafficSelector,

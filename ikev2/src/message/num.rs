@@ -31,6 +31,11 @@ impl<P> From<P> for Primitive<P> {
     }
 }
 
+/// Protocol numbers
+///
+/// The `Num` data strucure is a thin wrapper around integrals used in
+/// the IKEv2 wire protocol, with a distinction between IANA assigned
+/// or unassigned numbers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Num<P, E>
 where

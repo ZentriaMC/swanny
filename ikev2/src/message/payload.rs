@@ -10,7 +10,7 @@ use crate::{
 use anyhow::Result;
 use bytes::{Buf, BufMut, BytesMut};
 
-pub const HEADER_SIZE: usize = 4;
+pub(crate) const HEADER_SIZE: usize = 4;
 
 impl From<PayloadType> for u8 {
     fn from(value: PayloadType) -> Self {
@@ -587,7 +587,7 @@ impl serialize::Deserialize for Ts {
     }
 }
 
-pub fn serialize_payloads<'a>(
+pub(crate) fn serialize_payloads<'a>(
     payloads: impl IntoIterator<Item = &'a Payload>,
     buf: &mut dyn BufMut,
 ) -> Result<()> {
@@ -610,7 +610,7 @@ pub fn serialize_payloads<'a>(
     Ok(())
 }
 
-pub fn deserialize_payloads(
+pub(crate) fn deserialize_payloads(
     mut payload_type: Num<u8, PayloadType>,
     buf: &mut dyn Buf,
 ) -> Result<Vec<Payload>> {
@@ -626,7 +626,7 @@ pub fn deserialize_payloads(
     Ok(payloads)
 }
 
-pub fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> Result<usize> {
+pub(crate) fn cumulative_size<'a>(payloads: impl IntoIterator<Item = &'a Payload>) -> Result<usize> {
     let sizes: Result<Vec<_>> = payloads.into_iter().map(|p| p.size()).collect();
 
     sizes?

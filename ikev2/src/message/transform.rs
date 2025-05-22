@@ -5,7 +5,7 @@ use crate::message::{
 use anyhow::Result;
 use bytes::{Buf, BufMut};
 
-pub const HEADER_SIZE: usize = 4;
+pub(crate) const HEADER_SIZE: usize = 4;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attribute {
