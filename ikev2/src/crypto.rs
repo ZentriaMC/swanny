@@ -27,6 +27,7 @@ pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<()> {
     Ok(rand::rand_bytes(buf)?)
 }
 
+/// PRF algorithm
 #[derive(Clone)]
 pub struct Prf {
     id: PrfId,
@@ -110,6 +111,7 @@ impl From<&Prf> for Transform {
     }
 }
 
+/// Integrity checkign algorithm
 #[derive(Clone)]
 pub struct Integ {
     id: IntegId,
@@ -255,6 +257,11 @@ impl GroupVariant {
     }
 }
 
+/// Private key used for secret derivation
+///
+/// The `GroupPrivateKey` data structure represents a private key used
+/// to calculate shared secret. This is generated with
+/// `Group::generate_key`.
 #[derive(Clone, Debug)]
 pub struct GroupPrivateKey {
     group: Group,
@@ -305,6 +312,7 @@ impl GroupPrivateKey {
     }
 }
 
+/// Key exchange group
 #[derive(Clone)]
 pub struct Group {
     id: DhId,
@@ -318,6 +326,7 @@ impl std::fmt::Debug for Group {
 }
 
 impl Group {
+    /// Creates a new `Group` from a group ID
     pub fn new(id: DhId) -> Result<Self> {
         let variant = GroupVariant::new(id)?;
         Ok(Self {
@@ -326,10 +335,12 @@ impl Group {
         })
     }
 
+    /// Returns the group ID
     pub fn id(&self) -> DhId {
         self.id
     }
 
+    /// Generates a new private key
     pub fn generate_key(&self) -> Result<GroupPrivateKey> {
         Ok(GroupPrivateKey {
             group: self.clone(),
