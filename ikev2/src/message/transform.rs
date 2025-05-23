@@ -177,7 +177,7 @@ pub(crate) mod tests {
         let attr = create_attribute();
         Transform::new(
             TransformType::ENCR.into(),
-            Num::Assigned(TransformId::Encr(Num::Assigned(EncrId::ENCR_AES_CTR.into())).into()),
+            EncrId::ENCR_AES_CTR.into(),
             [attr],
         )
     }

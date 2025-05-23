@@ -9,8 +9,8 @@
 use crate::message::{
     EspSpi, Spi,
     num::{
-        AttributeFormat, AttributeType, DhId, EncrId, EsnId, IntegId, Num, PrfId, Protocol,
-        TransformId, TransformType,
+        AttributeFormat, AttributeType, DhId, EncrId, EsnId, IntegId, PrfId, Protocol,
+        TransformType,
     },
     payload::Id,
     proposal::Proposal,
@@ -74,11 +74,7 @@ impl ProposalBuilder {
                         AttributeFormat::TV,
                     ));
                 }
-                Transform::new(
-                    TransformType::ENCR.into(),
-                    Num::Assigned(TransformId::Encr((*id).into()).into()),
-                    attributes,
-                )
+                Transform::new(TransformType::ENCR.into(), (*id).into(), attributes)
             })
             .collect();
 
@@ -87,13 +83,7 @@ impl ProposalBuilder {
         let mut prf = self
             .prf
             .iter()
-            .map(|id| {
-                Transform::new(
-                    TransformType::PRF.into(),
-                    Num::Assigned(TransformId::Prf((*id).into()).into()),
-                    None::<Attribute>,
-                )
-            })
+            .map(|id| Transform::new(TransformType::PRF.into(), (*id).into(), None::<Attribute>))
             .collect();
 
         transforms.append(&mut prf);
@@ -101,13 +91,7 @@ impl ProposalBuilder {
         let mut integrity = self
             .integrity
             .iter()
-            .map(|id| {
-                Transform::new(
-                    TransformType::INTEG.into(),
-                    Num::Assigned(TransformId::Integ((*id).into()).into()),
-                    None::<Attribute>,
-                )
-            })
+            .map(|id| Transform::new(TransformType::INTEG.into(), (*id).into(), None::<Attribute>))
             .collect();
 
         transforms.append(&mut integrity);
@@ -115,13 +99,7 @@ impl ProposalBuilder {
         let mut dh = self
             .dh
             .iter()
-            .map(|id| {
-                Transform::new(
-                    TransformType::DH.into(),
-                    Num::Assigned(TransformId::Dh((*id).into()).into()),
-                    None::<Attribute>,
-                )
-            })
+            .map(|id| Transform::new(TransformType::DH.into(), (*id).into(), None::<Attribute>))
             .collect();
 
         transforms.append(&mut dh);
@@ -129,13 +107,7 @@ impl ProposalBuilder {
         let mut esn = self
             .esn
             .iter()
-            .map(|id| {
-                Transform::new(
-                    TransformType::ESN.into(),
-                    Num::Assigned(TransformId::Esn((*id).into()).into()),
-                    None::<Attribute>,
-                )
-            })
+            .map(|id| Transform::new(TransformType::ESN.into(), (*id).into(), None::<Attribute>))
             .collect();
 
         transforms.append(&mut esn);

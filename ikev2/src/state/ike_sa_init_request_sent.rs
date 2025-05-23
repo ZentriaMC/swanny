@@ -3,7 +3,7 @@ use crate::{
     crypto,
     message::{
         Message, Spi,
-        num::{ExchangeType, MessageFlags, Num, PayloadType},
+        num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
@@ -57,7 +57,7 @@ impl IkeSaInitRequestSent {
         let chosen_proposal = ChosenProposal::new(proposal)?;
 
         let private_key = data.private_key.as_ref().unwrap();
-        if ke_r.dh_group() != Num::Assigned(private_key.group().id().into()) {
+        if ke_r.dh_group().assigned() != Some(private_key.group().id()) {
             return Err(anyhow::anyhow!("unmatched DH group"));
         }
 

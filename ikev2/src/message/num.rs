@@ -419,7 +419,7 @@ impl Num<u16, TransformId> {
     }
 }
 
-macro_rules! emit_try_from_transform_id {
+macro_rules! emit_transform_id_conversions {
     ( $id:ident, $ce:ident ) => {
         impl TryFrom<TransformId> for $id {
             type Error = anyhow::Error;
@@ -442,14 +442,20 @@ macro_rules! emit_try_from_transform_id {
                 }
             }
         }
+
+        impl From<$id> for Num<u16, TransformId> {
+            fn from(value: $id) -> Self {
+                Num::Assigned(Enum(TransformId::$ce(value.into())))
+            }
+        }
     };
 }
 
-emit_try_from_transform_id!(EncrId, Encr);
-emit_try_from_transform_id!(PrfId, Prf);
-emit_try_from_transform_id!(IntegId, Integ);
-emit_try_from_transform_id!(DhId, Dh);
-emit_try_from_transform_id!(EsnId, Esn);
+emit_transform_id_conversions!(EncrId, Encr);
+emit_transform_id_conversions!(PrfId, Prf);
+emit_transform_id_conversions!(IntegId, Integ);
+emit_transform_id_conversions!(DhId, Dh);
+emit_transform_id_conversions!(EsnId, Esn);
 
 #[allow(non_camel_case_types)]
 #[repr(u8)]
