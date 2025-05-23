@@ -12,12 +12,6 @@ use bytes::{Buf, BufMut, BytesMut};
 
 pub(crate) const HEADER_SIZE: usize = 4;
 
-impl From<PayloadType> for u8 {
-    fn from(value: PayloadType) -> Self {
-        value as Self
-    }
-}
-
 /// Content variants
 #[derive(Debug)]
 pub enum Content {

@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 use num_traits::FromPrimitive;
 
+/// A newtype used by `Num` to represent an IANA registered number.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Enum<E>(E);
 
@@ -16,6 +17,7 @@ impl<E> From<E> for Enum<E> {
     }
 }
 
+/// A newtype used by `Num` to represent a number not in the IANA registry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Primitive<P>(P);
 
@@ -34,8 +36,11 @@ impl<P> From<P> for Primitive<P> {
 /// Protocol numbers
 ///
 /// The `Num` data strucure is a thin wrapper around integrals used in
-/// the IKEv2 wire protocol, with a distinction between IANA assigned
-/// or unassigned numbers.
+/// the IKEv2 wire protocol. Unlike `Option`, it provides a
+/// distinction between IANA assigned or unassigned numbers.
+///
+/// The applications do not usually need to construct `Num`
+/// manually. Use `Into` trait from the enum types such as `IdType`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Num<P, E>
 where
@@ -124,6 +129,12 @@ impl From<ExchangeType> for u8 {
     }
 }
 
+impl From<ExchangeType> for Num<u8, ExchangeType> {
+    fn from(value: ExchangeType) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 bitflags! {
     #[derive(Debug, PartialEq)]
     pub struct MessageFlags: u8 {
@@ -154,6 +165,18 @@ pub enum PayloadType {
     EAP = 48,
 }
 
+impl From<PayloadType> for u8 {
+    fn from(value: PayloadType) -> Self {
+        value as Self
+    }
+}
+
+impl From<PayloadType> for Num<u8, PayloadType> {
+    fn from(value: PayloadType) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum Protocol {
@@ -165,6 +188,12 @@ pub enum Protocol {
 impl From<Protocol> for u8 {
     fn from(value: Protocol) -> Self {
         value as Self
+    }
+}
+
+impl From<Protocol> for Num<u8, Protocol> {
+    fn from(value: Protocol) -> Self {
+        Num::Assigned(Enum(value))
     }
 }
 
@@ -192,6 +221,12 @@ pub enum TransformType {
 impl From<TransformType> for u8 {
     fn from(value: TransformType) -> Self {
         value as Self
+    }
+}
+
+impl From<TransformType> for Num<u8, TransformType> {
+    fn from(value: TransformType) -> Self {
+        Num::Assigned(Enum(value))
     }
 }
 
@@ -225,6 +260,12 @@ impl From<EncrId> for u16 {
     }
 }
 
+impl From<EncrId> for Num<u16, EncrId> {
+    fn from(value: EncrId) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 #[allow(non_camel_case_types)]
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
@@ -241,6 +282,12 @@ pub enum PrfId {
 impl From<PrfId> for u16 {
     fn from(value: PrfId) -> Self {
         value as Self
+    }
+}
+
+impl From<PrfId> for Num<u16, PrfId> {
+    fn from(value: PrfId) -> Self {
+        Num::Assigned(Enum(value))
     }
 }
 
@@ -271,6 +318,12 @@ impl From<IntegId> for u16 {
     }
 }
 
+impl From<IntegId> for Num<u16, IntegId> {
+    fn from(value: IntegId) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum DhId {
@@ -294,6 +347,12 @@ impl From<DhId> for u16 {
     }
 }
 
+impl From<DhId> for Num<u16, DhId> {
+    fn from(value: DhId) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum EsnId {
@@ -307,6 +366,12 @@ impl From<EsnId> for u16 {
     }
 }
 
+impl From<EsnId> for Num<u16, EsnId> {
+    fn from(value: EsnId) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum AttributeType {
@@ -316,6 +381,12 @@ pub enum AttributeType {
 impl From<AttributeType> for u16 {
     fn from(value: AttributeType) -> Self {
         value as Self
+    }
+}
+
+impl From<AttributeType> for Num<u16, AttributeType> {
+    fn from(value: AttributeType) -> Self {
+        Num::Assigned(Enum(value))
     }
 }
 
@@ -410,6 +481,12 @@ impl From<IdType> for u8 {
     }
 }
 
+impl From<IdType> for Num<u8, IdType> {
+    fn from(value: IdType) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum AuthType {
@@ -421,6 +498,12 @@ pub enum AuthType {
 impl From<AuthType> for u8 {
     fn from(value: AuthType) -> Self {
         value as Self
+    }
+}
+
+impl From<AuthType> for Num<u8, AuthType> {
+    fn from(value: AuthType) -> Self {
+        Num::Assigned(Enum(value))
     }
 }
 
@@ -465,6 +548,12 @@ impl From<NotifyType> for u16 {
     }
 }
 
+impl From<NotifyType> for Num<u16, NotifyType> {
+    fn from(value: NotifyType) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 #[allow(non_camel_case_types)]
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
@@ -476,5 +565,11 @@ pub enum TrafficSelectorType {
 impl From<TrafficSelectorType> for u8 {
     fn from(value: TrafficSelectorType) -> Self {
         value as Self
+    }
+}
+
+impl From<TrafficSelectorType> for Num<u8, TrafficSelectorType> {
+    fn from(value: TrafficSelectorType) -> Self {
+        Num::Assigned(Enum(value))
     }
 }
