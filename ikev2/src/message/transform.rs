@@ -178,7 +178,7 @@ pub(crate) mod tests {
         Transform::new(
             TransformType::ENCR.into(),
             EncrId::ENCR_AES_CTR.into(),
-            [attr],
+            Some(attr),
         )
     }
 
