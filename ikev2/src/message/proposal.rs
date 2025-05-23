@@ -159,7 +159,7 @@ pub(crate) mod tests {
         let transform = transform::tests::create_transform();
         Proposal::new(
             1,
-            Num::Assigned(Protocol::IKE.into()),
+            Protocol::IKE.into(),
             &[1, 2, 3, 4, 5, 6, 7, 8],
             [transform],
         )

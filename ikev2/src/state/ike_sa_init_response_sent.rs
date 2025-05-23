@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     message::{
         Message,
-        num::{ExchangeType, MessageFlags, Num, PayloadType},
+        num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
@@ -96,7 +96,7 @@ impl IkeSaInitResponseSent {
         let mut message = Message::new(
             request.spi_i(),
             &data.spi,
-            Num::Assigned(ExchangeType::IKE_AUTH.into()),
+            ExchangeType::IKE_AUTH.into(),
             MessageFlags::R,
             request.id(),
         );
@@ -121,32 +121,29 @@ impl IkeSaInitResponseSent {
             data.nonce_i.as_ref().unwrap(),
             data.nonce_r.as_ref().unwrap(),
         )?;
-        let proposal = chosen_proposal.proposal(
-            1,
-            Num::Assigned(chosen_proposal.protocol().into()),
-            child_sa.spi(),
-        );
+        let proposal =
+            chosen_proposal.proposal(1, chosen_proposal.protocol().into(), child_sa.spi());
 
         let payloads = [
             Payload::new(
-                Num::Assigned(PayloadType::SA.into()),
+                PayloadType::SA.into(),
                 payload::Content::Sa(payload::Sa::new(Some(proposal))),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::AUTH.into()),
+                PayloadType::AUTH.into(),
                 payload::Content::Auth(data.auth_sign(config)?),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::IDr.into()),
+                PayloadType::IDr.into(),
                 payload::Content::Id(config.id().clone()),
                 true,
             ),
         ];
 
         message.add_payloads([Payload::new(
-            Num::Assigned(PayloadType::SK.into()),
+            PayloadType::SK.into(),
             payload::Content::Sk(payload::Sk::encrypt(
                 data.chosen_proposal.as_ref().unwrap().cipher(),
                 &keys.protecting.er,

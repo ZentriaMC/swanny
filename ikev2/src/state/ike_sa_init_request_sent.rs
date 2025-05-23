@@ -90,7 +90,7 @@ impl IkeSaInitRequestSent {
         let mut message = Message::new(
             &data.spi,
             spi_r,
-            Num::Assigned(ExchangeType::IKE_AUTH.into()),
+            ExchangeType::IKE_AUTH.into(),
             MessageFlags::I,
             data.message_id.wrapping_add(1),
         );
@@ -103,29 +103,29 @@ impl IkeSaInitRequestSent {
 
         let payloads = [
             Payload::new(
-                Num::Assigned(PayloadType::SA.into()),
+                PayloadType::SA.into(),
                 payload::Content::Sa(payload::Sa::new(proposals.clone())),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::IDi.into()),
+                PayloadType::IDi.into(),
                 payload::Content::Id(config.id().clone()),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::AUTH.into()),
+                PayloadType::AUTH.into(),
                 payload::Content::Auth(data.auth_sign(config)?),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::TSi.into()),
+                PayloadType::TSi.into(),
                 payload::Content::Ts(payload::Ts::new(Some(
                     larval_child_sa.ts_i.as_ref().unwrap().clone(),
                 ))),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::TSr.into()),
+                PayloadType::TSr.into(),
                 payload::Content::Ts(payload::Ts::new(Some(
                     larval_child_sa.ts_r.as_ref().unwrap().clone(),
                 ))),
@@ -137,7 +137,7 @@ impl IkeSaInitRequestSent {
         let keys = data.keys.as_ref().unwrap();
 
         message.add_payloads([Payload::new(
-            Num::Assigned(PayloadType::SK.into()),
+            PayloadType::SK.into(),
             payload::Content::Sk(payload::Sk::encrypt(
                 chosen_proposal.cipher(),
                 &keys.protecting.ei,

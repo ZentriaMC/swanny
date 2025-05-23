@@ -158,7 +158,7 @@ pub(crate) mod tests {
 
     pub(crate) fn create_traffic_selector(address: &IpAddr) -> TrafficSelector {
         TrafficSelector::new(
-            Num::Assigned(TrafficSelectorType::TS_IPV4_ADDR_RANGE.into()),
+            TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
             0,
             &address,
             &address,

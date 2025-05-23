@@ -69,14 +69,14 @@ impl ProposalBuilder {
                 let mut attributes = Vec::new();
                 if let Some(key_size) = key_size {
                     attributes.push(Attribute::new(
-                        Num::Assigned(AttributeType::KeyLength.into()),
+                        AttributeType::KeyLength.into(),
                         key_size.to_be_bytes(),
                         AttributeFormat::TV,
                     ));
                 }
                 Transform::new(
-                    Num::Assigned(TransformType::ENCR.into()),
-                    Num::Assigned(TransformId::Encr(Num::Assigned((*id).into())).into()),
+                    TransformType::ENCR.into(),
+                    Num::Assigned(TransformId::Encr((*id).into()).into()),
                     attributes,
                 )
             })
@@ -89,8 +89,8 @@ impl ProposalBuilder {
             .iter()
             .map(|id| {
                 Transform::new(
-                    Num::Assigned(TransformType::PRF.into()),
-                    Num::Assigned(TransformId::Prf(Num::Assigned((*id).into())).into()),
+                    TransformType::PRF.into(),
+                    Num::Assigned(TransformId::Prf((*id).into()).into()),
                     None::<Attribute>,
                 )
             })
@@ -103,8 +103,8 @@ impl ProposalBuilder {
             .iter()
             .map(|id| {
                 Transform::new(
-                    Num::Assigned(TransformType::INTEG.into()),
-                    Num::Assigned(TransformId::Integ(Num::Assigned((*id).into())).into()),
+                    TransformType::INTEG.into(),
+                    Num::Assigned(TransformId::Integ((*id).into()).into()),
                     None::<Attribute>,
                 )
             })
@@ -117,8 +117,8 @@ impl ProposalBuilder {
             .iter()
             .map(|id| {
                 Transform::new(
-                    Num::Assigned(TransformType::DH.into()),
-                    Num::Assigned(TransformId::Dh(Num::Assigned((*id).into())).into()),
+                    TransformType::DH.into(),
+                    Num::Assigned(TransformId::Dh((*id).into()).into()),
                     None::<Attribute>,
                 )
             })
@@ -131,8 +131,8 @@ impl ProposalBuilder {
             .iter()
             .map(|id| {
                 Transform::new(
-                    Num::Assigned(TransformType::ESN.into()),
-                    Num::Assigned(TransformId::Esn(Num::Assigned((*id).into())).into()),
+                    TransformType::ESN.into(),
+                    Num::Assigned(TransformId::Esn((*id).into()).into()),
                     None::<Attribute>,
                 )
             })
@@ -140,12 +140,7 @@ impl ProposalBuilder {
 
         transforms.append(&mut esn);
 
-        Proposal::new(
-            number,
-            Num::Assigned(protocol.into()),
-            spi.as_ref(),
-            transforms,
-        )
+        Proposal::new(number, protocol.into(), spi.as_ref(), transforms)
     }
 }
 
@@ -284,10 +279,7 @@ pub(crate) mod tests {
                     .dh(DhId::MODP2048)
             })
             .psk(b"test test test")
-            .build(Id::new(
-                Num::Assigned(IdType::ID_KEY_ID.into()),
-                id.as_ref(),
-            ))
+            .build(Id::new(IdType::ID_KEY_ID.into(), id.as_ref()))
     }
 
     #[test]

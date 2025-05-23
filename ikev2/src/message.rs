@@ -179,7 +179,7 @@ mod tests {
         Message::new(
             &SPI_I,
             &SPI_R,
-            Num::Assigned(ExchangeType::IKE_SA_INIT.into()),
+            ExchangeType::IKE_SA_INIT.into(),
             MessageFlags::I,
             0,
         )
@@ -211,12 +211,12 @@ mod tests {
         let ke = payload::tests::create_ke();
 
         message.add_payloads(Some(Payload::new(
-            Num::Assigned(PayloadType::SA.into()),
+            PayloadType::SA.into(),
             payload::Content::Sa(sa),
             true,
         )));
         message.add_payloads(Some(Payload::new(
-            Num::Assigned(PayloadType::KE.into()),
+            PayloadType::KE.into(),
             payload::Content::Ke(ke),
             true,
         )));

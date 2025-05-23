@@ -3,7 +3,7 @@ use crate::{
     crypto::GroupPrivateKey,
     message::{
         self, Spi,
-        num::{AuthType, Num},
+        num::AuthType,
         payload::{self, Auth, Id},
         serialize::Serialize,
         traffic_selector::TrafficSelector,
@@ -154,7 +154,7 @@ impl StateData {
         let prf = chosen_proposal.prf();
         if let Some(psk) = config.psk() {
             Ok(payload::Auth::new(
-                Num::Assigned(AuthType::PSK.into()),
+                AuthType::PSK.into(),
                 prf.prf(prf.prf(psk, message::KEY_PAD)?, &signed_data)?,
             ))
         } else {

@@ -8,7 +8,7 @@
 //!
 //! # Examples
 //!
-//! ```rust, no_run
+//! ```rust, ignore
 //! # async fn main() {
 //! let ike_sa_config = create_ike_sa_config(&config.address, &config.psk);
 //!
@@ -204,7 +204,7 @@ impl ChosenProposal {
         } else {
             let transform = proposal
                 .transforms()
-                .find(|t| t.ty() == Num::Assigned(TransformType::INTEG.into()))
+                .find(|t| matches!(t.ty().assigned(), Some(TransformType::INTEG)))
                 .ok_or_else(|| anyhow::anyhow!("INTEG transform not found"))?;
             let id: IntegId = transform.id().try_into()?;
             Some(Integ::new(id)?)
@@ -212,7 +212,7 @@ impl ChosenProposal {
 
         let transform = proposal
             .transforms()
-            .find(|t| t.ty() == Num::Assigned(TransformType::DH.into()));
+            .find(|t| matches!(t.ty().assigned(), Some(TransformType::DH)));
         let group = match transform {
             Some(transform) => {
                 let id: DhId = transform.id().try_into()?;

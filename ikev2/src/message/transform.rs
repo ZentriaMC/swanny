@@ -167,7 +167,7 @@ pub(crate) mod tests {
 
     fn create_attribute() -> Attribute {
         Attribute::new(
-            Num::Assigned(AttributeType::KeyLength.into()),
+            AttributeType::KeyLength.into(),
             &128u16.to_be_bytes()[..],
             AttributeFormat::TV,
         )
@@ -176,7 +176,7 @@ pub(crate) mod tests {
     pub(crate) fn create_transform() -> Transform {
         let attr = create_attribute();
         Transform::new(
-            Num::Assigned(TransformType::ENCR.into()),
+            TransformType::ENCR.into(),
             Num::Assigned(TransformId::Encr(Num::Assigned(EncrId::ENCR_AES_CTR.into())).into()),
             [attr],
         )

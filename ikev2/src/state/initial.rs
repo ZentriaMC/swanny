@@ -3,7 +3,7 @@ use crate::{
     crypto::{self, GroupPrivateKey},
     message::{
         Message, Spi,
-        num::{ExchangeType, MessageFlags, Num, PayloadType, Protocol},
+        num::{ExchangeType, MessageFlags, PayloadType, Protocol},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
@@ -55,28 +55,25 @@ impl Initial {
         let mut message = Message::new(
             &data.spi,
             &Spi::default(),
-            Num::Assigned(ExchangeType::IKE_SA_INIT.into()),
+            ExchangeType::IKE_SA_INIT.into(),
             MessageFlags::I,
             1,
         );
 
         message.add_payloads([
             Payload::new(
-                Num::Assigned(PayloadType::SA.into()),
+                PayloadType::SA.into(),
                 payload::Content::Sa(payload::Sa::new(proposals)),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::NONCE.into()),
+                PayloadType::NONCE.into(),
                 payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::KE.into()),
-                payload::Content::Ke(payload::Ke::new(
-                    Num::Assigned(group.id().into()),
-                    &public_key,
-                )),
+                PayloadType::KE.into(),
+                payload::Content::Ke(payload::Ke::new(group.id().into(), &public_key)),
                 true,
             ),
         ]);
@@ -165,31 +162,28 @@ impl Initial {
         let mut message = Message::new(
             data.peer_spi.as_ref().unwrap(),
             &data.spi,
-            Num::Assigned(ExchangeType::IKE_SA_INIT.into()),
+            ExchangeType::IKE_SA_INIT.into(),
             MessageFlags::R,
             message_id,
         );
 
         message.add_payloads([
             Payload::new(
-                Num::Assigned(PayloadType::KE.into()),
-                payload::Content::Ke(payload::Ke::new(
-                    Num::Assigned(group.id().into()),
-                    &public_key,
-                )),
+                PayloadType::KE.into(),
+                payload::Content::Ke(payload::Ke::new(group.id().into(), &public_key)),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::SA.into()),
+                PayloadType::SA.into(),
                 payload::Content::Sa(payload::Sa::new(Some(chosen_proposal.proposal(
                     1,
-                    Num::Assigned(Protocol::IKE.into()),
+                    Protocol::IKE.into(),
                     b"",
                 )))),
                 true,
             ),
             Payload::new(
-                Num::Assigned(PayloadType::NONCE.into()),
+                PayloadType::NONCE.into(),
                 payload::Content::Nonce(payload::Nonce::new(&nonce_r[..])),
                 true,
             ),

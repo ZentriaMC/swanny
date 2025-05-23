@@ -754,7 +754,7 @@ pub(crate) mod tests {
 
     pub(crate) fn create_ke() -> Ke {
         const DATA: &'static [u8] = b"key exchange data";
-        Ke::new(Num::Assigned(DhId::MODP4096.into()), DATA)
+        Ke::new(DhId::MODP4096.into(), DATA)
     }
 
     #[test]
