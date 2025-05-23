@@ -227,7 +227,10 @@ impl ChosenProposal {
         };
 
         Ok(Self {
-            protocol: proposal.protocol().try_into()?,
+            protocol: proposal
+                .protocol()
+                .assigned()
+                .ok_or_else(|| anyhow::anyhow!("unknown protocol"))?,
             spi: proposal.spi().to_vec(),
             cipher,
             prf,
