@@ -10,12 +10,15 @@
 //!
 use anyhow::Result;
 use bytes::{Buf, BufMut};
+use std::ops::Deref;
 
 pub mod num;
 use num::{ExchangeType, MessageFlags, Num, PayloadType};
 
 pub mod payload;
 use payload::Payload;
+
+use crate::crypto::Cipher;
 
 pub mod proposal;
 pub mod serialize;
@@ -27,36 +30,19 @@ pub type EspSpi = [u8; 4];
 
 pub(crate) const KEY_PAD: &[u8] = b"Key Pad for IKEv2";
 
-/// IKEv2 message
-#[derive(Debug)]
-pub struct Message {
+const HEADER_SIZE: usize = 28;
+const IKE_V2_VERSION: u8 = 0x20;
+
+#[derive(Clone, Debug)]
+pub struct Header {
     spi_i: Spi,
     spi_r: Spi,
     exchange: Num<u8, ExchangeType>,
     flags: MessageFlags,
     id: u32,
-    payloads: Vec<Payload>,
 }
 
-impl Message {
-    /// Creates a new `Message` with required fields
-    pub fn new(
-        spi_i: &Spi,
-        spi_r: &Spi,
-        exchange: Num<u8, ExchangeType>,
-        flags: MessageFlags,
-        id: u32,
-    ) -> Self {
-        Self {
-            spi_i: spi_i.to_owned(),
-            spi_r: spi_r.to_owned(),
-            exchange,
-            flags,
-            id,
-            payloads: Default::default(),
-        }
-    }
-
+impl Header {
     /// Returns the initiator SPI
     pub fn spi_i(&self) -> &Spi {
         &self.spi_i
@@ -80,6 +66,86 @@ impl Message {
     /// Returns the message ID
     pub fn id(&self) -> u32 {
         self.id
+    }
+
+    fn new(
+        spi_i: &Spi,
+        spi_r: &Spi,
+        exchange: Num<u8, ExchangeType>,
+        flags: MessageFlags,
+        id: u32,
+    ) -> Self {
+        Self {
+            spi_i: spi_i.to_owned(),
+            spi_r: spi_r.to_owned(),
+            exchange,
+            flags,
+            id,
+        }
+    }
+
+    fn serialize(
+        &self,
+        next_payload_type: Num<u8, PayloadType>,
+        buf: &mut dyn BufMut,
+    ) -> Result<()> {
+        buf.put_slice(&self.spi_i);
+        buf.put_slice(&self.spi_r);
+        buf.put_u8(next_payload_type.into());
+        buf.put_u8(IKE_V2_VERSION);
+        buf.put_u8(self.exchange.into());
+        buf.put_u8(self.flags.bits());
+        buf.put_u32(self.id);
+        Ok(())
+    }
+
+    fn deserialize(buf: &mut dyn Buf) -> Result<(Self, Num<u8, PayloadType>)> {
+        let mut spi_i: Spi = Default::default();
+        buf.try_copy_to_slice(&mut spi_i[..])?;
+        let mut spi_r: Spi = Default::default();
+        buf.try_copy_to_slice(&mut spi_r[..])?;
+        let next_payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
+        let version = buf.try_get_u8()?;
+        if version != IKE_V2_VERSION {
+            return Err(anyhow::anyhow!("invalid version"));
+        }
+        let exchange: Num<u8, ExchangeType> = buf.try_get_u8()?.into();
+        let flags = MessageFlags::from_bits(buf.try_get_u8()?)
+            .ok_or_else(|| anyhow::anyhow!("unknown flags"))?;
+        let id = buf.try_get_u32()?;
+        Ok((
+            Self {
+                spi_i,
+                spi_r,
+                exchange,
+                flags,
+                id,
+            },
+            next_payload_type,
+        ))
+    }
+}
+
+/// IKEv2 message
+#[derive(Debug)]
+pub struct Message {
+    header: Header,
+    payloads: Vec<Payload>,
+}
+
+impl Message {
+    /// Creates a new `Message` with required fields
+    pub fn new(
+        spi_i: &Spi,
+        spi_r: &Spi,
+        exchange: Num<u8, ExchangeType>,
+        flags: MessageFlags,
+        id: u32,
+    ) -> Self {
+        Self {
+            header: Header::new(spi_i, spi_r, exchange, flags, id),
+            payloads: Default::default(),
+        }
     }
 
     /// Returns an iterator over payloads inside this message
@@ -113,19 +179,32 @@ impl Message {
             None
         }
     }
+
+    /// Turns this `Message` into a `ProtectedMessage`, encrypting the payloads
+    pub fn protect(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<ProtectedMessage> {
+        Ok(ProtectedMessage {
+            header: self.header.clone(),
+            payloads: vec![payload::Payload::new(
+                PayloadType::SK.into(),
+                payload::Content::Sk(payload::Sk::encrypt(cipher, key, &self.payloads)?),
+                true,
+            )],
+        })
+    }
 }
 
-const HEADER_SIZE: usize = 28;
+impl Deref for Message {
+    type Target = Header;
+
+    fn deref(&self) -> &Self::Target {
+        &self.header
+    }
+}
 
 impl serialize::Serialize for Message {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
-        buf.put_slice(&self.spi_i[..]);
-        buf.put_slice(&self.spi_r[..]);
-        buf.put_u8(self.payloads.first().map(|p| p.ty().into()).unwrap_or(0));
-        buf.put_u8(0x20);
-        buf.put_u8(self.exchange.into());
-        buf.put_u8(self.flags.bits());
-        buf.put_u32(self.id);
+        let next_payload_type = self.payloads.first().map(|p| p.ty().into()).unwrap_or(0);
+        self.header.serialize(next_payload_type.into(), buf)?;
         buf.put_u32(self.size()?.try_into()?);
         payload::serialize_payloads(&self.payloads, buf)?;
         Ok(())
@@ -143,26 +222,91 @@ impl serialize::Deserialize for Message {
     where
         Self: Sized,
     {
-        let mut spi_i: Spi = Default::default();
-        buf.try_copy_to_slice(&mut spi_i[..])?;
-        let mut spi_r: Spi = Default::default();
-        buf.try_copy_to_slice(&mut spi_r[..])?;
-        let next_payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
-        let _version = buf.try_get_u8()?;
-        let exchange: Num<u8, ExchangeType> = buf.try_get_u8()?.into();
-        let flags = MessageFlags::from_bits(buf.try_get_u8()?)
-            .ok_or_else(|| anyhow::anyhow!("unknown flags"))?;
-        let id = buf.try_get_u32()?;
-        let _length = buf.try_get_u32()?;
+        let (header, next_payload_type) = Header::deserialize(buf)?;
+        let size: usize = buf.try_get_u32()?.try_into()?;
+        if size < HEADER_SIZE || size - HEADER_SIZE > buf.remaining() {
+            return Err(anyhow::anyhow!("premature end of message"));
+        }
         let payloads = payload::deserialize_payloads(next_payload_type, buf)?;
-        Ok(Self {
-            spi_i,
-            spi_r,
-            exchange,
-            flags,
-            id,
-            payloads,
+        Ok(Self { header, payloads })
+    }
+}
+
+/// Protected IKEv2 message
+#[derive(Debug)]
+pub struct ProtectedMessage {
+    header: Header,
+    payloads: Vec<Payload>,
+}
+
+impl ProtectedMessage {
+    /// Creates a new `ProtectedMessage` with required fields
+    pub fn new(
+        spi_i: &Spi,
+        spi_r: &Spi,
+        exchange: Num<u8, ExchangeType>,
+        flags: MessageFlags,
+        id: u32,
+    ) -> Self {
+        Self {
+            header: Header::new(spi_i, spi_r, exchange, flags, id),
+            payloads: Default::default(),
+        }
+    }
+
+    /// Turns this `ProtectedMessage` into a `Message`, decrypting the payloads
+    pub fn unprotect(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<Message> {
+        let last = self
+            .payloads
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("no payload"))?;
+        if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
+            return Err(anyhow::anyhow!("no SK payload"));
+        }
+        let sk: &payload::Sk = last.try_into()?;
+        Ok(Message {
+            header: self.header.clone(),
+            payloads: sk.decrypt(cipher, key)?,
         })
+    }
+}
+
+impl Deref for ProtectedMessage {
+    type Target = Header;
+
+    fn deref(&self) -> &Self::Target {
+        &self.header
+    }
+}
+
+impl serialize::Serialize for ProtectedMessage {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+        let next_payload_type = self.payloads.first().map(|p| p.ty().into()).unwrap_or(0);
+        self.header.serialize(next_payload_type.into(), buf)?;
+        buf.put_u32(self.size()?.try_into()?);
+        payload::serialize_payloads(&self.payloads, buf)?;
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize> {
+        HEADER_SIZE
+            .checked_add(payload::cumulative_size(&self.payloads)?)
+            .ok_or_else(|| anyhow::anyhow!("overflow while calculating message size"))
+    }
+}
+
+impl serialize::Deserialize for ProtectedMessage {
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let (header, next_payload_type) = Header::deserialize(buf)?;
+        let size: usize = buf.try_get_u32()?.try_into()?;
+        if size < HEADER_SIZE || size - HEADER_SIZE > buf.remaining() {
+            return Err(anyhow::anyhow!("premature end of message"));
+        }
+        let payloads = payload::deserialize_payloads(next_payload_type, buf)?;
+        Ok(Self { header, payloads })
     }
 }
 

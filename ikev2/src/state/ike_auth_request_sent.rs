@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     message::{
-        Message,
+        ProtectedMessage,
         num::{ExchangeType, PayloadType},
         payload,
         serialize::Deserialize,
@@ -30,46 +30,31 @@ impl IkeAuthRequestSent {
     fn handle_ike_auth_response<D>(
         config: &Config,
         data: &D,
-        response: &Message,
+        response: &ProtectedMessage,
     ) -> Result<ChosenProposal>
     where
         D: Deref<Target = StateData>,
     {
-        let last = response
-            .payloads()
-            .last()
-            .ok_or_else(|| anyhow::anyhow!("no payload"))?;
-        if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
-            return Err(anyhow::anyhow!("no SK payload"));
-        }
-        let sk: &payload::Sk = last.try_into()?;
-
         let keys = data.keys.as_ref().unwrap();
 
-        let payloads = sk.decrypt(
+        let response = response.unprotect(
             data.chosen_proposal.as_ref().unwrap().cipher(),
             &keys.protecting.er,
         )?;
 
-        debug!(payloads = ?payloads, "encrypted payloads");
+        debug!(response = ?&response, "unprotected response");
 
-        let auth = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::AUTH)))
+        let auth: &payload::Auth = response
+            .get(PayloadType::AUTH)
             .ok_or_else(|| anyhow::anyhow!("no AUTH payload"))?;
-        let auth: &payload::Auth = auth.try_into()?;
 
-        let id_r = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::IDr)))
+        let id_r: &payload::Id = response
+            .get(PayloadType::IDr)
             .ok_or_else(|| anyhow::anyhow!("no IDr payload"))?;
-        let id_r: &payload::Id = id_r.try_into()?;
 
-        let sa_r = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::SA)))
+        let sa: &payload::Sa = response
+            .get(PayloadType::SA)
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
-        let sa_r: &payload::Sa = sa_r.try_into()?;
 
         if data.auth_verify(config, id_r, auth)? {
             info!(
@@ -88,7 +73,7 @@ impl IkeAuthRequestSent {
             .as_ref()
             .unwrap();
 
-        ChosenProposal::negotiate(proposals, sa_r.proposals())
+        ChosenProposal::negotiate(proposals, sa.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))
     }
 
@@ -120,7 +105,7 @@ impl State for IkeAuthRequestSent {
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
         let serialized_response = message;
-        let response = Message::deserialize(&mut message)?;
+        let response = ProtectedMessage::deserialize(&mut message)?;
         match response.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
                 {

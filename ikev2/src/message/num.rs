@@ -136,7 +136,7 @@ impl From<ExchangeType> for Num<u8, ExchangeType> {
 }
 
 bitflags! {
-    #[derive(Debug, PartialEq)]
+    #[derive(Copy, Clone, Debug, PartialEq)]
     pub struct MessageFlags: u8 {
         const R = 1u8 << 5;
         const V = 1u8 << 4;

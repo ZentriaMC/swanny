@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     message::{
-        Message,
+        Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
@@ -31,58 +31,39 @@ impl IkeSaInitResponseSent {
     fn handle_ike_auth_request<D>(
         config: &Config,
         data: &D,
-        request: &Message,
-    ) -> Result<(Message, ChildSa)>
+        request: &ProtectedMessage,
+    ) -> Result<(ProtectedMessage, ChildSa)>
     where
         D: Deref<Target = StateData>,
     {
-        let last = request
-            .payloads()
-            .last()
-            .ok_or_else(|| anyhow::anyhow!("no payload"))?;
-        if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
-            return Err(anyhow::anyhow!("no SK payload"));
-        }
-        let sk: &payload::Sk = last.try_into()?;
-
         let keys = data.keys.as_ref().unwrap();
 
-        let payloads = sk.decrypt(
+        let request = request.unprotect(
             data.chosen_proposal.as_ref().unwrap().cipher(),
             &keys.protecting.ei,
         )?;
 
-        debug!(payloads = ?&payloads, "encrypted payloads");
+        debug!(request = ?&request, "unprotected request");
 
-        let auth = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::AUTH)))
+        let auth: &payload::Auth = request
+            .get(PayloadType::AUTH)
             .ok_or_else(|| anyhow::anyhow!("no AUTH payload"))?;
-        let auth: &payload::Auth = auth.try_into()?;
 
-        let id_i = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::IDi)))
-            .ok_or_else(|| anyhow::anyhow!("no ID payload"))?;
-        let id_i: &payload::Id = id_i.try_into()?;
+        let id_i: &payload::Id = request
+            .get(PayloadType::IDi)
+            .ok_or_else(|| anyhow::anyhow!("no IDi payload"))?;
 
-        let sa_i = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::SA)))
+        let sa: &payload::Sa = request
+            .get(PayloadType::SA)
             .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
-        let sa_i: &payload::Sa = sa_i.try_into()?;
 
-        let ts_i = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::TSi)))
+        let ts_i: &payload::Ts = request
+            .get(PayloadType::TSi)
             .ok_or_else(|| anyhow::anyhow!("no TSi payload"))?;
-        let ts_i: &payload::Ts = ts_i.try_into()?;
 
-        let ts_r = payloads
-            .iter()
-            .find(|payload| matches!(payload.ty().assigned(), Some(PayloadType::TSr)))
+        let ts_r: &payload::Ts = request
+            .get(PayloadType::TSr)
             .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
-        let ts_r: &payload::Ts = ts_r.try_into()?;
 
         if data.auth_verify(config, id_i, auth)? {
             info!(
@@ -93,7 +74,7 @@ impl IkeSaInitResponseSent {
             return Err(anyhow::anyhow!("authentication failed"));
         }
 
-        let mut message = Message::new(
+        let mut response = Message::new(
             request.spi_i(),
             &data.spi,
             ExchangeType::IKE_AUTH.into(),
@@ -113,7 +94,7 @@ impl IkeSaInitResponseSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa_i.proposals())
+        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
@@ -124,7 +105,7 @@ impl IkeSaInitResponseSent {
         let proposal =
             chosen_proposal.proposal(1, chosen_proposal.protocol().into(), child_sa.spi());
 
-        let payloads = [
+        response.add_payloads([
             Payload::new(
                 PayloadType::SA.into(),
                 payload::Content::Sa(payload::Sa::new(Some(proposal))),
@@ -140,18 +121,14 @@ impl IkeSaInitResponseSent {
                 payload::Content::Id(config.id().clone()),
                 true,
             ),
-        ];
+        ]);
 
-        message.add_payloads([Payload::new(
-            PayloadType::SK.into(),
-            payload::Content::Sk(payload::Sk::encrypt(
-                data.chosen_proposal.as_ref().unwrap().cipher(),
-                &keys.protecting.er,
-                &payloads,
-            )?),
-            true,
-        )]);
-        Ok((message, child_sa))
+        let response = response.protect(
+            data.chosen_proposal.as_ref().unwrap().cipher(),
+            &keys.protecting.er,
+        )?;
+
+        Ok((response, child_sa))
     }
 }
 
@@ -165,7 +142,7 @@ impl State for IkeSaInitResponseSent {
         mut message: &[u8],
     ) -> Result<Box<dyn State>> {
         let serialized_request = message;
-        let request = Message::deserialize(&mut message)?;
+        let request = ProtectedMessage::deserialize(&mut message)?;
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
                 {

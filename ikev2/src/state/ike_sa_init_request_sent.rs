@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     crypto,
     message::{
-        Message, Spi,
+        Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
         serialize::{Deserialize, Serialize},
@@ -83,11 +83,15 @@ impl IkeSaInitRequestSent {
         Ok((chosen_proposal, keys, nonce_r.nonce().to_vec()))
     }
 
-    fn generate_ike_auth_request<D>(config: &Config, data: &D, spi_r: &Spi) -> Result<Message>
+    fn generate_ike_auth_request<D>(
+        config: &Config,
+        data: &D,
+        spi_r: &Spi,
+    ) -> Result<ProtectedMessage>
     where
         D: Deref<Target = StateData>,
     {
-        let mut message = Message::new(
+        let mut request = Message::new(
             &data.spi,
             spi_r,
             ExchangeType::IKE_AUTH.into(),
@@ -101,7 +105,7 @@ impl IkeSaInitRequestSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
-        let payloads = [
+        request.add_payloads([
             Payload::new(
                 PayloadType::SA.into(),
                 payload::Content::Sa(payload::Sa::new(proposals.clone())),
@@ -131,21 +135,13 @@ impl IkeSaInitRequestSent {
                 ))),
                 true,
             ),
-        ];
+        ]);
 
         let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
         let keys = data.keys.as_ref().unwrap();
 
-        message.add_payloads([Payload::new(
-            PayloadType::SK.into(),
-            payload::Content::Sk(payload::Sk::encrypt(
-                chosen_proposal.cipher(),
-                &keys.protecting.ei,
-                &payloads,
-            )?),
-            true,
-        )]);
-        Ok(message)
+        let request = request.protect(chosen_proposal.cipher(), &keys.protecting.ei)?;
+        Ok(request)
     }
 }
 
