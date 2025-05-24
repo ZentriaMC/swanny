@@ -28,8 +28,6 @@ pub mod transform;
 pub type Spi = [u8; 8];
 pub type EspSpi = [u8; 4];
 
-pub(crate) const KEY_PAD: &[u8] = b"Key Pad for IKEv2";
-
 const HEADER_SIZE: usize = 28;
 const IKE_V2_VERSION: u8 = 0x20;
 

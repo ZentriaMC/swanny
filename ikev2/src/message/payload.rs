@@ -1,5 +1,5 @@
 use crate::{
-    crypto::Cipher,
+    crypto::{Cipher, Prf},
     message::{
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
         proposal::{self, Proposal},
@@ -374,6 +374,8 @@ pub struct Auth {
 }
 
 impl Auth {
+    const KEY_PAD: &[u8] = b"Key Pad for IKEv2";
+
     /// Creats a new `Auth` content with given method and data
     pub fn new(method: Num<u8, AuthType>, auth_data: impl AsRef<[u8]>) -> Self {
         Self {
@@ -390,6 +392,23 @@ impl Auth {
     /// Returns the authentication data associated with the `Auth` content
     pub fn auth_data(&self) -> &[u8] {
         &self.auth_data
+    }
+
+    /// Creates an `Auth` content by signing data with PSK
+    pub fn sign_with_psk(prf: &Prf, psk: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Self> {
+        Ok(Self::new(
+            AuthType::PSK.into(),
+            prf.prf(prf.prf(psk, Self::KEY_PAD)?, data)?,
+        ))
+    }
+
+    pub fn verify_with_psk(
+        &self,
+        prf: &Prf,
+        psk: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<bool> {
+        Ok(prf.verify(prf.prf(psk, Self::KEY_PAD)?, data, &self.auth_data)?)
     }
 }
 

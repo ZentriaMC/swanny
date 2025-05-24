@@ -2,9 +2,8 @@ use crate::{
     config::Config,
     crypto::GroupPrivateKey,
     message::{
-        self, Spi,
-        num::AuthType,
-        payload::{self, Auth, Id},
+        Spi,
+        payload::{self, Id},
         serialize::Serialize,
         traffic_selector::TrafficSelector,
     },
@@ -55,7 +54,7 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
 
 #[derive(Default)]
 pub(crate) struct StateData {
-    pub(crate) is_initiator: Option<bool>,
+    is_initiator: Option<bool>,
     spi: Spi,
     peer_spi: Option<Spi>,
     message_id: u32,
@@ -77,12 +76,23 @@ impl StateData {
         }
     }
 
-    fn initiator_signed_data(
-        &self,
-        chosen_proposal: &ChosenProposal,
-        keys: &Keys,
-        id: &Id,
-    ) -> Result<Vec<u8>> {
+    pub fn is_initiator(&self) -> Option<bool> {
+        self.is_initiator
+    }
+
+    fn chosen_proposal(&self) -> Result<&ChosenProposal> {
+        self.chosen_proposal
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no proposal chosen"))
+    }
+
+    fn keys(&self) -> Result<&Keys> {
+        self.keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no keys generated"))
+    }
+
+    fn initiator_signed_data(&self, id: &Id) -> Result<Vec<u8>> {
         let len = id.size()?;
         let mut buf = BytesMut::with_capacity(len);
         id.serialize(&mut buf)?;
@@ -96,8 +106,8 @@ impl StateData {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Nr not received"))?;
 
-        let prf = chosen_proposal.prf();
-        let mut mac = prf.prf(&keys.deriving.pi, &buf[payload::HEADER_SIZE..])?;
+        let prf = self.chosen_proposal()?.prf();
+        let mut mac = prf.prf(&self.keys()?.deriving.pi, &buf[payload::HEADER_SIZE..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_request.to_vec());
@@ -106,12 +116,7 @@ impl StateData {
         Ok(signed_data)
     }
 
-    fn responder_signed_data(
-        &self,
-        chosen_proposal: &ChosenProposal,
-        keys: &Keys,
-        id: &Id,
-    ) -> Result<Vec<u8>> {
+    fn responder_signed_data(&self, id: &Id) -> Result<Vec<u8>> {
         let len = id.size()?;
         let mut buf = BytesMut::with_capacity(len);
         id.serialize(&mut buf)?;
@@ -125,8 +130,8 @@ impl StateData {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Ni not received"))?;
 
-        let prf = chosen_proposal.prf();
-        let mut mac = prf.prf(&keys.deriving.pr, &buf[payload::HEADER_SIZE..])?;
+        let prf = self.chosen_proposal()?.prf();
+        let mut mac = prf.prf(&self.keys()?.deriving.pr, &buf[payload::HEADER_SIZE..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_response.to_vec());
@@ -135,108 +140,49 @@ impl StateData {
         Ok(signed_data)
     }
 
-    fn auth_sign(&self, config: &Config) -> Result<payload::Auth> {
-        let chosen_proposal = self
-            .chosen_proposal
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no proposal chosen"))?;
-        let keys = self
-            .keys
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
-
-        let signed_data = match self.is_initiator {
-            Some(true) => self.initiator_signed_data(chosen_proposal, keys, config.id())?,
-            Some(false) => self.responder_signed_data(chosen_proposal, keys, config.id())?,
-            _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
-        };
-
-        let prf = chosen_proposal.prf();
-        if let Some(psk) = config.psk() {
-            Ok(payload::Auth::new(
-                AuthType::PSK.into(),
-                prf.prf(prf.prf(psk, message::KEY_PAD)?, &signed_data)?,
-            ))
-        } else {
-            Err(anyhow::anyhow!("PSK not set"))
+    fn auth_data_for_signing(&self, id: &Id) -> Result<Vec<u8>> {
+        match self.is_initiator {
+            Some(true) => self.initiator_signed_data(id),
+            Some(false) => self.responder_signed_data(id),
+            None => return Err(anyhow::anyhow!("initiator/responder not determined")),
         }
     }
 
-    fn auth_verify(&self, config: &Config, id: &Id, auth: &Auth) -> Result<bool> {
-        let chosen_proposal = self
-            .chosen_proposal
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no proposal chosen"))?;
-        let keys = self
-            .keys
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
-
-        let signed_data = match self.is_initiator {
-            Some(true) => self.responder_signed_data(chosen_proposal, keys, id)?,
-            Some(false) => self.initiator_signed_data(chosen_proposal, keys, id)?,
-            _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
-        };
-
-        let prf = chosen_proposal.prf();
-        if let Some(psk) = config.psk() {
-            Ok(prf.verify(
-                prf.prf(psk, message::KEY_PAD)?,
-                &signed_data,
-                auth.auth_data(),
-            )?)
-        } else {
-            Err(anyhow::anyhow!("PSK not set"))
+    fn auth_data_for_verification(&self, id: &Id) -> Result<Vec<u8>> {
+        match self.is_initiator {
+            Some(true) => self.responder_signed_data(id),
+            Some(false) => self.initiator_signed_data(id),
+            None => return Err(anyhow::anyhow!("initiator/responder not determined")),
         }
     }
 
     fn message_sign(&self, message: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
-        let chosen_proposal = self
-            .chosen_proposal
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no proposal chosen"))?;
-
-        if chosen_proposal.integ().is_none() {
+        if self.chosen_proposal()?.integ().is_none() {
             return Ok(None);
         }
 
-        let keys = self
-            .keys
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
-
-        let key = match self.is_initiator {
-            Some(true) => &keys.protecting.ai,
-            Some(false) => &keys.protecting.ar,
+        let key = match self.is_initiator() {
+            Some(true) => &self.keys()?.protecting.ai,
+            Some(false) => &self.keys()?.protecting.ar,
             _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
         };
 
-        let integ = chosen_proposal.integ().unwrap();
+        let integ = self.chosen_proposal()?.integ().unwrap();
         Ok(Some(integ.sign(key.as_ref().unwrap(), message.as_ref())?))
     }
 
     fn message_verify(&self, message: impl AsRef<[u8]>) -> Result<bool> {
-        let chosen_proposal = self
-            .chosen_proposal
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no proposal chosen"))?;
-
-        if chosen_proposal.integ().is_none() {
+        if self.chosen_proposal()?.integ().is_none() {
             return Ok(true);
         }
 
-        let keys = self
-            .keys
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no keys generated"))?;
-
-        let key = match self.is_initiator {
-            Some(true) => &keys.protecting.ar,
-            Some(false) => &keys.protecting.ai,
+        let key = match self.is_initiator() {
+            Some(true) => &self.keys()?.protecting.ar,
+            Some(false) => &self.keys()?.protecting.ai,
             _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
         };
 
-        let integ = chosen_proposal.integ().unwrap();
+        let integ = self.chosen_proposal()?.integ().unwrap();
         if message.as_ref().len() < integ.output_size() {
             return Err(anyhow::anyhow!("invalid checksum size"));
         }

@@ -105,6 +105,15 @@ impl IkeSaInitRequestSent {
             return Err(anyhow::anyhow!("no proposal to send"));
         }
 
+        let auth = if let Some(psk) = config.psk() {
+            let prf = data.chosen_proposal()?.prf();
+            let signed_data = data.auth_data_for_signing(config.id())?;
+            payload::Auth::sign_with_psk(prf, psk, &signed_data)
+        } else {
+            Err(anyhow::anyhow!("PSK not set"))
+        };
+        let auth = auth?;
+
         request.add_payloads([
             Payload::new(
                 PayloadType::SA.into(),
@@ -116,11 +125,7 @@ impl IkeSaInitRequestSent {
                 payload::Content::Id(config.id().clone()),
                 true,
             ),
-            Payload::new(
-                PayloadType::AUTH.into(),
-                payload::Content::Auth(data.auth_sign(config)?),
-                true,
-            ),
+            Payload::new(PayloadType::AUTH.into(), payload::Content::Auth(auth), true),
             Payload::new(
                 PayloadType::TSi.into(),
                 payload::Content::Ts(payload::Ts::new(Some(

@@ -100,7 +100,7 @@ impl IkeSa {
     /// Returns the initiator/responder status if it has been determined
     pub async fn is_initiator(&self) -> Option<bool> {
         let data = self.data.read().await;
-        data.is_initiator
+        data.is_initiator()
     }
 
     /// Processes IKE message

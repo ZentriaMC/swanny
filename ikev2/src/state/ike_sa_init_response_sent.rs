@@ -65,7 +65,15 @@ impl IkeSaInitResponseSent {
             .get(PayloadType::TSr)
             .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
 
-        if data.auth_verify(config, id_i, auth)? {
+        let authenticated = if let Some(psk) = config.psk() {
+            let prf = data.chosen_proposal()?.prf();
+            let signed_data = data.auth_data_for_verification(id_i)?;
+            auth.verify_with_psk(prf, psk, &signed_data)
+        } else {
+            Err(anyhow::anyhow!("PSK not set"))
+        };
+
+        if authenticated? {
             info!(
                 spi = &data.peer_spi.as_ref().unwrap()[..],
                 "responder authenticated initiator"
@@ -105,17 +113,22 @@ impl IkeSaInitResponseSent {
         let proposal =
             chosen_proposal.proposal(1, chosen_proposal.protocol().into(), child_sa.spi());
 
+        let auth = if let Some(psk) = config.psk() {
+            let prf = data.chosen_proposal()?.prf();
+            let signed_data = data.auth_data_for_signing(config.id())?;
+            payload::Auth::sign_with_psk(prf, psk, &signed_data)
+        } else {
+            Err(anyhow::anyhow!("PSK not set"))
+        };
+        let auth = auth?;
+
         response.add_payloads([
             Payload::new(
                 PayloadType::SA.into(),
                 payload::Content::Sa(payload::Sa::new(Some(proposal))),
                 true,
             ),
-            Payload::new(
-                PayloadType::AUTH.into(),
-                payload::Content::Auth(data.auth_sign(config)?),
-                true,
-            ),
+            Payload::new(PayloadType::AUTH.into(), payload::Content::Auth(auth), true),
             Payload::new(
                 PayloadType::IDr.into(),
                 payload::Content::Id(config.id().clone()),
