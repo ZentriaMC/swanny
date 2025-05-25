@@ -8,12 +8,11 @@
 //! [RFC 7296]: https://www.rfc-editor.org/rfc/rfc7296.html
 //! [`Payload`]: crate::message::payload::Payload
 //!
-use anyhow::Result;
 use bytes::{Buf, BufMut};
 use std::ops::Deref;
 
 pub mod num;
-use num::{ExchangeType, MessageFlags, Num, PayloadType};
+use num::{ExchangeType, MessageFlags, Num, PayloadType, TrafficSelectorType};
 
 pub mod payload;
 use payload::Payload;
@@ -86,7 +85,7 @@ impl Header {
         &self,
         next_payload_type: Num<u8, PayloadType>,
         buf: &mut dyn BufMut,
-    ) -> Result<()> {
+    ) -> Result<(), serialize::SerializeError> {
         buf.put_slice(&self.spi_i);
         buf.put_slice(&self.spi_r);
         buf.put_u8(next_payload_type.into());
@@ -97,7 +96,9 @@ impl Header {
         Ok(())
     }
 
-    fn deserialize(buf: &mut dyn Buf) -> Result<(Self, Num<u8, PayloadType>)> {
+    fn deserialize(
+        buf: &mut dyn Buf,
+    ) -> Result<(Self, Num<u8, PayloadType>), serialize::DeserializeError> {
         let mut spi_i: Spi = Default::default();
         buf.try_copy_to_slice(&mut spi_i[..])?;
         let mut spi_r: Spi = Default::default();
@@ -105,11 +106,12 @@ impl Header {
         let next_payload_type: Num<u8, PayloadType> = buf.try_get_u8()?.into();
         let version = buf.try_get_u8()?;
         if version != IKE_V2_VERSION {
-            return Err(anyhow::anyhow!("invalid version"));
+            return Err(serialize::DeserializeError::UnknownVersion(version));
         }
         let exchange: Num<u8, ExchangeType> = buf.try_get_u8()?.into();
-        let flags = MessageFlags::from_bits(buf.try_get_u8()?)
-            .ok_or_else(|| anyhow::anyhow!("unknown flags"))?;
+        let flags = buf.try_get_u8()?;
+        let flags = MessageFlags::from_bits(flags)
+            .ok_or_else(|| serialize::DeserializeError::UnknownMessageFlags(flags))?;
         let id = buf.try_get_u32()?;
         Ok((
             Self {
@@ -179,7 +181,11 @@ impl Message {
     }
 
     /// Turns this `Message` into a `ProtectedMessage`, encrypting the payloads
-    pub fn protect(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<ProtectedMessage> {
+    pub fn protect(
+        &self,
+        cipher: &Cipher,
+        key: impl AsRef<[u8]>,
+    ) -> anyhow::Result<ProtectedMessage> {
         Ok(ProtectedMessage {
             header: self.header.clone(),
             payloads: vec![payload::Payload::new(
@@ -200,7 +206,7 @@ impl Deref for Message {
 }
 
 impl serialize::Serialize for Message {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         let next_payload_type = self.payloads.first().map(|p| p.ty().into()).unwrap_or(0);
         self.header.serialize(next_payload_type.into(), buf)?;
         buf.put_u32(self.size()?.try_into()?);
@@ -208,22 +214,22 @@ impl serialize::Serialize for Message {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         HEADER_SIZE
             .checked_add(payload::cumulative_size(&self.payloads)?)
-            .ok_or_else(|| anyhow::anyhow!("overflow while calculating message size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for Message {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
         let (header, next_payload_type) = Header::deserialize(buf)?;
         let size: usize = buf.try_get_u32()?.try_into()?;
         if size < HEADER_SIZE || size - HEADER_SIZE > buf.remaining() {
-            return Err(anyhow::anyhow!("premature end of message"));
+            return Err(serialize::DeserializeError::PrematureEof);
         }
         let payloads = payload::deserialize_payloads(next_payload_type, buf)?;
         Ok(Self { header, payloads })
@@ -253,7 +259,7 @@ impl ProtectedMessage {
     }
 
     /// Turns this `ProtectedMessage` into a `Message`, decrypting the payloads
-    pub fn unprotect(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<Message> {
+    pub fn unprotect(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> anyhow::Result<Message> {
         let last = self
             .payloads
             .last()
@@ -278,7 +284,7 @@ impl Deref for ProtectedMessage {
 }
 
 impl serialize::Serialize for ProtectedMessage {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         let next_payload_type = self.payloads.first().map(|p| p.ty().into()).unwrap_or(0);
         self.header.serialize(next_payload_type.into(), buf)?;
         buf.put_u32(self.size()?.try_into()?);
@@ -286,22 +292,22 @@ impl serialize::Serialize for ProtectedMessage {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         HEADER_SIZE
             .checked_add(payload::cumulative_size(&self.payloads)?)
-            .ok_or_else(|| anyhow::anyhow!("overflow while calculating message size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for ProtectedMessage {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
         let (header, next_payload_type) = Header::deserialize(buf)?;
         let size: usize = buf.try_get_u32()?.try_into()?;
         if size < HEADER_SIZE || size - HEADER_SIZE > buf.remaining() {
-            return Err(anyhow::anyhow!("premature end of message"));
+            return Err(serialize::DeserializeError::PrematureEof);
         }
         let payloads = payload::deserialize_payloads(next_payload_type, buf)?;
         Ok(Self { header, payloads })

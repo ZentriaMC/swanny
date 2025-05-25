@@ -3,7 +3,6 @@ use crate::message::{
     serialize,
     transform::{self, Transform},
 };
-use anyhow::Result;
 use bytes::{Buf, BufMut};
 
 pub(crate) const HEADER_SIZE: usize = 4;
@@ -78,7 +77,7 @@ impl Proposal {
 }
 
 impl serialize::Serialize for Proposal {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.number);
         buf.put_u8(self.protocol.into());
         buf.put_u8(self.spi.len().try_into()?);
@@ -93,30 +92,30 @@ impl serialize::Serialize for Proposal {
             buf.put_u8(0);
             let len = transform::HEADER_SIZE
                 .checked_add(transform.size()?)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum proposal size"))?;
+                .ok_or_else(|| serialize::SerializeError::Overflow)?;
             buf.put_u16(len.try_into()?);
             transform.serialize(buf)?;
         }
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         let mut len = HEADER_SIZE
             .checked_add(self.spi.len())
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum proposal size"))?;
+            .ok_or_else(|| serialize::SerializeError::Overflow)?;
         for transform in &self.transforms {
             len = len
                 .checked_add(transform::HEADER_SIZE)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum proposal size"))?
+                .ok_or_else(|| serialize::SerializeError::Overflow)?
                 .checked_add(transform.size()?)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum proposal size"))?;
+                .ok_or_else(|| serialize::SerializeError::Overflow)?;
         }
         Ok(len)
     }
 }
 
 impl serialize::Deserialize for Proposal {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -133,12 +132,12 @@ impl serialize::Deserialize for Proposal {
             let len: usize = buf.try_get_u16()?.into();
             let len = len
                 .checked_sub(transform::HEADER_SIZE)
-                .ok_or_else(|| anyhow::anyhow!("invalid transform length"))?;
+                .ok_or_else(|| serialize::DeserializeError::Underflow)?;
             transforms.push(Transform::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
         if buf.has_remaining() {
-            return Err(anyhow::anyhow!("proposal with extra data"));
+            return Err(serialize::DeserializeError::Overlong);
         }
         Ok(Self {
             number,

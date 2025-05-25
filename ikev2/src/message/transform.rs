@@ -2,7 +2,6 @@ use crate::message::{
     num::{AttributeFormat, AttributeType, Num, TransformId, TransformType},
     serialize,
 };
-use anyhow::Result;
 use bytes::{Buf, BufMut};
 
 pub(crate) const HEADER_SIZE: usize = 4;
@@ -41,7 +40,7 @@ impl Attribute {
 }
 
 impl serialize::Serialize for Attribute {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         let ty: u16 = self.ty.into();
         match self.format {
             AttributeFormat::TLV => {
@@ -58,18 +57,18 @@ impl serialize::Serialize for Attribute {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         match self.format {
             AttributeFormat::TLV => 4usize
                 .checked_add(self.value.len())
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum attribute size")),
+                .ok_or_else(|| serialize::SerializeError::Overflow),
             AttributeFormat::TV => Ok(4),
         }
     }
 }
 
 impl serialize::Deserialize for Attribute {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -121,7 +120,7 @@ impl Transform {
 }
 
 impl serialize::Serialize for Transform {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.ty.into());
         buf.put_u8(0);
         buf.put_u16(self.id.into());
@@ -131,17 +130,17 @@ impl serialize::Serialize for Transform {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
-        let sizes: Result<Vec<_>> = self.attributes.iter().map(|a| a.size()).collect();
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
+        let sizes: Result<Vec<_>, _> = self.attributes.iter().map(|a| a.size()).collect();
         sizes?
             .into_iter()
             .try_fold(4usize, |acc, x| acc.checked_add(x))
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum transform size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for Transform {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {

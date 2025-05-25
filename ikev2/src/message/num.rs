@@ -406,6 +406,12 @@ impl From<TransformId> for u16 {
     }
 }
 
+impl From<TransformId> for Num<u16, TransformId> {
+    fn from(value: TransformId) -> Self {
+        Num::Assigned(Enum(value))
+    }
+}
+
 impl Num<u16, TransformId> {
     pub fn from_u16(ty: Num<u8, TransformType>, value: u16) -> Self {
         match ty.assigned() {
@@ -419,26 +425,32 @@ impl Num<u16, TransformId> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum TryFromTransformIdError {
+    #[error("unknown transform ID")]
+    UnknownTransformId(Num<u16, TransformId>),
+}
+
 macro_rules! emit_transform_id_conversions {
     ( $id:ident, $ce:ident ) => {
         impl TryFrom<TransformId> for $id {
-            type Error = anyhow::Error;
+            type Error = TryFromTransformIdError;
 
             fn try_from(other: TransformId) -> std::result::Result<Self, Self::Error> {
                 match other {
                     TransformId::$ce(Num::Assigned(id)) => Ok(id.into_inner()),
-                    _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
+                    _ => Err(TryFromTransformIdError::UnknownTransformId(other.into())),
                 }
             }
         }
 
         impl TryFrom<Num<u16, TransformId>> for $id {
-            type Error = anyhow::Error;
+            type Error = TryFromTransformIdError;
 
             fn try_from(other: Num<u16, TransformId>) -> std::result::Result<Self, Self::Error> {
                 match other.assigned() {
                     Some(TransformId::$ce(Num::Assigned(id))) => Ok(id.into_inner()),
-                    _ => Err(anyhow::anyhow!("no matching {}", stringify!($id))),
+                    _ => Err(TryFromTransformIdError::UnknownTransformId(other)),
                 }
             }
         }

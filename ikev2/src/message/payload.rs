@@ -7,7 +7,6 @@ use crate::{
         traffic_selector::TrafficSelector,
     },
 };
-use anyhow::Result;
 use bytes::{Buf, BufMut, BytesMut};
 
 pub(crate) const HEADER_SIZE: usize = 4;
@@ -26,7 +25,7 @@ pub enum Content {
 }
 
 impl Serialize for Content {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         match self {
             Content::Sa(sa) => sa.serialize(buf),
             Content::Ke(ke) => ke.serialize(buf),
@@ -39,7 +38,7 @@ impl Serialize for Content {
         }
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         match self {
             Content::Sa(sa) => sa.size(),
             Content::Ke(ke) => ke.size(),
@@ -92,7 +91,7 @@ impl Payload {
         &self,
         next_payload_type: Num<u8, PayloadType>,
         buf: &mut dyn BufMut,
-    ) -> Result<()> {
+    ) -> Result<(), serialize::SerializeError> {
         buf.put_u8(next_payload_type.into());
         buf.put_u8(u8::from(self.critical) * 0x80);
         buf.put_u16(self.size()?.try_into()?);
@@ -100,17 +99,17 @@ impl Payload {
     }
 
     /// Returns the size of serialized payload
-    pub fn size(&self) -> Result<usize> {
+    pub fn size(&self) -> Result<usize, serialize::SerializeError> {
         HEADER_SIZE
             .checked_add(self.content.size()?)
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 
     /// Deserializes `buf` as a payload with given type
     pub fn deserialize(
         payload_type: Num<u8, PayloadType>,
         buf: &mut dyn Buf,
-    ) -> Result<(Self, Num<u8, PayloadType>)>
+    ) -> Result<(Self, Num<u8, PayloadType>), serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -119,9 +118,9 @@ impl Payload {
         let len: usize = buf.try_get_u16()?.into();
         let len = len
             .checked_sub(HEADER_SIZE)
-            .ok_or_else(|| anyhow::anyhow!("invalid payload length"))?;
+            .ok_or_else(|| serialize::DeserializeError::Underflow)?;
         if len > buf.remaining() {
-            return Err(anyhow::anyhow!("invalid payload length"));
+            return Err(serialize::DeserializeError::PrematureEof);
         }
 
         let content = match payload_type.assigned() {
@@ -144,7 +143,11 @@ impl Payload {
                 next_payload_type,
                 &mut &buf.chunk()[..len],
             )?),
-            ct => return Err(anyhow::anyhow!("unknown content type {:?}", ct)),
+            _ => {
+                return Err(serialize::DeserializeError::UnknownPayloadType(
+                    payload_type,
+                ));
+            }
         };
         buf.advance(len);
 
@@ -155,19 +158,21 @@ impl Payload {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum TryFromPayloadError {
+    #[error("unknown payload type")]
+    UnknownPayloadType(Num<u8, PayloadType>),
+}
+
 macro_rules! emit_try_from_payload {
     ( $pe:pat, $ce:ident ) => {
         impl<'a> TryFrom<&'a Payload> for &'a $ce {
-            type Error = anyhow::Error;
+            type Error = TryFromPayloadError;
 
-            fn try_from(other: &'a Payload) -> std::result::Result<Self, Self::Error> {
+            fn try_from(other: &'a Payload) -> Result<Self, Self::Error> {
                 match (other.ty().assigned(), other.content()) {
                     (Some($pe), Content::$ce(content)) => Ok(content),
-                    _ => Err(anyhow::anyhow!(
-                        "no matching content for {} {}",
-                        stringify!($pe),
-                        stringify!($ce)
-                    )),
+                    _ => Err(TryFromPayloadError::UnknownPayloadType(other.ty())),
                 }
             }
         }
@@ -208,7 +213,7 @@ impl Sa {
 }
 
 impl serialize::Serialize for Sa {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         for (i, proposal) in self.proposals.iter().enumerate() {
             if i == self.proposals.len() - 1 {
                 buf.put_u8(0);
@@ -218,28 +223,28 @@ impl serialize::Serialize for Sa {
             buf.put_u8(0);
             let len = proposal::HEADER_SIZE
                 .checked_add(proposal.size()?)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))?;
+                .ok_or_else(|| serialize::SerializeError::Overflow)?;
             buf.put_u16(len.try_into()?);
             proposal.serialize(buf)?;
         }
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         let mut len = 0usize;
         for proposal in &self.proposals {
             len = len
                 .checked_add(proposal::HEADER_SIZE)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))?
+                .ok_or_else(|| serialize::SerializeError::Overflow)?
                 .checked_add(proposal.size()?)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))?;
+                .ok_or_else(|| serialize::SerializeError::Overflow)?;
         }
         Ok(len)
     }
 }
 
 impl serialize::Deserialize for Sa {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -250,7 +255,7 @@ impl serialize::Deserialize for Sa {
             let len: usize = buf.try_get_u16()?.into();
             let len = len
                 .checked_sub(proposal::HEADER_SIZE)
-                .ok_or_else(|| anyhow::anyhow!("invalid proposal length"))?;
+                .ok_or_else(|| serialize::DeserializeError::Underflow)?;
             proposals.push(Proposal::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
@@ -286,22 +291,22 @@ impl Ke {
 }
 
 impl serialize::Serialize for Ke {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u16(self.dh_group.into());
         buf.put_u16(0);
         buf.put_slice(&self.ke_data[..]);
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.ke_data.len())
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for Ke {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -339,7 +344,7 @@ impl Id {
 }
 
 impl serialize::Serialize for Id {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.ty.into());
         buf.put_u8(0);
         buf.put_u16(0);
@@ -347,15 +352,15 @@ impl serialize::Serialize for Id {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.id_data.len())
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for Id {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -395,7 +400,11 @@ impl Auth {
     }
 
     /// Creates an `Auth` content by signing data with PSK
-    pub fn sign_with_psk(prf: &Prf, psk: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Self> {
+    pub fn sign_with_psk(
+        prf: &Prf,
+        psk: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> anyhow::Result<Self> {
         Ok(Self::new(
             AuthType::PSK.into(),
             prf.prf(prf.prf(psk, Self::KEY_PAD)?, data)?,
@@ -407,13 +416,13 @@ impl Auth {
         prf: &Prf,
         psk: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
-    ) -> Result<bool> {
+    ) -> anyhow::Result<bool> {
         Ok(prf.verify(prf.prf(psk, Self::KEY_PAD)?, data, &self.auth_data)?)
     }
 }
 
 impl serialize::Serialize for Auth {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.method.into());
         buf.put_u8(0);
         buf.put_u16(0);
@@ -421,15 +430,15 @@ impl serialize::Serialize for Auth {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.auth_data.len())
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for Auth {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -461,18 +470,18 @@ impl Nonce {
 }
 
 impl serialize::Serialize for Nonce {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_slice(&self.nonce[..]);
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         Ok(self.nonce.len())
     }
 }
 
 impl serialize::Deserialize for Nonce {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -527,7 +536,7 @@ impl Notify {
 }
 
 impl serialize::Serialize for Notify {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.protocol.into());
         if let Some(ref spi) = self.spi {
             buf.put_u8(spi.len().try_into()?);
@@ -542,17 +551,17 @@ impl serialize::Serialize for Notify {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.spi.as_ref().map(|spi| spi.len()).unwrap_or(0))
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))?
+            .ok_or_else(|| serialize::SerializeError::Overflow)?
             .checked_add(self.notify_data.len())
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for Notify {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -598,7 +607,7 @@ impl Ts {
 }
 
 impl serialize::Serialize for Ts {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.traffic_selectors.len().try_into()?);
         buf.put_u8(0);
         buf.put_u16(0);
@@ -608,19 +617,19 @@ impl serialize::Serialize for Ts {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         let mut len = 4usize;
         for traffic_selector in &self.traffic_selectors {
             len = len
                 .checked_add(traffic_selector.size()?)
-                .ok_or_else(|| anyhow::anyhow!("exceeded maximum payload size"))?;
+                .ok_or_else(|| serialize::SerializeError::Overflow)?;
         }
         Ok(len)
     }
 }
 
 impl serialize::Deserialize for Ts {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -630,12 +639,11 @@ impl serialize::Deserialize for Ts {
 
         let mut traffic_selectors = Vec::new();
         for _ in 0..count {
-            let traffic_selector = TrafficSelector::deserialize(&mut buf.chunk())?;
-            buf.advance(traffic_selector.size()?);
+            let traffic_selector = TrafficSelector::deserialize(buf)?;
             traffic_selectors.push(traffic_selector);
         }
         if buf.has_remaining() {
-            return Err(anyhow::anyhow!("payload with extra data"));
+            return Err(serialize::DeserializeError::Overlong);
         }
         Ok(Self::new(traffic_selectors))
     }
@@ -667,7 +675,7 @@ impl Sk {
         cipher: &Cipher,
         key: impl AsRef<[u8]>,
         payloads: impl IntoIterator<Item = &'a Payload>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let payloads: Vec<_> = payloads.into_iter().collect();
         let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
@@ -677,7 +685,7 @@ impl Sk {
     }
 
     /// Decrypts payloads from the ciphertext of the `Sk` content
-    pub fn decrypt(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> Result<Vec<Payload>> {
+    pub fn decrypt(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> anyhow::Result<Vec<Payload>> {
         let plaintext = cipher.decrypt(key, &self.ciphertext)?;
         let mut payload_type: Num<u8, PayloadType> = self.inner;
         let mut plaintext = plaintext.as_slice();
@@ -691,7 +699,10 @@ impl Sk {
     }
 
     /// Deserializes `buf` as an `Sk` content with given type
-    pub fn deserialize(payload_type: Num<u8, PayloadType>, buf: &mut dyn Buf) -> Result<Self>
+    pub fn deserialize(
+        payload_type: Num<u8, PayloadType>,
+        buf: &mut dyn Buf,
+    ) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
@@ -700,12 +711,12 @@ impl Sk {
 }
 
 impl serialize::Serialize for Sk {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_slice(&self.ciphertext[..]);
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         Ok(self.ciphertext.len())
     }
 }
@@ -713,7 +724,7 @@ impl serialize::Serialize for Sk {
 pub(crate) fn serialize_payloads<'a>(
     payloads: impl IntoIterator<Item = &'a Payload>,
     buf: &mut dyn BufMut,
-) -> Result<()> {
+) -> Result<(), serialize::SerializeError> {
     let payloads: Vec<_> = payloads.into_iter().collect();
     let last = payloads.last().map(|p| match p.ty().assigned() {
         Some(PayloadType::SK) => Some(p.content()),
@@ -736,7 +747,7 @@ pub(crate) fn serialize_payloads<'a>(
 pub(crate) fn deserialize_payloads(
     mut payload_type: Num<u8, PayloadType>,
     buf: &mut dyn Buf,
-) -> Result<Vec<Payload>> {
+) -> Result<Vec<Payload>, serialize::DeserializeError> {
     let mut payloads = Vec::new();
     while buf.has_remaining() {
         let (payload, next_type) = Payload::deserialize(payload_type, buf)?;
@@ -751,13 +762,13 @@ pub(crate) fn deserialize_payloads(
 
 pub(crate) fn cumulative_size<'a>(
     payloads: impl IntoIterator<Item = &'a Payload>,
-) -> Result<usize> {
-    let sizes: Result<Vec<_>> = payloads.into_iter().map(|p| p.size()).collect();
+) -> Result<usize, serialize::SerializeError> {
+    let sizes: Result<Vec<_>, _> = payloads.into_iter().map(|p| p.size()).collect();
 
     sizes?
         .into_iter()
         .try_fold(0usize, |acc, x| acc.checked_add(x))
-        .ok_or_else(|| anyhow::anyhow!("exceeded maximum message size"))
+        .ok_or_else(|| serialize::SerializeError::Overflow)
 }
 
 #[cfg(test)]

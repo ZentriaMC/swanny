@@ -2,7 +2,6 @@ use crate::message::{
     num::{Num, TrafficSelectorType},
     serialize,
 };
-use anyhow::Result;
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
 
@@ -61,7 +60,7 @@ impl TrafficSelector {
 }
 
 impl serialize::Serialize for TrafficSelector {
-    fn serialize(&self, buf: &mut dyn BufMut) -> Result<()> {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.ty.into());
         buf.put_u8(self.ip_proto);
         buf.put_u16(self.size()?.try_into()?);
@@ -82,33 +81,33 @@ impl serialize::Serialize for TrafficSelector {
         Ok(())
     }
 
-    fn size(&self) -> Result<usize> {
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
         let address_size = match self.ty.assigned() {
             Some(TrafficSelectorType::TS_IPV4_ADDR_RANGE) => 4usize,
             Some(TrafficSelectorType::TS_IPV6_ADDR_RANGE) => 16usize,
-            _ => return Err(anyhow::anyhow!("unknown TS type")),
+            _ => {
+                return Err(serialize::SerializeError::UnknownTrafficSelectorType(
+                    self.ty,
+                ));
+            }
         };
 
         8usize
             .checked_add(address_size * 2)
-            .ok_or_else(|| anyhow::anyhow!("exceeded maximum TS size"))
+            .ok_or_else(|| serialize::SerializeError::Overflow)
     }
 }
 
 impl serialize::Deserialize for TrafficSelector {
-    fn deserialize(buf: &mut dyn Buf) -> Result<Self>
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
     where
         Self: Sized,
     {
         let ty: Num<u8, TrafficSelectorType> = buf.try_get_u8()?.into();
         let ip_proto = buf.try_get_u8()?;
         let size: usize = buf.try_get_u16()?.into();
-        if size != buf.remaining() + 4usize {
-            return Err(anyhow::anyhow!(
-                "invalid TS length: {}, {}",
-                size,
-                buf.remaining()
-            ));
+        if size < 4 || size - 4 > buf.remaining() {
+            return Err(serialize::DeserializeError::PrematureEof);
         }
 
         let start_port = buf.try_get_u16()?;
@@ -132,11 +131,8 @@ impl serialize::Deserialize for TrafficSelector {
                 let end_address = address.into();
                 (start_address, end_address)
             }
-            _ => return Err(anyhow::anyhow!("unknown TS type")),
+            _ => return Err(serialize::DeserializeError::UnknownTrafficSelectorType(ty)),
         };
-        if buf.has_remaining() {
-            return Err(anyhow::anyhow!("invalid TS length"));
-        }
 
         Ok(Self {
             ty,
