@@ -404,7 +404,7 @@ impl Auth {
         prf: &Prf,
         psk: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, crypto::CryptoError> {
         Ok(Self::new(
             AuthType::PSK.into(),
             prf.prf(prf.prf(psk, Self::KEY_PAD)?, data)?,

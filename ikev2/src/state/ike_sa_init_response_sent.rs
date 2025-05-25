@@ -114,7 +114,7 @@ impl IkeSaInitResponseSent {
         let auth = if let Some(psk) = config.psk() {
             let prf = data.chosen_proposal()?.prf();
             let signed_data = data.auth_data_for_signing(config.id())?;
-            payload::Auth::sign_with_psk(prf, psk, &signed_data)
+            Ok(payload::Auth::sign_with_psk(prf, psk, &signed_data)?)
         } else {
             Err(anyhow::anyhow!("PSK not set"))
         };
