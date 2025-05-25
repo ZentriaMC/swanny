@@ -2,7 +2,6 @@ use crate::message::{
     num::{AttributeFormat, AttributeType, DhId, EncrId, IntegId, PrfId, TransformType},
     transform::{Attribute, Transform},
 };
-use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 
 use openssl::{
@@ -20,7 +19,40 @@ use openssl::{
 
 use std::sync::Arc;
 
-pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<()> {
+#[derive(Debug, thiserror::Error)]
+pub enum CryptoError {
+    #[error("OpenSSL error")]
+    OpensslError(#[from] openssl::error::ErrorStack),
+
+    #[error("unsupported PRF algorithm")]
+    UnsupportedPrf(PrfId),
+
+    #[error("unsupported integrity checking algorithm")]
+    UnsupportedInteg(IntegId),
+
+    #[error("unsupported MODP group")]
+    UnsupportedModpGroup(DhId),
+
+    #[error("unsupported ECDH group")]
+    UnsupportedEcdhGroup(DhId),
+
+    #[error("unsupported group")]
+    UnsupportedGroup(DhId),
+
+    #[error("unsupported cipher")]
+    UnsupportedCipher((EncrId, Option<u16>)),
+
+    #[error("integer overflow")]
+    Overflow,
+
+    #[error("invalid padding")]
+    InvalidPadding,
+
+    #[error("integer conversion error")]
+    TryFromInt(#[from] std::num::TryFromIntError),
+}
+
+pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<(), CryptoError> {
     Ok(rand::rand_bytes(buf)?)
 }
 
@@ -38,14 +70,14 @@ impl std::fmt::Debug for Prf {
 }
 
 impl Prf {
-    pub fn new(id: PrfId) -> Result<Self> {
+    pub fn new(id: PrfId) -> Result<Self, CryptoError> {
         let md = match id {
             PrfId::PRF_HMAC_MD5 => MessageDigest::md5(),
             PrfId::PRF_HMAC_SHA1 => MessageDigest::sha1(),
             PrfId::PRF_HMAC_SHA2_256 => MessageDigest::sha256(),
             PrfId::PRF_HMAC_SHA2_384 => MessageDigest::sha384(),
             PrfId::PRF_HMAC_SHA2_512 => MessageDigest::sha512(),
-            _ => return Err(anyhow::anyhow!("unsupported PRF")),
+            _ => return Err(CryptoError::UnsupportedPrf(id)),
         };
 
         Ok(Self { id, md })
@@ -64,11 +96,15 @@ impl Prf {
         key: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
         mac: impl AsRef<[u8]>,
-    ) -> Result<bool> {
+    ) -> Result<bool, CryptoError> {
         Ok(memcmp::eq(&self.prf(key, data)?, mac.as_ref()))
     }
 
-    pub fn prf(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+    pub fn prf(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<Vec<u8>, CryptoError> {
         let pkey = PKey::hmac(key.as_ref())?;
         let mut signer = Signer::new(self.md, &pkey)?;
         signer.update(data.as_ref())?;
@@ -80,7 +116,7 @@ impl Prf {
         key: impl AsRef<[u8]>,
         seed: impl AsRef<[u8]>,
         size: usize,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Vec<u8>, CryptoError> {
         let pkey = PKey::hmac(key.as_ref())?;
         let mut signer = Signer::new(self.md, &pkey)?;
         let mut buf = BytesMut::with_capacity(size);
@@ -126,14 +162,14 @@ impl std::fmt::Debug for Integ {
 }
 
 impl Integ {
-    pub fn new(id: IntegId) -> Result<Self> {
+    pub fn new(id: IntegId) -> Result<Self, CryptoError> {
         let (md, output_size) = match id {
             IntegId::AUTH_HMAC_MD5_96 => (MessageDigest::md5(), 12),
             IntegId::AUTH_HMAC_SHA1_96 => (MessageDigest::sha1(), 12),
             IntegId::AUTH_HMAC_SHA2_256_128 => (MessageDigest::sha256(), 16),
             IntegId::AUTH_HMAC_SHA2_384_192 => (MessageDigest::sha384(), 24),
             IntegId::AUTH_HMAC_SHA2_512_256 => (MessageDigest::sha512(), 32),
-            _ => return Err(anyhow::anyhow!("unsupported integrity checking algorithm")),
+            _ => return Err(CryptoError::UnsupportedInteg(id)),
         };
 
         Ok(Self {
@@ -147,7 +183,11 @@ impl Integ {
         self.id
     }
 
-    pub fn sign(&self, key: impl AsRef<[u8]>, data: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+    pub fn sign(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<Vec<u8>, CryptoError> {
         let pkey = PKey::hmac(key.as_ref())?;
         let mut signer = Signer::new(self.md, &pkey)?;
         signer.update(data.as_ref())?;
@@ -161,7 +201,7 @@ impl Integ {
         key: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
         signature: impl AsRef<[u8]>,
-    ) -> Result<bool> {
+    ) -> Result<bool, CryptoError> {
         Ok(memcmp::eq(&self.sign(key, data)?, signature.as_ref()))
     }
 
@@ -190,7 +230,7 @@ enum GroupVariant {
 }
 
 impl GroupVariant {
-    fn ffdh(id: DhId) -> Result<Self> {
+    fn ffdh(id: DhId) -> Result<Self, CryptoError> {
         let (prime, generator) = match id {
             DhId::MODP768 => (
                 bn::BigNum::get_rfc2409_prime_768().unwrap(),
@@ -224,23 +264,23 @@ impl GroupVariant {
                 bn::BigNum::get_rfc3526_prime_8192().unwrap(),
                 bn::BigNum::from_u32(2).unwrap(),
             ),
-            _ => return Err(anyhow::anyhow!("unsupported MODP group")),
+            _ => return Err(CryptoError::UnsupportedModpGroup(id)),
         };
 
         Ok(Self::Ffdh(dh::Dh::from_pqg(prime, None, generator)?))
     }
 
-    fn ecdh(id: DhId) -> Result<Self> {
+    fn ecdh(id: DhId) -> Result<Self, CryptoError> {
         let nid = match id {
             DhId::SECP256R1 => Nid::X9_62_PRIME256V1,
             DhId::SECP384R1 => Nid::SECP384R1,
             DhId::SECP521R1 => Nid::SECP521R1,
-            _ => return Err(anyhow::anyhow!("unsupported ECDH group")),
+            _ => return Err(CryptoError::UnsupportedEcdhGroup(id)),
         };
         Ok(Self::Ecdh(ec::EcGroup::from_curve_name(nid)?))
     }
 
-    fn new(id: DhId) -> Result<Self> {
+    fn new(id: DhId) -> Result<Self, CryptoError> {
         match id {
             DhId::MODP768
             | DhId::MODP1024
@@ -249,7 +289,7 @@ impl GroupVariant {
             | DhId::MODP3072
             | DhId::MODP4096 => Self::ffdh(id),
             DhId::SECP256R1 | DhId::SECP384R1 | DhId::SECP521R1 => Self::ecdh(id),
-            _ => Err(anyhow::anyhow!("unsupported MODP group")),
+            _ => Err(CryptoError::UnsupportedGroup(id)),
         }
     }
 }
@@ -270,7 +310,7 @@ impl GroupPrivateKey {
         &self.group
     }
 
-    pub fn public_key(&self) -> Result<Vec<u8>> {
+    pub fn public_key(&self) -> Result<Vec<u8>, CryptoError> {
         match *self.group.variant {
             GroupVariant::Ffdh(_) => Ok(self.pkey.dh()?.public_key().to_vec()),
             GroupVariant::Ecdh(ref group) => {
@@ -284,7 +324,7 @@ impl GroupPrivateKey {
         }
     }
 
-    pub fn compute_key(&self, public_key: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+    pub fn compute_key(&self, public_key: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
         let public_key = match *self.group.variant {
             GroupVariant::Ffdh(ref params) => {
                 let public_key = bn::BigNum::from_slice(public_key.as_ref())?;
@@ -324,7 +364,7 @@ impl std::fmt::Debug for Group {
 
 impl Group {
     /// Creates a new `Group` from a group ID
-    pub fn new(id: DhId) -> Result<Self> {
+    pub fn new(id: DhId) -> Result<Self, CryptoError> {
         let variant = GroupVariant::new(id)?;
         Ok(Self {
             id,
@@ -338,14 +378,14 @@ impl Group {
     }
 
     /// Generates a new private key
-    pub fn generate_key(&self) -> Result<GroupPrivateKey> {
+    pub fn generate_key(&self) -> Result<GroupPrivateKey, CryptoError> {
         Ok(GroupPrivateKey {
             group: self.clone(),
             pkey: Self::generate_pkey(&self.variant)?,
         })
     }
 
-    fn generate_pkey(variant: &GroupVariant) -> Result<PKey<pkey::Private>> {
+    fn generate_pkey(variant: &GroupVariant) -> Result<PKey<pkey::Private>, CryptoError> {
         match variant {
             GroupVariant::Ffdh(params) => {
                 let dh = dh::Dh::from_pqg(
@@ -386,7 +426,7 @@ impl std::fmt::Debug for Cipher {
 }
 
 impl Cipher {
-    pub fn new(id: EncrId, key_size: Option<u16>) -> Result<Self> {
+    pub fn new(id: EncrId, key_size: Option<u16>) -> Result<Self, CryptoError> {
         let (cipher, is_aead, tag_size, salt_size) = match (id, key_size) {
             (EncrId::ENCR_AES_CBC, Some(128)) => (symm::Cipher::aes_128_cbc(), false, None, None),
             (EncrId::ENCR_AES_CBC, Some(192)) => (symm::Cipher::aes_192_cbc(), false, None, None),
@@ -418,7 +458,7 @@ impl Cipher {
             (EncrId::ENCR_AES_GCM_16, Some(256)) => {
                 (symm::Cipher::aes_256_gcm(), true, Some(16), Some(4))
             }
-            e => return Err(anyhow::anyhow!("unsupported cipher {:?}", e)),
+            _ => return Err(CryptoError::UnsupportedCipher((id, key_size))),
         };
         Ok(Self {
             id,
@@ -457,7 +497,11 @@ impl Cipher {
         self.id
     }
 
-    pub fn encrypt(&self, key: impl AsRef<[u8]>, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+    pub fn encrypt(
+        &self,
+        key: impl AsRef<[u8]>,
+        plaintext: impl AsRef<[u8]>,
+    ) -> Result<Vec<u8>, CryptoError> {
         let mut iv = vec![0; self.cipher.iv_len().unwrap()];
         rand::rand_bytes(&mut iv)?;
         let mut encrypter =
@@ -467,7 +511,7 @@ impl Cipher {
         let blocks = (plaintext.as_ref().len() + 1).div_ceil(block_size);
         let padded_size = block_size
             .checked_mul(blocks)
-            .ok_or_else(|| anyhow::anyhow!("overflow"))?;
+            .ok_or(CryptoError::Overflow)?;
         let mut ciphertext = vec![0; block_size * blocks + block_size];
 
         let mut count = encrypter.update(plaintext.as_ref(), &mut ciphertext)?;
@@ -481,7 +525,11 @@ impl Cipher {
         Ok(iv)
     }
 
-    pub fn decrypt(&self, key: impl AsRef<[u8]>, ciphertext: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+    pub fn decrypt(
+        &self,
+        key: impl AsRef<[u8]>,
+        ciphertext: impl AsRef<[u8]>,
+    ) -> Result<Vec<u8>, CryptoError> {
         let (iv, ciphertext) = ciphertext.as_ref().split_at(self.cipher.iv_len().unwrap());
         let mut decrypter =
             symm::Crypter::new(self.cipher, symm::Mode::Decrypt, key.as_ref(), Some(iv))?;
@@ -495,7 +543,7 @@ impl Cipher {
 
         let pad_len: usize = plaintext[plaintext.len() - 1].into();
         if pad_len > block_size {
-            return Err(anyhow::anyhow!("invalid padding length"));
+            return Err(CryptoError::InvalidPadding);
         }
         plaintext.truncate(plaintext.len() - pad_len - 1);
 
@@ -523,7 +571,7 @@ pub(crate) fn generate_skeyseed(
     n_r: impl AsRef<[u8]>,
     private_key: &GroupPrivateKey,
     peer_public_key: impl AsRef<[u8]>,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>, CryptoError> {
     let g_ir = private_key.compute_key(peer_public_key)?;
     let mut buf = n_i.as_ref().to_vec();
     buf.extend_from_slice(n_r.as_ref());

@@ -66,7 +66,7 @@ impl IkeSaInitResponseSent {
         let authenticated = if let Some(psk) = config.psk() {
             let prf = data.chosen_proposal()?.prf();
             let signed_data = data.auth_data_for_verification(id_i)?;
-            auth.verify_with_psk(prf, psk, &signed_data)
+            Ok(auth.verify_with_psk(prf, psk, &signed_data)?)
         } else {
             Err(anyhow::anyhow!("PSK not set"))
         };

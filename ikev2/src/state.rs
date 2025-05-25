@@ -190,6 +190,6 @@ impl StateData {
         let (message, checksum) = message
             .as_ref()
             .split_at(message.as_ref().len() - integ.output_size());
-        integ.verify(key.as_ref().unwrap(), message, checksum)
+        Ok(integ.verify(key.as_ref().unwrap(), message, checksum)?)
     }
 }

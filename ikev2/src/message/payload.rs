@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Cipher, Prf},
+    crypto::{self, Cipher, Prf},
     message::{
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
         proposal::{self, Proposal},
@@ -416,7 +416,7 @@ impl Auth {
         prf: &Prf,
         psk: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
-    ) -> anyhow::Result<bool> {
+    ) -> Result<bool, crypto::CryptoError> {
         prf.verify(prf.prf(psk, Self::KEY_PAD)?, data, &self.auth_data)
     }
 }
