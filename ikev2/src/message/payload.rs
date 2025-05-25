@@ -1,7 +1,6 @@
 use crate::{
     crypto::{self, Cipher, Prf},
     message::{
-        self,
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
         proposal::{self, Proposal},
         serialize::{self, Deserialize, Serialize},
@@ -676,7 +675,7 @@ impl Sk {
         cipher: &Cipher,
         key: impl AsRef<[u8]>,
         payloads: impl IntoIterator<Item = &'a Payload>,
-    ) -> Result<Self, message::MessageError> {
+    ) -> Result<Self, serialize::SerializeError> {
         let payloads: Vec<_> = payloads.into_iter().collect();
         let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
@@ -690,7 +689,7 @@ impl Sk {
         &self,
         cipher: &Cipher,
         key: impl AsRef<[u8]>,
-    ) -> Result<Vec<Payload>, message::MessageError> {
+    ) -> Result<Vec<Payload>, serialize::DeserializeError> {
         let plaintext = cipher.decrypt(key, &self.ciphertext)?;
         let mut payload_type: Num<u8, PayloadType> = self.inner;
         let mut plaintext = plaintext.as_slice();

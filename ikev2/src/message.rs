@@ -17,7 +17,7 @@ use num::{ExchangeType, MessageFlags, Num, PayloadType, TrafficSelectorType};
 pub mod payload;
 use payload::Payload;
 
-use crate::crypto::{self, Cipher};
+use crate::crypto::Cipher;
 
 pub mod proposal;
 pub mod serialize;
@@ -29,24 +29,6 @@ pub type EspSpi = [u8; 4];
 
 const HEADER_SIZE: usize = 28;
 const IKE_V2_VERSION: u8 = 0x20;
-
-#[derive(Debug, thiserror::Error)]
-pub enum MessageError {
-    #[error("cryptographic error")]
-    Crypto(#[from] crypto::CryptoError),
-
-    #[error("serialization error")]
-    Serialize(#[from] serialize::SerializeError),
-
-    #[error("deserialization error")]
-    Deserialize(#[from] serialize::DeserializeError),
-
-    #[error("encrypted payload is expected but missing")]
-    MissingEncryptedPayload,
-
-    #[error("payload conversion error")]
-    TryFromPayload(#[from] TryFromPayloadError),
-}
 
 #[derive(Clone, Debug)]
 pub struct Header {
@@ -203,7 +185,7 @@ impl Message {
         &self,
         cipher: &Cipher,
         key: impl AsRef<[u8]>,
-    ) -> Result<ProtectedMessage, MessageError> {
+    ) -> Result<ProtectedMessage, serialize::SerializeError> {
         Ok(ProtectedMessage {
             header: self.header.clone(),
             payloads: vec![payload::Payload::new(
@@ -281,13 +263,13 @@ impl ProtectedMessage {
         &self,
         cipher: &Cipher,
         key: impl AsRef<[u8]>,
-    ) -> Result<Message, MessageError> {
+    ) -> Result<Message, serialize::DeserializeError> {
         let last = self
             .payloads
             .last()
-            .ok_or(MessageError::MissingEncryptedPayload)?;
+            .ok_or(serialize::DeserializeError::MissingEncryptedPayload)?;
         if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
-            return Err(MessageError::MissingEncryptedPayload);
+            return Err(serialize::DeserializeError::MissingEncryptedPayload);
         }
         let sk: &payload::Sk = last.try_into()?;
         Ok(Message {

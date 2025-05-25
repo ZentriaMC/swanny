@@ -1,4 +1,7 @@
-use crate::message::{Num, PayloadType, TrafficSelectorType};
+use crate::{
+    crypto,
+    message::{Num, PayloadType, TrafficSelectorType, payload::TryFromPayloadError},
+};
 use bytes::{Buf, BufMut};
 
 #[derive(Debug, thiserror::Error)]
@@ -11,6 +14,9 @@ pub enum SerializeError {
 
     #[error("unknown traffic selector type")]
     UnknownTrafficSelectorType(Num<u8, TrafficSelectorType>),
+
+    #[error("cryptographic error")]
+    Crypto(#[from] crypto::CryptoError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -41,6 +47,15 @@ pub enum DeserializeError {
 
     #[error("unknown bits are set in message flags")]
     UnknownMessageFlags(u8),
+
+    #[error("payload conversion error")]
+    TryFromPayload(#[from] TryFromPayloadError),
+
+    #[error("encrypted payload is expected but missing")]
+    MissingEncryptedPayload,
+
+    #[error("cryptographic error")]
+    Crypto(#[from] crypto::CryptoError),
 }
 
 pub trait Serialize {
