@@ -142,10 +142,10 @@ impl IkeSaInitRequestSent {
             ),
         ]);
 
-        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
-        let keys = data.keys.as_ref().unwrap();
-
-        let request = request.protect(chosen_proposal.cipher(), &keys.protecting.ei)?;
+        let request = request.protect(
+            data.chosen_proposal()?.cipher(),
+            &data.keys()?.protecting.ei,
+        )?;
         Ok(request)
     }
 }

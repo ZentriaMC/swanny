@@ -153,8 +153,8 @@ impl Initial {
     where
         D: Deref<Target = StateData>,
     {
-        let chosen_proposal = data.chosen_proposal.as_ref().unwrap();
-        let group = chosen_proposal
+        let group = data
+            .chosen_proposal()?
             .group()
             .ok_or_else(|| anyhow::anyhow!("group not set"))?;
         let nonce_r = data.nonce_r.as_ref().unwrap();
@@ -175,7 +175,7 @@ impl Initial {
             ),
             Payload::new(
                 PayloadType::SA.into(),
-                payload::Content::Sa(payload::Sa::new(Some(chosen_proposal.proposal(
+                payload::Content::Sa(payload::Sa::new(Some(data.chosen_proposal()?.proposal(
                     1,
                     Protocol::IKE.into(),
                     b"",

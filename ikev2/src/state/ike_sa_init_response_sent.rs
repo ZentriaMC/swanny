@@ -36,11 +36,9 @@ impl IkeSaInitResponseSent {
     where
         D: Deref<Target = StateData>,
     {
-        let keys = data.keys.as_ref().unwrap();
-
         let request = request.unprotect(
-            data.chosen_proposal.as_ref().unwrap().cipher(),
-            &keys.protecting.ei,
+            data.chosen_proposal()?.cipher(),
+            &data.keys()?.protecting.ei,
         )?;
 
         debug!(request = ?&request, "unprotected request");
@@ -106,7 +104,7 @@ impl IkeSaInitResponseSent {
             .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
-            &keys.deriving.d,
+            &data.keys()?.deriving.d,
             data.nonce_i.as_ref().unwrap(),
             data.nonce_r.as_ref().unwrap(),
         )?;
@@ -137,8 +135,8 @@ impl IkeSaInitResponseSent {
         ]);
 
         let response = response.protect(
-            data.chosen_proposal.as_ref().unwrap().cipher(),
-            &keys.protecting.er,
+            data.chosen_proposal()?.cipher(),
+            &data.keys()?.protecting.er,
         )?;
 
         Ok((response, child_sa))

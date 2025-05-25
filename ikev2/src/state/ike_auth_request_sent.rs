@@ -37,10 +37,7 @@ impl IkeAuthRequestSent {
     {
         let keys = data.keys.as_ref().unwrap();
 
-        let response = response.unprotect(
-            data.chosen_proposal.as_ref().unwrap().cipher(),
-            &keys.protecting.er,
-        )?;
+        let response = response.unprotect(data.chosen_proposal()?.cipher(), &keys.protecting.er)?;
 
         debug!(response = ?&response, "unprotected response");
 
