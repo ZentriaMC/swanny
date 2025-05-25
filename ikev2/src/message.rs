@@ -17,7 +17,7 @@ use num::{ExchangeType, MessageFlags, Num, PayloadType, TrafficSelectorType};
 pub mod payload;
 use payload::Payload;
 
-use crate::crypto::Cipher;
+use crate::crypto::{self, Cipher};
 
 pub mod proposal;
 pub mod serialize;
@@ -29,6 +29,24 @@ pub type EspSpi = [u8; 4];
 
 const HEADER_SIZE: usize = 28;
 const IKE_V2_VERSION: u8 = 0x20;
+
+#[derive(Debug, thiserror::Error)]
+pub enum MessageError {
+    #[error("cryptographic error")]
+    Crypto(#[from] crypto::CryptoError),
+
+    #[error("serialization error")]
+    Serialize(#[from] serialize::SerializeError),
+
+    #[error("deserialization error")]
+    Deserialize(#[from] serialize::DeserializeError),
+
+    #[error("encrypted payload is expected but missing")]
+    MissingEncryptedPayload,
+
+    #[error("payload conversion error")]
+    TryFromPayload(#[from] TryFromPayloadError),
+}
 
 #[derive(Clone, Debug)]
 pub struct Header {
@@ -185,7 +203,7 @@ impl Message {
         &self,
         cipher: &Cipher,
         key: impl AsRef<[u8]>,
-    ) -> anyhow::Result<ProtectedMessage> {
+    ) -> Result<ProtectedMessage, MessageError> {
         Ok(ProtectedMessage {
             header: self.header.clone(),
             payloads: vec![payload::Payload::new(
@@ -259,13 +277,17 @@ impl ProtectedMessage {
     }
 
     /// Turns this `ProtectedMessage` into a `Message`, decrypting the payloads
-    pub fn unprotect(&self, cipher: &Cipher, key: impl AsRef<[u8]>) -> anyhow::Result<Message> {
+    pub fn unprotect(
+        &self,
+        cipher: &Cipher,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Message, MessageError> {
         let last = self
             .payloads
             .last()
-            .ok_or_else(|| anyhow::anyhow!("no payload"))?;
+            .ok_or(MessageError::MissingEncryptedPayload)?;
         if !matches!(last.ty().assigned(), Some(PayloadType::SK)) {
-            return Err(anyhow::anyhow!("no SK payload"));
+            return Err(MessageError::MissingEncryptedPayload);
         }
         let sk: &payload::Sk = last.try_into()?;
         Ok(Message {
