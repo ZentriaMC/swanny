@@ -144,7 +144,7 @@ impl StateData {
         match self.is_initiator {
             Some(true) => self.initiator_signed_data(id),
             Some(false) => self.responder_signed_data(id),
-            None => return Err(anyhow::anyhow!("initiator/responder not determined")),
+            None => Err(anyhow::anyhow!("initiator/responder not determined")),
         }
     }
 
@@ -152,7 +152,7 @@ impl StateData {
         match self.is_initiator {
             Some(true) => self.responder_signed_data(id),
             Some(false) => self.initiator_signed_data(id),
-            None => return Err(anyhow::anyhow!("initiator/responder not determined")),
+            None => Err(anyhow::anyhow!("initiator/responder not determined")),
         }
     }
 

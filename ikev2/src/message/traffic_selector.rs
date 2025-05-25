@@ -94,7 +94,7 @@ impl serialize::Serialize for TrafficSelector {
 
         8usize
             .checked_add(address_size * 2)
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 

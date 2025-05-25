@@ -102,7 +102,7 @@ impl Payload {
     pub fn size(&self) -> Result<usize, serialize::SerializeError> {
         HEADER_SIZE
             .checked_add(self.content.size()?)
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 
     /// Deserializes `buf` as a payload with given type
@@ -118,7 +118,7 @@ impl Payload {
         let len: usize = buf.try_get_u16()?.into();
         let len = len
             .checked_sub(HEADER_SIZE)
-            .ok_or_else(|| serialize::DeserializeError::Underflow)?;
+            .ok_or(serialize::DeserializeError::Underflow)?;
         if len > buf.remaining() {
             return Err(serialize::DeserializeError::PrematureEof);
         }
@@ -223,7 +223,7 @@ impl serialize::Serialize for Sa {
             buf.put_u8(0);
             let len = proposal::HEADER_SIZE
                 .checked_add(proposal.size()?)
-                .ok_or_else(|| serialize::SerializeError::Overflow)?;
+                .ok_or(serialize::SerializeError::Overflow)?;
             buf.put_u16(len.try_into()?);
             proposal.serialize(buf)?;
         }
@@ -235,9 +235,9 @@ impl serialize::Serialize for Sa {
         for proposal in &self.proposals {
             len = len
                 .checked_add(proposal::HEADER_SIZE)
-                .ok_or_else(|| serialize::SerializeError::Overflow)?
+                .ok_or(serialize::SerializeError::Overflow)?
                 .checked_add(proposal.size()?)
-                .ok_or_else(|| serialize::SerializeError::Overflow)?;
+                .ok_or(serialize::SerializeError::Overflow)?;
         }
         Ok(len)
     }
@@ -255,7 +255,7 @@ impl serialize::Deserialize for Sa {
             let len: usize = buf.try_get_u16()?.into();
             let len = len
                 .checked_sub(proposal::HEADER_SIZE)
-                .ok_or_else(|| serialize::DeserializeError::Underflow)?;
+                .ok_or(serialize::DeserializeError::Underflow)?;
             proposals.push(Proposal::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
@@ -301,7 +301,7 @@ impl serialize::Serialize for Ke {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.ke_data.len())
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 
@@ -355,7 +355,7 @@ impl serialize::Serialize for Id {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.id_data.len())
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 
@@ -417,7 +417,7 @@ impl Auth {
         psk: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
     ) -> anyhow::Result<bool> {
-        Ok(prf.verify(prf.prf(psk, Self::KEY_PAD)?, data, &self.auth_data)?)
+        prf.verify(prf.prf(psk, Self::KEY_PAD)?, data, &self.auth_data)
     }
 }
 
@@ -433,7 +433,7 @@ impl serialize::Serialize for Auth {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.auth_data.len())
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 
@@ -554,9 +554,9 @@ impl serialize::Serialize for Notify {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         4usize
             .checked_add(self.spi.as_ref().map(|spi| spi.len()).unwrap_or(0))
-            .ok_or_else(|| serialize::SerializeError::Overflow)?
+            .ok_or(serialize::SerializeError::Overflow)?
             .checked_add(self.notify_data.len())
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 
@@ -622,7 +622,7 @@ impl serialize::Serialize for Ts {
         for traffic_selector in &self.traffic_selectors {
             len = len
                 .checked_add(traffic_selector.size()?)
-                .ok_or_else(|| serialize::SerializeError::Overflow)?;
+                .ok_or(serialize::SerializeError::Overflow)?;
         }
         Ok(len)
     }
@@ -768,7 +768,7 @@ pub(crate) fn cumulative_size<'a>(
     sizes?
         .into_iter()
         .try_fold(0usize, |acc, x| acc.checked_add(x))
-        .ok_or_else(|| serialize::SerializeError::Overflow)
+        .ok_or(serialize::SerializeError::Overflow)
 }
 
 #[cfg(test)]

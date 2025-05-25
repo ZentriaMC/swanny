@@ -111,7 +111,7 @@ impl Header {
         let exchange: Num<u8, ExchangeType> = buf.try_get_u8()?.into();
         let flags = buf.try_get_u8()?;
         let flags = MessageFlags::from_bits(flags)
-            .ok_or_else(|| serialize::DeserializeError::UnknownMessageFlags(flags))?;
+            .ok_or(serialize::DeserializeError::UnknownMessageFlags(flags))?;
         let id = buf.try_get_u32()?;
         Ok((
             Self {
@@ -217,7 +217,7 @@ impl serialize::Serialize for Message {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         HEADER_SIZE
             .checked_add(payload::cumulative_size(&self.payloads)?)
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 
@@ -295,7 +295,7 @@ impl serialize::Serialize for ProtectedMessage {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         HEADER_SIZE
             .checked_add(payload::cumulative_size(&self.payloads)?)
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 

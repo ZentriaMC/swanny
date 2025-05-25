@@ -61,7 +61,7 @@ impl serialize::Serialize for Attribute {
         match self.format {
             AttributeFormat::TLV => 4usize
                 .checked_add(self.value.len())
-                .ok_or_else(|| serialize::SerializeError::Overflow),
+                .ok_or(serialize::SerializeError::Overflow),
             AttributeFormat::TV => Ok(4),
         }
     }
@@ -135,7 +135,7 @@ impl serialize::Serialize for Transform {
         sizes?
             .into_iter()
             .try_fold(4usize, |acc, x| acc.checked_add(x))
-            .ok_or_else(|| serialize::SerializeError::Overflow)
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 

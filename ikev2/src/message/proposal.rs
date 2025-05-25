@@ -92,7 +92,7 @@ impl serialize::Serialize for Proposal {
             buf.put_u8(0);
             let len = transform::HEADER_SIZE
                 .checked_add(transform.size()?)
-                .ok_or_else(|| serialize::SerializeError::Overflow)?;
+                .ok_or(serialize::SerializeError::Overflow)?;
             buf.put_u16(len.try_into()?);
             transform.serialize(buf)?;
         }
@@ -102,13 +102,13 @@ impl serialize::Serialize for Proposal {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         let mut len = HEADER_SIZE
             .checked_add(self.spi.len())
-            .ok_or_else(|| serialize::SerializeError::Overflow)?;
+            .ok_or(serialize::SerializeError::Overflow)?;
         for transform in &self.transforms {
             len = len
                 .checked_add(transform::HEADER_SIZE)
-                .ok_or_else(|| serialize::SerializeError::Overflow)?
+                .ok_or(serialize::SerializeError::Overflow)?
                 .checked_add(transform.size()?)
-                .ok_or_else(|| serialize::SerializeError::Overflow)?;
+                .ok_or(serialize::SerializeError::Overflow)?;
         }
         Ok(len)
     }
@@ -132,7 +132,7 @@ impl serialize::Deserialize for Proposal {
             let len: usize = buf.try_get_u16()?.into();
             let len = len
                 .checked_sub(transform::HEADER_SIZE)
-                .ok_or_else(|| serialize::DeserializeError::Underflow)?;
+                .ok_or(serialize::DeserializeError::Underflow)?;
             transforms.push(Transform::deserialize(&mut &buf.chunk()[..len])?);
             buf.advance(len);
         }
