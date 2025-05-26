@@ -17,7 +17,7 @@ use crate::{
         payload::Id,
         proposal::Proposal,
         transform::{Attribute, Transform},
-    }
+    },
 };
 
 #[derive(Debug, thiserror::Error)]

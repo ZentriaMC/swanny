@@ -65,7 +65,7 @@ impl Key {
 
 impl AsRef<[u8]> for Key {
     fn as_ref(&self) -> &[u8] {
-        &self.0.as_ref()
+        self.0.as_ref()
     }
 }
 
