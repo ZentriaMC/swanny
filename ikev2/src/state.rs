@@ -1,18 +1,17 @@
 use crate::{
-    config::Config,
-    crypto::GroupPrivateKey,
+    config::{Config, ConfigError},
+    crypto::{CryptoError, GroupPrivateKey},
     message::{
         Spi,
         payload::{self, Id},
-        serialize::Serialize,
+        serialize::{DeserializeError, Serialize, SerializeError},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, Keys, LarvalChildSa},
+    sa::{ChosenProposal, ControlMessage, Keys, LarvalChildSa, ProtocolError},
 };
-use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
-use futures::channel::mpsc::UnboundedSender;
+use futures::channel::mpsc::{TrySendError, UnboundedSender};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -31,6 +30,48 @@ pub(crate) use ike_auth_request_sent::IkeAuthRequestSent;
 mod established;
 pub(crate) use established::Established;
 
+#[derive(Debug, thiserror::Error)]
+pub enum InvalidStateError {
+    #[error("no proposal chosen")]
+    NoProposalChosen,
+
+    #[error("no keys set")]
+    NoKeysSet,
+
+    #[error("IKE_SA_INIT not recorded")]
+    IkeSaInitNotRecorded,
+
+    #[error("nonce not recorded")]
+    NonceNotRecorded,
+
+    #[error("initiator/responder not determined")]
+    InitiatorNotDetermined,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StateError {
+    #[error("invalid state")]
+    InvalidState(#[from] InvalidStateError),
+
+    #[error("configuration error")]
+    Config(#[from] ConfigError),
+
+    #[error("error at the protocol level")]
+    Protocol(#[from] ProtocolError),
+
+    #[error("cryptographic error")]
+    Crypto(#[from] CryptoError),
+
+    #[error("serialization error")]
+    SerializeError(#[from] SerializeError),
+
+    #[error("deserialization error")]
+    DeserializeError(#[from] DeserializeError),
+
+    #[error("try send error")]
+    TrySend(#[from] TrySendError<ControlMessage>),
+}
+
 #[async_trait]
 pub(crate) trait State: Send + Sync + std::fmt::Display {
     async fn handle_message(
@@ -39,7 +80,7 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         message: &[u8],
-    ) -> Result<Box<dyn State>>;
+    ) -> Result<Box<dyn State>, StateError>;
 
     async fn handle_acquire(
         self: Box<Self>,
@@ -49,7 +90,7 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
         index: u32,
-    ) -> Result<Box<dyn State>>;
+    ) -> Result<Box<dyn State>, StateError>;
 }
 
 #[derive(Default)]
@@ -80,31 +121,34 @@ impl StateData {
         self.is_initiator
     }
 
-    fn chosen_proposal(&self) -> Result<&ChosenProposal> {
+    fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {
         self.chosen_proposal
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no proposal chosen"))
+            .ok_or(StateError::InvalidState(
+                InvalidStateError::NoProposalChosen,
+            ))
     }
 
-    fn keys(&self) -> Result<&Keys> {
+    fn keys(&self) -> Result<&Keys, StateError> {
         self.keys
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no keys generated"))
+            .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))
     }
 
-    fn initiator_signed_data(&self, id: &Id) -> Result<Vec<u8>> {
+    fn initiator_signed_data(&self, id: &Id) -> Result<Vec<u8>, StateError> {
         let len = id.size()?;
         let mut buf = BytesMut::with_capacity(len);
         id.serialize(&mut buf)?;
 
-        let ike_sa_init_request = self
-            .ike_sa_init_request
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("IKE_SA_INIT request is not set"))?;
-        let nonce_r = self
-            .nonce_r
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Nr not received"))?;
+        let ike_sa_init_request =
+            self.ike_sa_init_request
+                .as_ref()
+                .ok_or(StateError::InvalidState(
+                    InvalidStateError::IkeSaInitNotRecorded,
+                ))?;
+        let nonce_r = self.nonce_r.as_ref().ok_or(StateError::InvalidState(
+            InvalidStateError::NonceNotRecorded,
+        ))?;
 
         let prf = self.chosen_proposal()?.prf();
         let mut mac = prf.prf(&self.keys()?.deriving.pi, &buf[payload::HEADER_SIZE..])?;
@@ -116,19 +160,20 @@ impl StateData {
         Ok(signed_data)
     }
 
-    fn responder_signed_data(&self, id: &Id) -> Result<Vec<u8>> {
+    fn responder_signed_data(&self, id: &Id) -> Result<Vec<u8>, StateError> {
         let len = id.size()?;
         let mut buf = BytesMut::with_capacity(len);
         id.serialize(&mut buf)?;
 
-        let ike_sa_init_response = self
-            .ike_sa_init_response
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("IKE_SA_INIT response is not set"))?;
-        let nonce_i = self
-            .nonce_i
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Ni not received"))?;
+        let ike_sa_init_response =
+            self.ike_sa_init_response
+                .as_ref()
+                .ok_or(StateError::InvalidState(
+                    InvalidStateError::IkeSaInitNotRecorded,
+                ))?;
+        let nonce_i = self.nonce_i.as_ref().ok_or(StateError::InvalidState(
+            InvalidStateError::NonceNotRecorded,
+        ))?;
 
         let prf = self.chosen_proposal()?.prf();
         let mut mac = prf.prf(&self.keys()?.deriving.pr, &buf[payload::HEADER_SIZE..])?;
@@ -140,23 +185,27 @@ impl StateData {
         Ok(signed_data)
     }
 
-    fn auth_data_for_signing(&self, id: &Id) -> Result<Vec<u8>> {
+    fn auth_data_for_signing(&self, id: &Id) -> Result<Vec<u8>, StateError> {
         match self.is_initiator {
             Some(true) => self.initiator_signed_data(id),
             Some(false) => self.responder_signed_data(id),
-            None => Err(anyhow::anyhow!("initiator/responder not determined")),
+            None => Err(StateError::InvalidState(
+                InvalidStateError::InitiatorNotDetermined,
+            )),
         }
     }
 
-    fn auth_data_for_verification(&self, id: &Id) -> Result<Vec<u8>> {
+    fn auth_data_for_verification(&self, id: &Id) -> Result<Vec<u8>, StateError> {
         match self.is_initiator {
             Some(true) => self.responder_signed_data(id),
             Some(false) => self.initiator_signed_data(id),
-            None => Err(anyhow::anyhow!("initiator/responder not determined")),
+            None => Err(StateError::InvalidState(
+                InvalidStateError::InitiatorNotDetermined,
+            )),
         }
     }
 
-    fn message_sign(&self, message: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+    fn message_sign(&self, message: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, StateError> {
         if self.chosen_proposal()?.integ().is_none() {
             return Ok(None);
         }
@@ -164,14 +213,18 @@ impl StateData {
         let key = match self.is_initiator() {
             Some(true) => &self.keys()?.protecting.ai,
             Some(false) => &self.keys()?.protecting.ar,
-            _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
+            None => {
+                return Err(StateError::InvalidState(
+                    InvalidStateError::InitiatorNotDetermined,
+                ));
+            }
         };
 
         let integ = self.chosen_proposal()?.integ().unwrap();
         Ok(Some(integ.sign(key.as_ref().unwrap(), message.as_ref())?))
     }
 
-    fn message_verify(&self, message: impl AsRef<[u8]>) -> Result<bool> {
+    fn message_verify(&self, message: impl AsRef<[u8]>) -> Result<bool, StateError> {
         if self.chosen_proposal()?.integ().is_none() {
             return Ok(true);
         }
@@ -179,12 +232,16 @@ impl StateData {
         let key = match self.is_initiator() {
             Some(true) => &self.keys()?.protecting.ar,
             Some(false) => &self.keys()?.protecting.ai,
-            _ => return Err(anyhow::anyhow!("initiator/responder not determined")),
+            None => {
+                return Err(StateError::InvalidState(
+                    InvalidStateError::InitiatorNotDetermined,
+                ));
+            }
         };
 
         let integ = self.chosen_proposal()?.integ().unwrap();
         if message.as_ref().len() < integ.output_size() {
-            return Err(anyhow::anyhow!("invalid checksum size"));
+            return Err(DeserializeError::PrematureEof.into());
         }
 
         let (message, checksum) = message

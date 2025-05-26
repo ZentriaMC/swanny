@@ -2,9 +2,8 @@ use crate::{
     config::Config,
     message::traffic_selector::TrafficSelector,
     sa::ControlMessage,
-    state::{State, StateData},
+    state::{State, StateData, StateError},
 };
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
@@ -26,7 +25,7 @@ impl State for Established {
         _sender: UnboundedSender<ControlMessage>,
         _data: Arc<RwLock<StateData>>,
         _message: &[u8],
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }
 
@@ -38,7 +37,7 @@ impl State for Established {
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
         _index: u32,
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }
 }

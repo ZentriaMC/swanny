@@ -1,5 +1,5 @@
 use crate::{
-    config::Config,
+    config::{Config, ConfigError},
     message::{
         ProtectedMessage,
         num::{ExchangeType, PayloadType},
@@ -7,10 +7,9 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa},
-    state::{self, State, StateData},
+    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
+    state::{self, State, StateData, StateError},
 };
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
 use std::ops::Deref;
@@ -31,7 +30,7 @@ impl IkeAuthRequestSent {
         config: &Config,
         data: &D,
         response: &ProtectedMessage,
-    ) -> Result<ChosenProposal>
+    ) -> Result<ChosenProposal, StateError>
     where
         D: Deref<Target = StateData>,
     {
@@ -43,22 +42,22 @@ impl IkeAuthRequestSent {
 
         let auth: &payload::Auth = response
             .get(PayloadType::AUTH)
-            .ok_or_else(|| anyhow::anyhow!("no AUTH payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::AUTH))?;
 
         let id_r: &payload::Id = response
             .get(PayloadType::IDr)
-            .ok_or_else(|| anyhow::anyhow!("no IDr payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::IDr))?;
 
         let sa: &payload::Sa = response
             .get(PayloadType::SA)
-            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
         let authenticated = if let Some(psk) = config.psk() {
             let prf = data.chosen_proposal()?.prf();
             let signed_data = data.auth_data_for_verification(id_r)?;
             Ok(auth.verify_with_psk(prf, psk, &signed_data)?)
         } else {
-            Err(anyhow::anyhow!("PSK not set"))
+            Err(ConfigError::NoPSK)
         };
 
         if authenticated? {
@@ -67,7 +66,7 @@ impl IkeAuthRequestSent {
                 "initiator authenticated responder"
             );
         } else {
-            return Err(anyhow::anyhow!("authentication failed"));
+            return Err(ProtocolError::AuthenticationFailed.into());
         }
 
         let proposals = data
@@ -78,25 +77,26 @@ impl IkeAuthRequestSent {
             .as_ref()
             .unwrap();
 
-        ChosenProposal::negotiate(proposals, sa.proposals())
-            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))
+        ChosenProposal::negotiate(proposals, sa.proposals()).map_err(Into::into)
     }
 
     fn create_child_sa<D>(
         data: &D,
         chosen_proposal: &ChosenProposal,
         larval_child_sa: LarvalChildSa,
-    ) -> Result<ChildSa>
+    ) -> Result<ChildSa, StateError>
     where
         D: Deref<Target = StateData>,
     {
         let keys = data.keys.as_ref().unwrap();
-        larval_child_sa.build(
-            chosen_proposal,
-            &keys.deriving.d,
-            data.nonce_i.as_ref().unwrap(),
-            data.nonce_r.as_ref().unwrap(),
-        )
+        larval_child_sa
+            .build(
+                chosen_proposal,
+                &keys.deriving.d,
+                data.nonce_i.as_ref().unwrap(),
+                data.nonce_r.as_ref().unwrap(),
+            )
+            .map_err(Into::into)
     }
 }
 
@@ -108,7 +108,7 @@ impl State for IkeAuthRequestSent {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         let serialized_response = message;
         let response = ProtectedMessage::deserialize(&mut message)?;
         match response.exchange().assigned() {
@@ -118,7 +118,7 @@ impl State for IkeAuthRequestSent {
                     if data.message_verify(serialized_response)? {
                         debug!("checksum verified");
                     } else {
-                        return Err(anyhow::anyhow!("checksum mismatch"));
+                        return Err(ProtocolError::IntegrityCheckFailed.into());
                     }
                 }
                 let chosen_proposal = {
@@ -139,8 +139,8 @@ impl State for IkeAuthRequestSent {
                 sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
                 Ok(Box::new(state::Established {}))
             }
-            exchange => {
-                return Err(anyhow::anyhow!("unknown exchange {:?}", exchange));
+            _ => {
+                return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
             }
         }
     }
@@ -153,7 +153,7 @@ impl State for IkeAuthRequestSent {
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
         _index: u32,
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }
 }

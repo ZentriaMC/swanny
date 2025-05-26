@@ -1,5 +1,5 @@
 use crate::{
-    config::Config,
+    config::{Config, ConfigError},
     crypto::{self, GroupPrivateKey},
     message::{
         Message, Spi,
@@ -8,10 +8,9 @@ use crate::{
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, LarvalChildSa},
-    state::{self, Keys, State, StateData},
+    sa::{ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
+    state::{self, Keys, State, StateData, StateError},
 };
-use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
@@ -32,13 +31,13 @@ impl Initial {
     fn generate_ike_sa_init_request<D>(
         config: &Config,
         data: &D,
-    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>)>
+    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>), StateError>
     where
         D: Deref<Target = StateData>,
     {
         let proposals: Vec<_> = config.ike_proposals(None).collect();
         if proposals.is_empty() {
-            return Err(anyhow::anyhow!("no proposal to send"));
+            return Err(ConfigError::NoProposalsSet.into());
         }
 
         let chosen_proposal = ChosenProposal::new(&proposals[0])?;
@@ -48,7 +47,7 @@ impl Initial {
 
         let group = chosen_proposal
             .group()
-            .ok_or_else(|| anyhow::anyhow!("group is not set"))?;
+            .ok_or(ConfigError::InsufficientProposal)?;
         let private_key = group.generate_key()?;
         let public_key = private_key.public_key()?;
 
@@ -85,33 +84,32 @@ impl Initial {
         config: &Config,
         data: &D,
         request: &Message,
-    ) -> Result<(ChosenProposal, Vec<u8>, Keys, Vec<u8>, Vec<u8>)>
+    ) -> Result<(ChosenProposal, Vec<u8>, Keys, Vec<u8>, Vec<u8>), StateError>
     where
         D: Deref<Target = StateData>,
     {
         let sa: &payload::Sa = request
             .get(PayloadType::SA)
-            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
         let ke: &payload::Ke = request
             .get(PayloadType::KE)
-            .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
 
         let nonce_i: &payload::Nonce = request
             .get(PayloadType::NONCE)
-            .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
 
         let proposals: Vec<_> = config.ike_proposals(None).collect();
         if proposals.is_empty() {
-            return Err(anyhow::anyhow!("no proposal to send"));
+            return Err(ConfigError::NoProposalsSet.into());
         }
 
-        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())
-            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
+        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
 
         let group = chosen_proposal
             .group()
-            .ok_or_else(|| anyhow::anyhow!("group not set"))?;
+            .ok_or(ConfigError::InsufficientProposal)?;
         let private_key = group.generate_key()?;
         let public_key = private_key.public_key()?;
 
@@ -149,14 +147,14 @@ impl Initial {
         data: &D,
         public_key: impl AsRef<[u8]>,
         message_id: u32,
-    ) -> Result<Message>
+    ) -> Result<Message, StateError>
     where
         D: Deref<Target = StateData>,
     {
         let group = data
             .chosen_proposal()?
             .group()
-            .ok_or_else(|| anyhow::anyhow!("group not set"))?;
+            .ok_or(ConfigError::InsufficientProposal)?;
         let nonce_r = data.nonce_r.as_ref().unwrap();
 
         let mut message = Message::new(
@@ -201,7 +199,7 @@ impl State for Initial {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         let serialized_request = message;
         let request = Message::deserialize(&mut message)?;
         match request.exchange().assigned() {
@@ -242,8 +240,8 @@ impl State for Initial {
 
                 Ok(Box::new(state::IkeSaInitResponseSent {}))
             }
-            exchange => {
-                return Err(anyhow::anyhow!("unknown exchange {:?}", exchange));
+            _ => {
+                return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
             }
         }
     }
@@ -256,7 +254,7 @@ impl State for Initial {
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
         _index: u32,
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         let (request, chosen_proposal, private_key, nonce) = {
             let data = data.read().await;
 

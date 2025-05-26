@@ -41,28 +41,72 @@
 //!
 use crate::{
     config::Config,
-    crypto::{self, Cipher, Group, Integ, Prf},
+    crypto::{self, Cipher, CryptoError, Group, Integ, Prf},
     message::{
         EspSpi, Spi,
-        num::{AttributeType, DhId, EncrId, IntegId, Num, PrfId, Protocol, TransformType},
+        num::{
+            AttributeType, DhId, EncrId, ExchangeType, IntegId, Num, PayloadType, PrfId, Protocol,
+            TransformType, TryFromTransformIdError,
+        },
         proposal::Proposal,
         traffic_selector::TrafficSelector,
         transform::Transform,
     },
-    state::{self, State, StateData},
+    state::{self, State, StateData, StateError},
 };
-use anyhow::Result;
 use bytes::Buf;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info};
+use tracing::info;
 
 /// Control message `IkeSa` may asynchronously send to the caller event loop
 #[derive(Debug)]
 pub enum ControlMessage {
     IkeMessage(Vec<u8>),
     CreateChildSa(Box<ChildSa>),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProtocolError {
+    #[error("missing payload")]
+    MissingPayload(PayloadType),
+
+    #[error("missing transform")]
+    MissingTransform(TransformType),
+
+    #[error("transform ID conversion error")]
+    TryFromTransformId(#[from] TryFromTransformIdError),
+
+    #[error("missing attribute")]
+    MissingAttribute(AttributeType),
+
+    #[error("invalid attribute")]
+    InvalidAttribute(AttributeType),
+
+    #[error("unexpected exchange")]
+    UnexpectedExchange(Num<u8, ExchangeType>),
+
+    #[error("cryptographic error")]
+    Crypto(#[from] CryptoError),
+
+    #[error("authentication failed")]
+    AuthenticationFailed,
+
+    #[error("integrity check failed")]
+    IntegrityCheckFailed,
+
+    #[error("no proposal chosen")]
+    NoProposalChosen,
+
+    #[error("no proposals received from peer")]
+    NoProposalsReceived,
+
+    #[error("inconsistent KE group received")]
+    InconsistentKeGroup(Num<u16, DhId>),
+
+    #[error("unknown IPsec protocol")]
+    UnknownProtocol(Num<u8, Protocol>),
 }
 
 /// IKE SA abstraction
@@ -79,7 +123,7 @@ pub struct IkeSa {
 
 impl IkeSa {
     /// Create a new IkeSa from the given configuration
-    pub fn new(config: &Config) -> Result<(Self, UnboundedReceiver<ControlMessage>)> {
+    pub fn new(config: &Config) -> Result<(Self, UnboundedReceiver<ControlMessage>), CryptoError> {
         let mut spi = Spi::default();
         crypto::rand_bytes(&mut spi)?;
 
@@ -104,7 +148,7 @@ impl IkeSa {
     }
 
     /// Processes IKE message
-    pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<()> {
+    pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
             drop(state);
@@ -137,7 +181,7 @@ impl IkeSa {
         ts_i: TrafficSelector,
         ts_r: TrafficSelector,
         index: u32,
-    ) -> Result<()> {
+    ) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
             drop(state);
@@ -180,22 +224,30 @@ pub struct ChosenProposal {
 
 impl ChosenProposal {
     /// Creates a new `ChosenProposal` from a proposal on the wire
-    pub fn new(proposal: &Proposal) -> Result<Self> {
+    pub fn new(proposal: &Proposal) -> Result<Self, ProtocolError> {
         let transform = proposal
             .transforms()
             .find(|t| matches!(t.ty().assigned(), Some(TransformType::ENCR)))
-            .ok_or_else(|| anyhow::anyhow!("ENCR transform not found"))?;
+            .ok_or(ProtocolError::MissingTransform(TransformType::ENCR))?;
         let id: EncrId = transform.id().try_into()?;
         let attribute = transform
             .attributes()
             .find(|a| matches!(a.ty().assigned(), Some(AttributeType::KeyLength)))
-            .ok_or_else(|| anyhow::anyhow!("KeyLength attribute not found"))?;
-        let cipher = Cipher::new(id, Some(u16::from_be_bytes(attribute.value().try_into()?)))?;
+            .ok_or(ProtocolError::MissingAttribute(AttributeType::KeyLength))?;
+        if attribute.value().len() != 2 {
+            return Err(ProtocolError::InvalidAttribute(AttributeType::KeyLength));
+        }
+        let cipher = Cipher::new(
+            id,
+            Some(u16::from_be_bytes(
+                attribute.value().try_into().expect("buffer too short"),
+            )),
+        )?;
 
         let transform = proposal
             .transforms()
             .find(|t| matches!(t.ty().assigned(), Some(TransformType::PRF)))
-            .ok_or_else(|| anyhow::anyhow!("PRF transform not found"))?;
+            .ok_or(ProtocolError::MissingTransform(TransformType::PRF))?;
         let id: PrfId = transform.id().try_into()?;
         let prf = Prf::new(id)?;
 
@@ -205,7 +257,7 @@ impl ChosenProposal {
             let transform = proposal
                 .transforms()
                 .find(|t| matches!(t.ty().assigned(), Some(TransformType::INTEG)))
-                .ok_or_else(|| anyhow::anyhow!("INTEG transform not found"))?;
+                .ok_or(ProtocolError::MissingTransform(TransformType::INTEG))?;
             let id: IntegId = transform.id().try_into()?;
             Some(Integ::new(id)?)
         };
@@ -220,7 +272,7 @@ impl ChosenProposal {
             }
             None => match proposal.protocol().assigned() {
                 Some(Protocol::IKE) => {
-                    return Err(anyhow::anyhow!("DH transform not found"));
+                    return Err(ProtocolError::MissingTransform(TransformType::DH));
                 }
                 _ => None,
             },
@@ -230,7 +282,7 @@ impl ChosenProposal {
             protocol: proposal
                 .protocol()
                 .assigned()
-                .ok_or_else(|| anyhow::anyhow!("unknown protocol"))?,
+                .ok_or(ProtocolError::UnknownProtocol(proposal.protocol()))?,
             spi: proposal.spi().to_vec(),
             cipher,
             prf,
@@ -242,19 +294,12 @@ impl ChosenProposal {
     pub(crate) fn negotiate<'a, 'b>(
         this: impl IntoIterator<Item = &'a Proposal>,
         other: impl IntoIterator<Item = &'b Proposal>,
-    ) -> Option<Self> {
+    ) -> Result<Self, ProtocolError> {
         let mut this = this.into_iter();
         let mut other = other.into_iter();
-        if let Some(proposal) = this.find_map(|px| other.find_map(|py| px.intersection(py))) {
-            match Self::new(&proposal) {
-                Ok(proposal) => Some(proposal),
-                Err(e) => {
-                    debug!(error = %e, "error");
-                    None
-                }
-            }
-        } else {
-            None
+        match this.find_map(|px| other.find_map(|py| px.intersection(py))) {
+            Some(proposal) => Self::new(&proposal),
+            None => Err(ProtocolError::NoProposalChosen),
         }
     }
 
@@ -295,7 +340,7 @@ impl ChosenProposal {
         nonce_r: impl AsRef<[u8]>,
         spi_i: &Spi,
         spi_r: &Spi,
-    ) -> Result<Keys> {
+    ) -> Result<Keys, CryptoError> {
         let mut buf = nonce_i.as_ref().to_vec();
         buf.extend_from_slice(nonce_r.as_ref());
         buf.extend_from_slice(&spi_i[..]);
@@ -313,30 +358,30 @@ impl ChosenProposal {
         let mut buf = buf.as_slice();
 
         let mut d = vec![0; self.prf.size()];
-        buf.try_copy_to_slice(&mut d)?;
+        buf.try_copy_to_slice(&mut d).expect("buffer too short");
 
         let mut ei = vec![0; self.cipher.key_size()];
-        buf.try_copy_to_slice(&mut ei)?;
+        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
 
         let mut er = vec![0; self.cipher.key_size()];
-        buf.try_copy_to_slice(&mut er)?;
+        buf.try_copy_to_slice(&mut er).expect("buffer too short");
 
         let (ai, ar) = if self.integ.is_some() {
             let mut ai = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ai)?;
+            buf.try_copy_to_slice(&mut ai).expect("buffer too short");
 
             let mut ar = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ar)?;
+            buf.try_copy_to_slice(&mut ar).expect("buffer too short");
             (Some(ai), Some(ar))
         } else {
             (None, None)
         };
 
         let mut pi = vec![0; self.prf.size()];
-        buf.try_copy_to_slice(&mut pi)?;
+        buf.try_copy_to_slice(&mut pi).expect("buffer too short");
 
         let mut pr = vec![0; self.prf.size()];
-        buf.try_copy_to_slice(&mut pr)?;
+        buf.try_copy_to_slice(&mut pr).expect("buffer too short");
 
         Ok(Keys {
             deriving: DerivingKeys { d, pi, pr },
@@ -398,7 +443,11 @@ pub(crate) struct LarvalChildSa {
 }
 
 impl LarvalChildSa {
-    pub fn new(config: &Config, ts_i: &TrafficSelector, ts_r: &TrafficSelector) -> Result<Self> {
+    pub fn new(
+        config: &Config,
+        ts_i: &TrafficSelector,
+        ts_r: &TrafficSelector,
+    ) -> Result<Self, CryptoError> {
         let mut spi = EspSpi::default();
         crypto::rand_bytes(&mut spi)?;
 
@@ -418,7 +467,7 @@ impl LarvalChildSa {
         d: impl AsRef<[u8]>,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
-    ) -> Result<ChildSa> {
+    ) -> Result<ChildSa, CryptoError> {
         let mut child_sa = ChildSa {
             ts_i: self.ts_i.take().unwrap(),
             ts_r: self.ts_r.take().unwrap(),
@@ -451,7 +500,7 @@ impl ChildSa {
         d: impl AsRef<[u8]>,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
-    ) -> Result<()> {
+    ) -> Result<(), CryptoError> {
         let mut buf = nonce_i.as_ref().to_vec();
         buf.extend_from_slice(nonce_r.as_ref());
         let integ_key_size = self
@@ -470,17 +519,17 @@ impl ChildSa {
         let mut buf = buf.as_slice();
 
         let mut ei = vec![0; encryption_key_size];
-        buf.try_copy_to_slice(&mut ei)?;
+        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
 
         let mut er = vec![0; encryption_key_size];
-        buf.try_copy_to_slice(&mut er)?;
+        buf.try_copy_to_slice(&mut er).expect("buffer too short");
 
         let (ai, ar) = if self.chosen_proposal.integ().is_some() {
             let mut ai = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ai)?;
+            buf.try_copy_to_slice(&mut ai).expect("buffer too short");
 
             let mut ar = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ar)?;
+            buf.try_copy_to_slice(&mut ar).expect("buffer too short");
             (Some(ai), Some(ar))
         } else {
             (None, None)

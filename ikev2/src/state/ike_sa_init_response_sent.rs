@@ -1,5 +1,5 @@
 use crate::{
-    config::Config,
+    config::{Config, ConfigError},
     message::{
         Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType},
@@ -7,10 +7,9 @@ use crate::{
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa},
-    state::{self, State, StateData},
+    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
+    state::{self, State, StateData, StateError},
 };
-use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
@@ -32,7 +31,7 @@ impl IkeSaInitResponseSent {
         config: &Config,
         data: &D,
         request: &ProtectedMessage,
-    ) -> Result<(ProtectedMessage, ChildSa)>
+    ) -> Result<(ProtectedMessage, ChildSa), StateError>
     where
         D: Deref<Target = StateData>,
     {
@@ -45,30 +44,30 @@ impl IkeSaInitResponseSent {
 
         let auth: &payload::Auth = request
             .get(PayloadType::AUTH)
-            .ok_or_else(|| anyhow::anyhow!("no AUTH payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::AUTH))?;
 
         let id_i: &payload::Id = request
             .get(PayloadType::IDi)
-            .ok_or_else(|| anyhow::anyhow!("no IDi payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::IDi))?;
 
         let sa: &payload::Sa = request
             .get(PayloadType::SA)
-            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
         let ts_i: &payload::Ts = request
             .get(PayloadType::TSi)
-            .ok_or_else(|| anyhow::anyhow!("no TSi payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
 
         let ts_r: &payload::Ts = request
             .get(PayloadType::TSr)
-            .ok_or_else(|| anyhow::anyhow!("no TSr payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
 
         let authenticated = if let Some(psk) = config.psk() {
             let prf = data.chosen_proposal()?.prf();
             let signed_data = data.auth_data_for_verification(id_i)?;
             Ok(auth.verify_with_psk(prf, psk, &signed_data)?)
         } else {
-            Err(anyhow::anyhow!("PSK not set"))
+            Err(ConfigError::NoPSK)
         };
 
         if authenticated? {
@@ -77,7 +76,7 @@ impl IkeSaInitResponseSent {
                 "responder authenticated initiator"
             );
         } else {
-            return Err(anyhow::anyhow!("authentication failed"));
+            return Err(ProtocolError::AuthenticationFailed.into());
         }
 
         let mut response = Message::new(
@@ -97,11 +96,10 @@ impl IkeSaInitResponseSent {
             .ipsec_proposals(larval_child_sa.spi.as_ref().unwrap())
             .collect();
         if proposals.is_empty() {
-            return Err(anyhow::anyhow!("no proposal to send"));
+            return Err(ConfigError::NoProposalsSet.into());
         }
 
-        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())
-            .ok_or_else(|| anyhow::anyhow!("no matching proposal"))?;
+        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
             &data.keys()?.deriving.d,
@@ -116,7 +114,7 @@ impl IkeSaInitResponseSent {
             let signed_data = data.auth_data_for_signing(config.id())?;
             Ok(payload::Auth::sign_with_psk(prf, psk, &signed_data)?)
         } else {
-            Err(anyhow::anyhow!("PSK not set"))
+            Err(ConfigError::NoPSK)
         };
         let auth = auth?;
 
@@ -151,7 +149,7 @@ impl State for IkeSaInitResponseSent {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         let serialized_request = message;
         let request = ProtectedMessage::deserialize(&mut message)?;
         match request.exchange().assigned() {
@@ -161,7 +159,7 @@ impl State for IkeSaInitResponseSent {
                     if data.message_verify(serialized_request)? {
                         debug!("checksum verified");
                     } else {
-                        return Err(anyhow::anyhow!("checksum mismatch"));
+                        return Err(ProtocolError::IntegrityCheckFailed.into());
                     }
                 }
 
@@ -188,8 +186,8 @@ impl State for IkeSaInitResponseSent {
                 sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
                 Ok(Box::new(state::Established {}))
             }
-            exchange => {
-                return Err(anyhow::anyhow!("unknown exchange {:?}", exchange));
+            _ => {
+                return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
             }
         }
     }
@@ -202,7 +200,7 @@ impl State for IkeSaInitResponseSent {
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
         _index: u32,
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }
 }

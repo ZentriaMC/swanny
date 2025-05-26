@@ -1,5 +1,5 @@
 use crate::{
-    config::Config,
+    config::{Config, ConfigError},
     crypto,
     message::{
         Message, ProtectedMessage, Spi,
@@ -8,10 +8,9 @@ use crate::{
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, Keys},
-    state::{self, State, StateData},
+    sa::{ChosenProposal, ControlMessage, Keys, ProtocolError},
+    state::{self, State, StateData, StateError},
 };
-use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
@@ -32,33 +31,33 @@ impl IkeSaInitRequestSent {
     fn handle_ike_sa_init_response<D>(
         data: &D,
         response: &Message,
-    ) -> Result<(ChosenProposal, Keys, Vec<u8>)>
+    ) -> Result<(ChosenProposal, Keys, Vec<u8>), StateError>
     where
         D: Deref<Target = StateData>,
     {
-        let sa_r: &payload::Sa = response
+        let sa: &payload::Sa = response
             .get(PayloadType::SA)
-            .ok_or_else(|| anyhow::anyhow!("no SA payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
-        let ke_r: &payload::Ke = response
+        let ke: &payload::Ke = response
             .get(PayloadType::KE)
-            .ok_or_else(|| anyhow::anyhow!("no KE payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
 
         let nonce_r: &payload::Nonce = response
             .get(PayloadType::NONCE)
-            .ok_or_else(|| anyhow::anyhow!("no NONCE payload"))?;
+            .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
 
-        let proposal = if let Some(proposal) = sa_r.proposals().next() {
+        let proposal = if let Some(proposal) = sa.proposals().next() {
             proposal
         } else {
-            return Err(anyhow::anyhow!("no proposals received"));
+            return Err(ProtocolError::NoProposalsReceived.into());
         };
 
         let chosen_proposal = ChosenProposal::new(proposal)?;
 
         let private_key = data.private_key.as_ref().unwrap();
-        if ke_r.dh_group().assigned() != Some(private_key.group().id()) {
-            return Err(anyhow::anyhow!("unmatched DH group"));
+        if ke.dh_group().assigned() != Some(private_key.group().id()) {
+            return Err(ProtocolError::InconsistentKeGroup(ke.dh_group()).into());
         }
 
         let nonce_i = data.nonce_i.as_ref().unwrap();
@@ -67,7 +66,7 @@ impl IkeSaInitRequestSent {
             nonce_i,
             nonce_r.nonce(),
             private_key,
-            ke_r.ke_data(),
+            ke.ke_data(),
         )?;
         debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
 
@@ -87,7 +86,7 @@ impl IkeSaInitRequestSent {
         config: &Config,
         data: &D,
         spi_r: &Spi,
-    ) -> Result<ProtectedMessage>
+    ) -> Result<ProtectedMessage, StateError>
     where
         D: Deref<Target = StateData>,
     {
@@ -102,7 +101,7 @@ impl IkeSaInitRequestSent {
         let larval_child_sa = data.larval_child_sa.as_ref().unwrap();
         let proposals = larval_child_sa.proposals.as_ref().unwrap();
         if proposals.is_empty() {
-            return Err(anyhow::anyhow!("no proposal to send"));
+            return Err(ConfigError::NoProposalsSet.into());
         }
 
         let auth = if let Some(psk) = config.psk() {
@@ -110,7 +109,7 @@ impl IkeSaInitRequestSent {
             let signed_data = data.auth_data_for_signing(config.id())?;
             Ok(payload::Auth::sign_with_psk(prf, psk, &signed_data)?)
         } else {
-            Err(anyhow::anyhow!("PSK not set"))
+            Err(ConfigError::NoPSK)
         };
         let auth = auth?;
 
@@ -158,7 +157,7 @@ impl State for IkeSaInitRequestSent {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         let serialized_response = message;
         let response = Message::deserialize(&mut message)?;
         match response.exchange().assigned() {
@@ -203,8 +202,8 @@ impl State for IkeSaInitRequestSent {
 
                 Ok(Box::new(state::IkeAuthRequestSent {}))
             }
-            exchange => {
-                return Err(anyhow::anyhow!("unknown exchange {:?}", exchange));
+            _ => {
+                return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
             }
         }
     }
@@ -217,7 +216,7 @@ impl State for IkeSaInitRequestSent {
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
         _index: u32,
-    ) -> Result<Box<dyn State>> {
+    ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }
 }

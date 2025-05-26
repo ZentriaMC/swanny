@@ -17,6 +17,18 @@ use crate::message::{
     transform::{Attribute, Transform},
 };
 
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("no proposal to send")]
+    NoProposalsSet,
+
+    #[error("insufficient proposal")]
+    InsufficientProposal,
+
+    #[error("no PSK set")]
+    NoPSK,
+}
+
 /// Builder to create a cryptographic proposal
 #[derive(Clone, Debug, Default)]
 pub struct ProposalBuilder {
