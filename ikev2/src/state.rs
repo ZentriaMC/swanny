@@ -12,7 +12,7 @@ use crate::{
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::{TrySendError, UnboundedSender};
-use std::sync::Arc;
+use std::{borrow::{Borrow, Cow}, sync::Arc};
 use tokio::sync::RwLock;
 
 mod initial;
@@ -107,6 +107,94 @@ pub(crate) struct StateData {
     ike_sa_init_request: Option<Vec<u8>>,
     ike_sa_init_response: Option<Vec<u8>>,
     larval_child_sa: Option<LarvalChildSa>,
+}
+
+#[derive(Default)]
+pub(crate) struct StateDataCache<'a> {
+    is_initiator: Cow<'a, Option<bool>>,
+    spi: Cow<'a, Spi>,
+    peer_spi: Cow<'a, Option<Spi>>,
+    message_id: Cow<'a, u32>,
+    chosen_proposal: Cow<'a, Option<ChosenProposal>>,
+    private_key: Cow<'a, Option<GroupPrivateKey>>,
+    keys: Cow<'a, Option<Keys>>,
+    nonce_i: Cow<'a, Option<Vec<u8>>>,
+    nonce_r: Cow<'a, Option<Vec<u8>>>,
+    ike_sa_init_request: Cow<'a, Option<Vec<u8>>>,
+    ike_sa_init_response: Cow<'a, Option<Vec<u8>>>,
+    larval_child_sa: Cow<'a, Option<LarvalChildSa>>,
+}
+
+impl<'a, 'b: 'c, 'c> StateDataCache<'a> {
+    fn new_borrowed(data: &'a StateData) -> Self {
+        Self {
+            is_initiator: Cow::Borrowed(&data.is_initiator),
+            spi: Cow::Borrowed(&data.spi),
+            peer_spi: Cow::Borrowed(&data.peer_spi),
+            message_id: Cow::Borrowed(&data.message_id),
+            chosen_proposal: Cow::Borrowed(&data.chosen_proposal),
+            private_key: Cow::Borrowed(&data.private_key),
+            keys: Cow::Borrowed(&data.keys),
+            nonce_i: Cow::Borrowed(&data.nonce_i),
+            nonce_r: Cow::Borrowed(&data.nonce_r),
+            ike_sa_init_request: Cow::Borrowed(&data.ike_sa_init_request),
+            ike_sa_init_response: Cow::Borrowed(&data.ike_sa_init_response),
+            larval_child_sa: Cow::Borrowed(&data.larval_child_sa),
+        }
+    }
+
+    fn merge(&self, other: &'b StateDataCache<'b>) -> StateDataCache<'c> {
+        StateDataCache {
+            is_initiator: match &self.is_initiator {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.is_initiator.borrow()),
+            },
+            spi: match &self.spi {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.spi.borrow()),
+            },
+            peer_spi: match &self.peer_spi {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.peer_spi.borrow()),
+            },
+            message_id: match &self.message_id {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.message_id.borrow()),
+            },
+            chosen_proposal: match &self.chosen_proposal {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.chosen_proposal.borrow()),
+            },
+            private_key: match &self.private_key {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.private_key.borrow()),
+            },
+            keys: match &self.keys {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.keys.borrow()),
+            },
+            nonce_i: match &self.nonce_i {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.nonce_i.borrow()),
+            },
+            nonce_r: match &self.nonce_r {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.nonce_r.borrow()),
+            },
+            ike_sa_init_request: match &self.ike_sa_init_request {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.ike_sa_init_request.borrow()),
+            },
+            ike_sa_init_response: match &self.ike_sa_init_response {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.ike_sa_init_response.borrow()),
+            },
+            larval_child_sa: match &self.larval_child_sa {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.larval_child_sa.borrow()),
+            },
+        }
+    }
 }
 
 impl StateData {

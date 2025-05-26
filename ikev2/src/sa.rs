@@ -440,6 +440,7 @@ pub struct ProtectingKeys {
     pub ar: Option<Key>,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct LarvalChildSa {
     pub ts_i: Option<TrafficSelector>,
     pub ts_r: Option<TrafficSelector>,
