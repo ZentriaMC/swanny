@@ -16,6 +16,7 @@ openssl.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 tracing.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

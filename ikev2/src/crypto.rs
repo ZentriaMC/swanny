@@ -19,6 +19,8 @@ use openssl::{
 
 use std::sync::Arc;
 
+use zeroize::Zeroizing;
+
 #[derive(Debug, thiserror::Error)]
 pub enum CryptoError {
     #[error("OpenSSL error")]
@@ -50,6 +52,21 @@ pub enum CryptoError {
 
     #[error("integer conversion error")]
     TryFromInt(#[from] std::num::TryFromIntError),
+}
+
+#[derive(Clone, Debug)]
+pub struct Key(Zeroizing<Vec<u8>>);
+
+impl Key {
+    pub fn new(blob: Vec<u8>) -> Self {
+        Self(Zeroizing::new(blob))
+    }
+}
+
+impl AsRef<[u8]> for Key {
+    fn as_ref(&self) -> &[u8] {
+        &self.0.as_ref()
+    }
 }
 
 pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<(), CryptoError> {
@@ -93,18 +110,14 @@ impl Prf {
 
     pub fn verify(
         &self,
-        key: impl AsRef<[u8]>,
+        key: &Key,
         data: impl AsRef<[u8]>,
         mac: impl AsRef<[u8]>,
     ) -> Result<bool, CryptoError> {
         Ok(memcmp::eq(&self.prf(key, data)?, mac.as_ref()))
     }
 
-    pub fn prf(
-        &self,
-        key: impl AsRef<[u8]>,
-        data: impl AsRef<[u8]>,
-    ) -> Result<Vec<u8>, CryptoError> {
+    pub fn prf(&self, key: &Key, data: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
         let pkey = PKey::hmac(key.as_ref())?;
         let mut signer = Signer::new(self.md, &pkey)?;
         signer.update(data.as_ref())?;
@@ -113,7 +126,7 @@ impl Prf {
 
     pub fn prfplus(
         &self,
-        key: impl AsRef<[u8]>,
+        key: &Key,
         seed: impl AsRef<[u8]>,
         size: usize,
     ) -> Result<Vec<u8>, CryptoError> {
@@ -183,11 +196,7 @@ impl Integ {
         self.id
     }
 
-    pub fn sign(
-        &self,
-        key: impl AsRef<[u8]>,
-        data: impl AsRef<[u8]>,
-    ) -> Result<Vec<u8>, CryptoError> {
+    pub fn sign(&self, key: &Key, data: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
         let pkey = PKey::hmac(key.as_ref())?;
         let mut signer = Signer::new(self.md, &pkey)?;
         signer.update(data.as_ref())?;
@@ -198,7 +207,7 @@ impl Integ {
 
     pub fn verify(
         &self,
-        key: impl AsRef<[u8]>,
+        key: &Key,
         data: impl AsRef<[u8]>,
         signature: impl AsRef<[u8]>,
     ) -> Result<bool, CryptoError> {
@@ -497,11 +506,7 @@ impl Cipher {
         self.id
     }
 
-    pub fn encrypt(
-        &self,
-        key: impl AsRef<[u8]>,
-        plaintext: impl AsRef<[u8]>,
-    ) -> Result<Vec<u8>, CryptoError> {
+    pub fn encrypt(&self, key: &Key, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
         let mut iv = vec![0; self.cipher.iv_len().unwrap()];
         rand::rand_bytes(&mut iv)?;
         let mut encrypter =
@@ -525,11 +530,7 @@ impl Cipher {
         Ok(iv)
     }
 
-    pub fn decrypt(
-        &self,
-        key: impl AsRef<[u8]>,
-        ciphertext: impl AsRef<[u8]>,
-    ) -> Result<Vec<u8>, CryptoError> {
+    pub fn decrypt(&self, key: &Key, ciphertext: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
         let (iv, ciphertext) = ciphertext.as_ref().split_at(self.cipher.iv_len().unwrap());
         let mut decrypter =
             symm::Crypter::new(self.cipher, symm::Mode::Decrypt, key.as_ref(), Some(iv))?;
@@ -571,11 +572,11 @@ pub(crate) fn generate_skeyseed(
     n_r: impl AsRef<[u8]>,
     private_key: &GroupPrivateKey,
     peer_public_key: impl AsRef<[u8]>,
-) -> Result<Vec<u8>, CryptoError> {
+) -> Result<Key, CryptoError> {
     let g_ir = private_key.compute_key(peer_public_key)?;
     let mut buf = n_i.as_ref().to_vec();
     buf.extend_from_slice(n_r.as_ref());
-    prf.prf(buf, g_ir)
+    Ok(Key::new(prf.prf(&Key::new(buf), g_ir)?))
 }
 
 #[cfg(test)]

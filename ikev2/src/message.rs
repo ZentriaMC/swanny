@@ -17,7 +17,7 @@ use num::{ExchangeType, MessageFlags, Num, PayloadType, TrafficSelectorType};
 pub mod payload;
 use payload::Payload;
 
-use crate::crypto::Cipher;
+use crate::crypto::{Cipher, Key};
 
 pub mod proposal;
 pub mod serialize;
@@ -184,7 +184,7 @@ impl Message {
     pub fn protect(
         &self,
         cipher: &Cipher,
-        key: impl AsRef<[u8]>,
+        key: &Key,
     ) -> Result<ProtectedMessage, serialize::SerializeError> {
         Ok(ProtectedMessage {
             header: self.header.clone(),
@@ -262,7 +262,7 @@ impl ProtectedMessage {
     pub fn unprotect(
         &self,
         cipher: &Cipher,
-        key: impl AsRef<[u8]>,
+        key: &Key,
     ) -> Result<Message, serialize::DeserializeError> {
         let last = self
             .payloads

@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{self, Cipher, Prf},
+    crypto::{self, Cipher, Prf, Key},
     message::{
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
         proposal::{self, Proposal},
@@ -402,22 +402,22 @@ impl Auth {
     /// Creates an `Auth` content by signing data with PSK
     pub fn sign_with_psk(
         prf: &Prf,
-        psk: impl AsRef<[u8]>,
+        psk: &Key,
         data: impl AsRef<[u8]>,
     ) -> Result<Self, crypto::CryptoError> {
         Ok(Self::new(
             AuthType::PSK.into(),
-            prf.prf(prf.prf(psk, Self::KEY_PAD)?, data)?,
+            prf.prf(&Key::new(prf.prf(psk, Self::KEY_PAD)?), data)?,
         ))
     }
 
     pub fn verify_with_psk(
         &self,
         prf: &Prf,
-        psk: impl AsRef<[u8]>,
+        psk: &Key,
         data: impl AsRef<[u8]>,
     ) -> Result<bool, crypto::CryptoError> {
-        prf.verify(prf.prf(psk, Self::KEY_PAD)?, data, &self.auth_data)
+        prf.verify(&Key::new(prf.prf(psk, Self::KEY_PAD)?), data, &self.auth_data)
     }
 }
 
@@ -673,14 +673,14 @@ impl Sk {
     /// Encrypts payloads with given cipher and key, creates a new `Sk` content
     pub fn encrypt<'a>(
         cipher: &Cipher,
-        key: impl AsRef<[u8]>,
+        key: &Key,
         payloads: impl IntoIterator<Item = &'a Payload>,
     ) -> Result<Self, serialize::SerializeError> {
         let payloads: Vec<_> = payloads.into_iter().collect();
         let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         serialize_payloads(payloads, &mut plaintext)?;
-        let ciphertext = cipher.encrypt(&key, &plaintext)?;
+        let ciphertext = cipher.encrypt(key, &plaintext)?;
         Ok(Self { ciphertext, inner })
     }
 
@@ -688,7 +688,7 @@ impl Sk {
     pub fn decrypt(
         &self,
         cipher: &Cipher,
-        key: impl AsRef<[u8]>,
+        key: &Key,
     ) -> Result<Vec<Payload>, serialize::DeserializeError> {
         let plaintext = cipher.decrypt(key, &self.ciphertext)?;
         let mut payload_type: Num<u8, PayloadType> = self.inner;

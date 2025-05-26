@@ -41,7 +41,7 @@
 //!
 use crate::{
     config::Config,
-    crypto::{self, Cipher, CryptoError, Group, Integ, Prf},
+    crypto::{self, Cipher, CryptoError, Group, Integ, Key, Prf},
     message::{
         EspSpi, Spi,
         num::{
@@ -335,7 +335,7 @@ impl ChosenProposal {
 
     pub(crate) fn generate_keys(
         &self,
-        skeyseed: impl AsRef<[u8]>,
+        skeyseed: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
         spi_i: &Spi,
@@ -359,12 +359,15 @@ impl ChosenProposal {
 
         let mut d = vec![0; self.prf.size()];
         buf.try_copy_to_slice(&mut d).expect("buffer too short");
+        let d = Key::new(d);
 
         let mut ei = vec![0; self.cipher.key_size()];
         buf.try_copy_to_slice(&mut ei).expect("buffer too short");
+        let ei = Key::new(ei);
 
         let mut er = vec![0; self.cipher.key_size()];
         buf.try_copy_to_slice(&mut er).expect("buffer too short");
+        let er = Key::new(er);
 
         let (ai, ar) = if self.integ.is_some() {
             let mut ai = vec![0; integ_key_size];
@@ -372,16 +375,18 @@ impl ChosenProposal {
 
             let mut ar = vec![0; integ_key_size];
             buf.try_copy_to_slice(&mut ar).expect("buffer too short");
-            (Some(ai), Some(ar))
+            (Some(Key::new(ai)), Some(Key::new(ar)))
         } else {
             (None, None)
         };
 
         let mut pi = vec![0; self.prf.size()];
         buf.try_copy_to_slice(&mut pi).expect("buffer too short");
+        let pi = Key::new(pi);
 
         let mut pr = vec![0; self.prf.size()];
         buf.try_copy_to_slice(&mut pr).expect("buffer too short");
+        let pr = Key::new(pr);
 
         Ok(Keys {
             deriving: DerivingKeys { d, pi, pr },
@@ -421,18 +426,18 @@ pub struct Keys {
 /// Key materials used for key derivation
 #[derive(Clone, Debug)]
 pub struct DerivingKeys {
-    pub d: Vec<u8>,
-    pub pi: Vec<u8>,
-    pub pr: Vec<u8>,
+    pub d: Key,
+    pub pi: Key,
+    pub pr: Key,
 }
 
 /// Key materials used for encryption and authentication
 #[derive(Clone, Debug)]
 pub struct ProtectingKeys {
-    pub ei: Vec<u8>,
-    pub er: Vec<u8>,
-    pub ai: Option<Vec<u8>>,
-    pub ar: Option<Vec<u8>>,
+    pub ei: Key,
+    pub er: Key,
+    pub ai: Option<Key>,
+    pub ar: Option<Key>,
 }
 
 pub(crate) struct LarvalChildSa {
@@ -464,7 +469,7 @@ impl LarvalChildSa {
     pub fn build(
         mut self,
         chosen_proposal: &ChosenProposal,
-        d: impl AsRef<[u8]>,
+        d: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<ChildSa, CryptoError> {
@@ -475,7 +480,7 @@ impl LarvalChildSa {
             chosen_proposal: chosen_proposal.to_owned(),
             keys: None,
         };
-        child_sa.generate_keys(d.as_ref(), nonce_i.as_ref(), nonce_r.as_ref())?;
+        child_sa.generate_keys(d, nonce_i.as_ref(), nonce_r.as_ref())?;
         Ok(child_sa)
     }
 }
@@ -497,7 +502,7 @@ impl ChildSa {
     /// Generates key materials used by this Child SA
     pub(crate) fn generate_keys(
         &mut self,
-        d: impl AsRef<[u8]>,
+        d: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<(), CryptoError> {
@@ -512,7 +517,7 @@ impl ChildSa {
         let encryption_key_size = self.chosen_proposal.cipher().key_size()
             + self.chosen_proposal.cipher().salt_size().unwrap_or(0);
         let buf = self.chosen_proposal.prf().prfplus(
-            d.as_ref(),
+            d,
             &buf,
             encryption_key_size * 2 + integ_key_size * 2,
         )?;
@@ -520,9 +525,11 @@ impl ChildSa {
 
         let mut ei = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut ei).expect("buffer too short");
+        let ei = Key::new(ei);
 
         let mut er = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut er).expect("buffer too short");
+        let er = Key::new(er);
 
         let (ai, ar) = if self.chosen_proposal.integ().is_some() {
             let mut ai = vec![0; integ_key_size];
@@ -530,7 +537,7 @@ impl ChildSa {
 
             let mut ar = vec![0; integ_key_size];
             buf.try_copy_to_slice(&mut ar).expect("buffer too short");
-            (Some(ai), Some(ar))
+            (Some(Key::new(ai)), Some(Key::new(ar)))
         } else {
             (None, None)
         };

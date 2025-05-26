@@ -6,15 +6,18 @@
 //!
 //! [`ConfigBuilder`]: crate::config::ConfigBuilder
 //!
-use crate::message::{
-    EspSpi, Spi,
-    num::{
-        AttributeFormat, AttributeType, DhId, EncrId, EsnId, IntegId, PrfId, Protocol,
-        TransformType,
-    },
-    payload::Id,
-    proposal::Proposal,
-    transform::{Attribute, Transform},
+use crate::{
+    crypto::Key,
+    message::{
+        EspSpi, Spi,
+        num::{
+            AttributeFormat, AttributeType, DhId, EncrId, EsnId, IntegId, PrfId, Protocol,
+            TransformType,
+        },
+        payload::Id,
+        proposal::Proposal,
+        transform::{Attribute, Transform},
+    }
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -134,7 +137,7 @@ pub struct ConfigBuilder {
     ike_proposals: Vec<ProposalBuilder>,
     ipsec_proposals: Vec<ProposalBuilder>,
     ipsec_protocol: Option<Protocol>,
-    psk: Option<Vec<u8>>,
+    psk: Option<Key>,
 }
 
 impl ConfigBuilder {
@@ -164,7 +167,7 @@ impl ConfigBuilder {
 
     /// Sets the PSK for authentication
     pub fn psk(mut self, psk: impl AsRef<[u8]>) -> Self {
-        self.psk = Some(psk.as_ref().to_vec());
+        self.psk = Some(Key::new(psk.as_ref().to_vec()));
         self
     }
 
@@ -187,7 +190,7 @@ pub struct Config {
     ipsec_protocol: Protocol,
     ipsec_proposals: Vec<ProposalBuilder>,
     id: Id,
-    psk: Option<Vec<u8>>,
+    psk: Option<Key>,
 }
 
 impl Config {
@@ -225,8 +228,8 @@ impl Config {
     }
 
     /// Returns the PSK for authentication if set
-    pub fn psk(&self) -> Option<&[u8]> {
-        self.psk.as_deref()
+    pub fn psk(&self) -> Option<&Key> {
+        self.psk.as_ref()
     }
 }
 
