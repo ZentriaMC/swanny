@@ -219,10 +219,6 @@ impl State for Initial {
                     data.swap(&default)
                 };
 
-                sender.unbounded_send(ControlMessage::IkeMessage(
-                    (*cache.ike_sa_init_response).to_owned().unwrap(),
-                ))?;
-
                 {
                     let mut data = data.write().await;
                     cache.write_into(&mut data);
@@ -258,10 +254,6 @@ impl State for Initial {
             *data.larval_child_sa.to_mut() = Some(LarvalChildSa::new(config, ts_i, ts_r)?);
             data.swap(&default)
         };
-
-        sender.unbounded_send(ControlMessage::IkeMessage(
-            (*cache.ike_sa_init_request).to_owned().unwrap(),
-        ))?;
 
         {
             let mut data = data.write().await;
