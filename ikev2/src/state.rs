@@ -98,179 +98,90 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
     ) -> Result<Box<dyn State>, StateError>;
 }
 
-#[derive(Default)]
-pub(crate) struct StateData {
-    is_initiator: Option<bool>,
-    spi: Spi,
-    peer_spi: Option<Spi>,
-    message_id: u32,
-    chosen_proposal: Option<ChosenProposal>,
-    public_key: Option<Vec<u8>>,
-    private_key: Option<GroupPrivateKey>,
-    keys: Option<Keys>,
-    nonce_i: Option<Vec<u8>>,
-    nonce_r: Option<Vec<u8>>,
-    ike_sa_init_request: Option<Vec<u8>>,
-    ike_sa_init_response: Option<Vec<u8>>,
-    larval_child_sa: Option<LarvalChildSa>,
+macro_rules! cache_cow {
+    (
+        $(#[$outer:meta])*
+            $vis:vis struct $Struct:ident: $StructCache:ident {
+                $(
+                    $field:ident: $ty:ty,
+                )*
+            }
+    ) => {
+        $(#[$outer])*
+            $vis struct $Struct {
+                $(
+                    $field: $ty,
+                )*
+            }
+
+        // A data structure to cache $Struct allowing temporary writes
+        // while it is borrowed as an immutable reference.
+        $(#[$outer])*
+            $vis struct $StructCache<'a> {
+                $(
+                    $field: Cow<'a, $ty>,
+                )*
+            }
+
+        impl<'a, 'b: 'c, 'c> $StructCache<'a> {
+            // Creates a new $StructCache borrowing from a given
+            // $Struct reference
+            fn new_borrowed(data: &'a $Struct) -> Self {
+                Self {
+                    $(
+                        $field: Cow::Borrowed(&data.$field),
+                    )*
+                }
+            }
+
+            // Swaps the currently borrowed reference and another
+            fn swap(&self, other: &'b $StructCache<'b>) -> $StructCache<'c> {
+                $StructCache {
+                    $(
+                        $field: match &self.$field {
+                            Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                            _ => Cow::Borrowed(other.$field.borrow()),
+                        },
+                    )*
+                }
+            }
+
+            // Writes changed values in this $StructCache into $Struct
+            fn write_into<D>(self, dest: &mut D)
+            where
+                D: DerefMut<Target = $Struct>,
+            {
+                $(
+                    if let Cow::Owned(owned) = self.$field {
+                        debug!("updating {}", stringify!($field));
+                        dest.$field = owned;
+                    }
+                )*
+            }
+        }
+    }
 }
 
-/// A data structure to cache `StateData` allowing temporary writes
-/// while it is borrowed as an immutable reference from `RwLock`.
-#[derive(Default)]
-pub(crate) struct StateDataCache<'a> {
-    is_initiator: Cow<'a, Option<bool>>,
-    spi: Cow<'a, Spi>,
-    peer_spi: Cow<'a, Option<Spi>>,
-    message_id: Cow<'a, u32>,
-    chosen_proposal: Cow<'a, Option<ChosenProposal>>,
-    public_key: Cow<'a, Option<Vec<u8>>>,
-    private_key: Cow<'a, Option<GroupPrivateKey>>,
-    keys: Cow<'a, Option<Keys>>,
-    nonce_i: Cow<'a, Option<Vec<u8>>>,
-    nonce_r: Cow<'a, Option<Vec<u8>>>,
-    ike_sa_init_request: Cow<'a, Option<Vec<u8>>>,
-    ike_sa_init_response: Cow<'a, Option<Vec<u8>>>,
-    larval_child_sa: Cow<'a, Option<LarvalChildSa>>,
+cache_cow! {
+    #[derive(Default)]
+    pub(crate) struct StateData: StateDataCache {
+        is_initiator: Option<bool>,
+        spi: Spi,
+        peer_spi: Option<Spi>,
+        message_id: u32,
+        chosen_proposal: Option<ChosenProposal>,
+        public_key: Option<Vec<u8>>,
+        private_key: Option<GroupPrivateKey>,
+        keys: Option<Keys>,
+        nonce_i: Option<Vec<u8>>,
+        nonce_r: Option<Vec<u8>>,
+        ike_sa_init_request: Option<Vec<u8>>,
+        ike_sa_init_response: Option<Vec<u8>>,
+        larval_child_sa: Option<LarvalChildSa>,
+    }
 }
 
-impl<'a, 'b: 'c, 'c> StateDataCache<'a> {
-    /// Creates a new `StateDataCache` borrowing from a given data
-    fn new_borrowed(data: &'a StateData) -> Self {
-        Self {
-            is_initiator: Cow::Borrowed(&data.is_initiator),
-            spi: Cow::Borrowed(&data.spi),
-            peer_spi: Cow::Borrowed(&data.peer_spi),
-            message_id: Cow::Borrowed(&data.message_id),
-            chosen_proposal: Cow::Borrowed(&data.chosen_proposal),
-            public_key: Cow::Borrowed(&data.public_key),
-            private_key: Cow::Borrowed(&data.private_key),
-            keys: Cow::Borrowed(&data.keys),
-            nonce_i: Cow::Borrowed(&data.nonce_i),
-            nonce_r: Cow::Borrowed(&data.nonce_r),
-            ike_sa_init_request: Cow::Borrowed(&data.ike_sa_init_request),
-            ike_sa_init_response: Cow::Borrowed(&data.ike_sa_init_response),
-            larval_child_sa: Cow::Borrowed(&data.larval_child_sa),
-        }
-    }
-
-    /// Swaps borrowed references to the ones from another
-    fn swap(&self, other: &'b StateDataCache<'b>) -> StateDataCache<'c> {
-        StateDataCache {
-            is_initiator: match &self.is_initiator {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.is_initiator.borrow()),
-            },
-            spi: match &self.spi {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.spi.borrow()),
-            },
-            peer_spi: match &self.peer_spi {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.peer_spi.borrow()),
-            },
-            message_id: match &self.message_id {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.message_id.borrow()),
-            },
-            chosen_proposal: match &self.chosen_proposal {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.chosen_proposal.borrow()),
-            },
-            public_key: match &self.public_key {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.public_key.borrow()),
-            },
-            private_key: match &self.private_key {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.private_key.borrow()),
-            },
-            keys: match &self.keys {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.keys.borrow()),
-            },
-            nonce_i: match &self.nonce_i {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.nonce_i.borrow()),
-            },
-            nonce_r: match &self.nonce_r {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.nonce_r.borrow()),
-            },
-            ike_sa_init_request: match &self.ike_sa_init_request {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.ike_sa_init_request.borrow()),
-            },
-            ike_sa_init_response: match &self.ike_sa_init_response {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.ike_sa_init_response.borrow()),
-            },
-            larval_child_sa: match &self.larval_child_sa {
-                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
-                _ => Cow::Borrowed(other.larval_child_sa.borrow()),
-            },
-        }
-    }
-
-    /// Writes changed values in this `StateDataCache` into `StateData`
-    fn write_into<D>(self, dest: &mut D)
-    where
-        D: DerefMut<Target = StateData>,
-    {
-        if let Cow::Owned(owned) = self.is_initiator {
-            debug!("updating is_initiator");
-            dest.is_initiator = owned;
-        }
-        if let Cow::Owned(owned) = self.spi {
-            debug!("updating spi");
-            dest.spi = owned;
-        }
-        if let Cow::Owned(owned) = self.peer_spi {
-            debug!("updating peer_spi");
-            dest.peer_spi = owned;
-        }
-        if let Cow::Owned(owned) = self.message_id {
-            debug!("updating message_id");
-            dest.message_id = owned;
-        }
-        if let Cow::Owned(owned) = self.chosen_proposal {
-            debug!("updating chosen_proposal");
-            dest.chosen_proposal = owned;
-        }
-        if let Cow::Owned(owned) = self.public_key {
-            debug!("updating public_key");
-            dest.public_key = owned;
-        }
-        if let Cow::Owned(owned) = self.private_key {
-            debug!("updating private_key");
-            dest.private_key = owned;
-        }
-        if let Cow::Owned(owned) = self.keys {
-            debug!("updating keys");
-            dest.keys = owned;
-        }
-        if let Cow::Owned(owned) = self.nonce_i {
-            debug!("updating nonce_i");
-            dest.nonce_i = owned;
-        }
-        if let Cow::Owned(owned) = self.nonce_r {
-            debug!("updating nonce_r");
-            dest.nonce_r = owned;
-        }
-        if let Cow::Owned(owned) = self.ike_sa_init_request {
-            debug!("updating ike_sa_init_request");
-            dest.ike_sa_init_request = owned;
-        }
-        if let Cow::Owned(owned) = self.ike_sa_init_response {
-            debug!("updating ike_sa_init_response");
-            dest.ike_sa_init_response = owned;
-        }
-        if let Cow::Owned(owned) = self.larval_child_sa {
-            debug!("updating larval_child_sa");
-            dest.larval_child_sa = owned;
-        }
-    }
-
+impl StateDataCache<'_> {
     fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {
         (*self.chosen_proposal)
             .as_ref()
