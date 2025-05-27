@@ -2,7 +2,8 @@ use crate::{
     config::{Config, ConfigError},
     crypto::{CryptoError, GroupPrivateKey},
     message::{
-        Spi,
+        Message, ProtectedMessage, Spi,
+        num::{ExchangeType, MessageFlags},
         payload::{self, Id},
         serialize::{DeserializeError, Serialize, SerializeError},
         traffic_selector::TrafficSelector,
@@ -177,6 +178,7 @@ cache_cow! {
         nonce_r: Option<Vec<u8>>,
         ike_sa_init_request: Option<Vec<u8>>,
         ike_sa_init_response: Option<Vec<u8>>,
+        last_message: Option<Vec<u8>>,
         larval_child_sa: Option<LarvalChildSa>,
     }
 }
@@ -322,5 +324,51 @@ impl StateData {
 
     pub fn is_initiator(&self) -> Option<bool> {
         self.is_initiator
+    }
+}
+
+trait SendMessage {
+    fn send_message(
+        sender: UnboundedSender<ControlMessage>,
+        data: &mut StateDataCache<'_>,
+        message: Message,
+    ) -> Result<(), StateError> {
+        let len = message.size()?;
+        let mut buf = BytesMut::with_capacity(len);
+        message.serialize(&mut buf)?;
+
+        if let Some(ExchangeType::IKE_SA_INIT) = message.exchange().assigned() {
+            if message.flags().contains(MessageFlags::I) {
+                *data.ike_sa_init_request.to_mut() = Some(buf.to_vec());
+            } else if message.flags().contains(MessageFlags::R) {
+                *data.ike_sa_init_response.to_mut() = Some(buf.to_vec());
+            } else {
+                debug!("message flags are not set");
+            }
+        } else {
+            *data.last_message.to_mut() = Some(buf.to_vec());
+        }
+
+        Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)
+    }
+}
+
+trait SendProtectedMessage {
+    fn send_message(
+        sender: UnboundedSender<ControlMessage>,
+        data: &mut StateDataCache<'_>,
+        message: ProtectedMessage,
+    ) -> Result<(), StateError> {
+        let len = message.size()?;
+        let mut buf = BytesMut::with_capacity(len);
+        message.serialize(&mut buf)?;
+
+        if let Some(checksum) = data.message_sign(&buf)? {
+            buf.extend_from_slice(&checksum);
+        }
+
+        *data.last_message.to_mut() = Some(buf.to_vec());
+
+        Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)
     }
 }

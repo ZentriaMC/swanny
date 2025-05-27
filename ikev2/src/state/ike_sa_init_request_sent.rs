@@ -5,20 +5,21 @@ use crate::{
         Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
-        serialize::{Deserialize, Serialize},
+        serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ChosenProposal, ControlMessage, ProtocolError},
-    state::{self, State, StateData, StateDataCache, StateError},
+    state::{self, SendProtectedMessage, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
-use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
 pub struct IkeSaInitRequestSent;
+
+impl SendProtectedMessage for IkeSaInitRequestSent {}
 
 impl std::fmt::Display for IkeSaInitRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -172,16 +173,7 @@ impl State for IkeSaInitRequestSent {
                     *data.ike_sa_init_response.to_mut() = Some(serialized_response.to_vec());
 
                     let request = generate_ike_auth_request(config, &mut data, response.spi_r())?;
-
-                    let len = request.size()?;
-                    let mut buf = BytesMut::with_capacity(len);
-                    request.serialize(&mut buf)?;
-
-                    if let Some(checksum) = data.message_sign(&buf)? {
-                        buf.extend_from_slice(&checksum);
-                    }
-
-                    sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                    Self::send_message(sender.clone(), &mut data, request)?;
                     data.swap(&default)
                 };
 

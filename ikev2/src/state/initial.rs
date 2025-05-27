@@ -5,20 +5,21 @@ use crate::{
         Message, Spi,
         num::{ExchangeType, MessageFlags, PayloadType, Protocol},
         payload::{self, Payload},
-        serialize::{Deserialize, Serialize},
+        serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
-    state::{self, State, StateData, StateDataCache, StateError},
+    state::{self, SendMessage, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
-use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
 pub struct Initial;
+
+impl SendMessage for Initial {}
 
 impl std::fmt::Display for Initial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -212,13 +213,9 @@ impl State for Initial {
                     handle_ike_sa_init_request(config, &mut data, &request)?;
 
                     let response = generate_ike_sa_init_response(&data, request.id())?;
-
-                    let len = response.size()?;
-                    let mut buf = BytesMut::with_capacity(len);
-                    response.serialize(&mut buf)?;
+                    Self::send_message(sender.clone(), &mut data, response)?;
 
                     *data.ike_sa_init_request.to_mut() = Some(serialized_request.to_vec());
-                    *data.ike_sa_init_response.to_mut() = Some(buf.to_vec());
                     data.swap(&default)
                 };
 
@@ -257,11 +254,7 @@ impl State for Initial {
 
             let request = generate_ike_sa_init_request(config, &mut data)?;
 
-            let len = request.size()?;
-            let mut buf = BytesMut::with_capacity(len);
-            request.serialize(&mut buf)?;
-
-            *data.ike_sa_init_request.to_mut() = Some(buf.to_vec());
+            Self::send_message(sender.clone(), &mut data, request)?;
             *data.larval_child_sa.to_mut() = Some(LarvalChildSa::new(config, ts_i, ts_r)?);
             data.swap(&default)
         };

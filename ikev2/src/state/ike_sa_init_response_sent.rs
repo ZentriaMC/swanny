@@ -4,20 +4,21 @@ use crate::{
         Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
-        serialize::{Deserialize, Serialize},
+        serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
-    state::{self, State, StateData, StateDataCache, StateError},
+    state::{self, SendProtectedMessage, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
-use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 pub struct IkeSaInitResponseSent;
+
+impl SendProtectedMessage for IkeSaInitResponseSent {}
 
 impl std::fmt::Display for IkeSaInitResponseSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -181,15 +182,7 @@ impl State for IkeSaInitResponseSent {
                     let response =
                         generate_ike_auth_response(config, &mut data, &request, &child_sa)?;
 
-                    let len = response.size()?;
-                    let mut buf = BytesMut::with_capacity(len);
-                    response.serialize(&mut buf)?;
-
-                    if let Some(checksum) = data.message_sign(&buf)? {
-                        buf.extend_from_slice(&checksum);
-                    }
-
-                    sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                    Self::send_message(sender.clone(), &mut data, response)?;
                     sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
                     data.swap(&default)
                 };
