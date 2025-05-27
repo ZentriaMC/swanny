@@ -7,12 +7,11 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
-    state::{self, State, StateData, StateError},
+    sa::{ChildSa, ChosenProposal, ControlMessage, ProtocolError},
+    state::{self, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
@@ -25,79 +24,65 @@ impl std::fmt::Display for IkeAuthRequestSent {
     }
 }
 
-impl IkeAuthRequestSent {
-    fn handle_ike_auth_response<D>(
-        config: &Config,
-        data: &D,
-        response: &ProtectedMessage,
-    ) -> Result<ChosenProposal, StateError>
-    where
-        D: Deref<Target = StateData>,
-    {
-        let keys = data.keys.as_ref().unwrap();
+fn handle_ike_auth_response(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+    response: &ProtectedMessage,
+) -> Result<ChildSa, StateError> {
+    let response = response.unprotect(
+        data.chosen_proposal()?.cipher(),
+        &data.keys()?.protecting.er,
+    )?;
 
-        let response = response.unprotect(data.chosen_proposal()?.cipher(), &keys.protecting.er)?;
+    debug!(response = ?&response, "unprotected response");
 
-        debug!(response = ?&response, "unprotected response");
+    let auth: &payload::Auth = response
+        .get(PayloadType::AUTH)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::AUTH))?;
 
-        let auth: &payload::Auth = response
-            .get(PayloadType::AUTH)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::AUTH))?;
+    let id_r: &payload::Id = response
+        .get(PayloadType::IDr)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::IDr))?;
 
-        let id_r: &payload::Id = response
-            .get(PayloadType::IDr)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::IDr))?;
+    let sa: &payload::Sa = response
+        .get(PayloadType::SA)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
-        let sa: &payload::Sa = response
-            .get(PayloadType::SA)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
+    let authenticated = if let Some(psk) = config.psk() {
+        let prf = data.chosen_proposal()?.prf();
+        let signed_data = data.auth_data_for_verification(id_r)?;
+        Ok(auth.verify_with_psk(prf, psk, &signed_data)?)
+    } else {
+        Err(ConfigError::NoPSK)
+    };
 
-        let authenticated = if let Some(psk) = config.psk() {
-            let prf = data.chosen_proposal()?.prf();
-            let signed_data = data.auth_data_for_verification(id_r)?;
-            Ok(auth.verify_with_psk(prf, psk, &signed_data)?)
-        } else {
-            Err(ConfigError::NoPSK)
-        };
-
-        if authenticated? {
-            info!(
-                spi = &data.peer_spi.as_ref().unwrap()[..],
-                "initiator authenticated responder"
-            );
-        } else {
-            return Err(ProtocolError::AuthenticationFailed.into());
-        }
-
-        let proposals = data
-            .larval_child_sa
-            .as_ref()
-            .unwrap()
-            .proposals
-            .as_ref()
-            .unwrap();
-
-        ChosenProposal::negotiate(proposals, sa.proposals()).map_err(Into::into)
+    if authenticated? {
+        info!(
+            spi = &data.peer_spi.as_ref().unwrap()[..],
+            "initiator authenticated responder"
+        );
+    } else {
+        return Err(ProtocolError::AuthenticationFailed.into());
     }
 
-    fn create_child_sa<D>(
-        data: &D,
-        chosen_proposal: &ChosenProposal,
-        larval_child_sa: LarvalChildSa,
-    ) -> Result<ChildSa, StateError>
-    where
-        D: Deref<Target = StateData>,
-    {
-        let keys = data.keys.as_ref().unwrap();
-        larval_child_sa
-            .build(
-                chosen_proposal,
-                &keys.deriving.d,
-                data.nonce_i.as_ref().unwrap(),
-                data.nonce_r.as_ref().unwrap(),
-            )
-            .map_err(Into::into)
-    }
+    let proposals = (*data.larval_child_sa)
+        .as_ref()
+        .unwrap()
+        .proposals
+        .as_ref()
+        .unwrap();
+
+    let chosen_proposal = ChosenProposal::negotiate(proposals, sa.proposals())?;
+
+    let larval_child_sa = data.larval_child_sa.to_mut().take().unwrap();
+    larval_child_sa
+        .build(
+            &chosen_proposal,
+            &data.keys()?.deriving.d,
+            (*data.nonce_i).as_ref().unwrap(),
+            (*data.nonce_r).as_ref().unwrap(),
+        )
+        .map_err(Into::into)
 }
 
 #[async_trait]
@@ -113,30 +98,31 @@ impl State for IkeAuthRequestSent {
         let response = ProtectedMessage::deserialize(&mut message)?;
         match response.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
-                {
+                let default = StateData::default();
+                let default = StateDataCache::new_borrowed(&default);
+
+                let cache = {
                     let data = data.read().await;
+                    let mut data = StateDataCache::new_borrowed(&data);
+
                     if data.message_verify(serialized_response)? {
                         debug!("checksum verified");
                     } else {
                         return Err(ProtocolError::IntegrityCheckFailed.into());
                     }
-                }
-                let chosen_proposal = {
-                    let data = data.read().await;
-                    Self::handle_ike_auth_response(config, &data, &response)?
+
+                    let child_sa = handle_ike_auth_response(config, &mut data, &response)?;
+                    debug!(child_sa = ?&child_sa, "Child SA created");
+
+                    sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
+                    data.swap(&default)
                 };
-                let larval_child_sa = {
+
+                {
                     let mut data = data.write().await;
-                    data.larval_child_sa.take().unwrap()
-                };
-                let child_sa = {
-                    let data = data.read().await;
-                    Self::create_child_sa(&data, &chosen_proposal, larval_child_sa)?
-                };
+                    cache.write_into(&mut data);
+                }
 
-                debug!(child_sa = ?&child_sa, "Child SA created");
-
-                sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
                 Ok(Box::new(state::Established {}))
             }
             _ => {

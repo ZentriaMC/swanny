@@ -8,13 +8,12 @@ use crate::{
         serialize::{Deserialize, Serialize},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, Keys, ProtocolError},
-    state::{self, State, StateData, StateError},
+    sa::{ChosenProposal, ControlMessage, ProtocolError},
+    state::{self, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
@@ -27,126 +26,126 @@ impl std::fmt::Display for IkeSaInitRequestSent {
     }
 }
 
-impl IkeSaInitRequestSent {
-    fn handle_ike_sa_init_response<D>(
-        data: &D,
-        response: &Message,
-    ) -> Result<(ChosenProposal, Keys, Vec<u8>), StateError>
-    where
-        D: Deref<Target = StateData>,
-    {
-        let sa: &payload::Sa = response
-            .get(PayloadType::SA)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
+fn handle_ike_sa_init_response(
+    data: &mut StateDataCache<'_>,
+    response: &Message,
+) -> Result<(), StateError> {
+    let sa: &payload::Sa = response
+        .get(PayloadType::SA)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
-        let ke: &payload::Ke = response
-            .get(PayloadType::KE)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
+    let ke: &payload::Ke = response
+        .get(PayloadType::KE)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
 
-        let nonce_r: &payload::Nonce = response
-            .get(PayloadType::NONCE)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
+    let nonce_r: &payload::Nonce = response
+        .get(PayloadType::NONCE)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
 
-        let proposal = if let Some(proposal) = sa.proposals().next() {
-            proposal
-        } else {
-            return Err(ProtocolError::NoProposalsReceived.into());
-        };
+    let proposal = if let Some(proposal) = sa.proposals().next() {
+        proposal
+    } else {
+        return Err(ProtocolError::NoProposalsReceived.into());
+    };
 
-        let chosen_proposal = ChosenProposal::new(proposal)?;
+    let chosen_proposal = ChosenProposal::new(proposal)?;
 
-        let private_key = data.private_key.as_ref().unwrap();
-        if ke.dh_group().assigned() != Some(private_key.group().id()) {
-            return Err(ProtocolError::InconsistentKeGroup(ke.dh_group()).into());
-        }
-
-        let nonce_i = data.nonce_i.as_ref().unwrap();
-        let skeyseed = crypto::generate_skeyseed(
-            chosen_proposal.prf(),
-            nonce_i,
-            nonce_r.nonce(),
-            private_key,
-            ke.ke_data(),
-        )?;
-        debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
-
-        let keys = chosen_proposal.generate_keys(
-            &skeyseed,
-            nonce_i,
-            nonce_r.nonce(),
-            response.spi_i(),
-            response.spi_r(),
-        )?;
-        debug!(keys = ?&keys, "keys generated");
-
-        Ok((chosen_proposal, keys, nonce_r.nonce().to_vec()))
+    let private_key = data.private_key.as_ref().as_ref().unwrap();
+    if ke.dh_group().assigned() != Some(private_key.group().id()) {
+        return Err(ProtocolError::InconsistentKeGroup(ke.dh_group()).into());
     }
 
-    fn generate_ike_auth_request<D>(
-        config: &Config,
-        data: &D,
-        spi_r: &Spi,
-    ) -> Result<ProtectedMessage, StateError>
-    where
-        D: Deref<Target = StateData>,
-    {
-        let mut request = Message::new(
-            &data.spi,
-            spi_r,
-            ExchangeType::IKE_AUTH.into(),
-            MessageFlags::I,
-            data.message_id.wrapping_add(1),
-        );
+    let nonce_i = data.nonce_i.as_ref().as_ref().unwrap();
+    let skeyseed = crypto::generate_skeyseed(
+        chosen_proposal.prf(),
+        nonce_i,
+        nonce_r.nonce(),
+        private_key,
+        ke.ke_data(),
+    )?;
+    debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
 
-        let larval_child_sa = data.larval_child_sa.as_ref().unwrap();
-        let proposals = larval_child_sa.proposals.as_ref().unwrap();
-        if proposals.is_empty() {
-            return Err(ConfigError::NoProposalsSet.into());
-        }
+    let keys = chosen_proposal.generate_keys(
+        &skeyseed,
+        nonce_i,
+        nonce_r.nonce(),
+        response.spi_i(),
+        response.spi_r(),
+    )?;
+    debug!(keys = ?&keys, "keys generated");
 
-        let auth = if let Some(psk) = config.psk() {
-            let prf = data.chosen_proposal()?.prf();
-            let signed_data = data.auth_data_for_signing(config.id())?;
-            Ok(payload::Auth::sign_with_psk(prf, psk, &signed_data)?)
-        } else {
-            Err(ConfigError::NoPSK)
-        };
-        let auth = auth?;
+    *data.chosen_proposal.to_mut() = Some(chosen_proposal);
+    *data.keys.to_mut() = Some(keys);
+    *data.nonce_r.to_mut() = Some(nonce_r.nonce().to_vec());
+    *data.peer_spi.to_mut() = Some(response.spi_r().to_owned());
 
-        request.add_payloads([
-            Payload::new(
-                PayloadType::SA.into(),
-                payload::Content::Sa(payload::Sa::new(proposals.clone())),
-                true,
-            ),
-            Payload::new(
-                PayloadType::IDi.into(),
-                payload::Content::Id(config.id().clone()),
-                true,
-            ),
-            Payload::new(PayloadType::AUTH.into(), payload::Content::Auth(auth), true),
-            Payload::new(
-                PayloadType::TSi.into(),
-                payload::Content::Ts(payload::Ts::new(Some(
-                    larval_child_sa.ts_i.as_ref().unwrap().clone(),
-                ))),
-                true,
-            ),
-            Payload::new(
-                PayloadType::TSr.into(),
-                payload::Content::Ts(payload::Ts::new(Some(
-                    larval_child_sa.ts_r.as_ref().unwrap().clone(),
-                ))),
-                true,
-            ),
-        ]);
+    Ok(())
+}
 
-        let request = request.protect(
-            data.chosen_proposal()?.cipher(),
-            &data.keys()?.protecting.ei,
-        )?;
-        Ok(request)
+fn generate_ike_auth_request(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+    spi_r: &Spi,
+) -> Result<ProtectedMessage, StateError> {
+    let mut request = Message::new(
+        &data.spi,
+        spi_r,
+        ExchangeType::IKE_AUTH.into(),
+        MessageFlags::I,
+        data.message_id.wrapping_add(1),
+    );
+
+    let larval_child_sa = data.larval_child_sa.as_ref().as_ref().unwrap();
+    let proposals = larval_child_sa.proposals.as_ref().unwrap();
+    if proposals.is_empty() {
+        return Err(ConfigError::NoProposalsSet.into());
     }
+
+    let auth = if let Some(psk) = config.psk() {
+        let prf = data.chosen_proposal()?.prf();
+        let signed_data = data.auth_data_for_signing(config.id())?;
+        Ok(payload::Auth::sign_with_psk(prf, psk, &signed_data)?)
+    } else {
+        Err(ConfigError::NoPSK)
+    };
+    let auth = auth?;
+
+    request.add_payloads([
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(proposals.clone())),
+            true,
+        ),
+        Payload::new(
+            PayloadType::IDi.into(),
+            payload::Content::Id(config.id().clone()),
+            true,
+        ),
+        Payload::new(PayloadType::AUTH.into(), payload::Content::Auth(auth), true),
+        Payload::new(
+            PayloadType::TSi.into(),
+            payload::Content::Ts(payload::Ts::new(Some(
+                larval_child_sa.ts_i.as_ref().unwrap().clone(),
+            ))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSr.into(),
+            payload::Content::Ts(payload::Ts::new(Some(
+                larval_child_sa.ts_r.as_ref().unwrap().clone(),
+            ))),
+            true,
+        ),
+    ]);
+
+    let request = request.protect(
+        data.chosen_proposal()?.cipher(),
+        &data.keys()?.protecting.ei,
+    )?;
+
+    *data.message_id.to_mut() = request.id();
+
+    Ok(request)
 }
 
 #[async_trait]
@@ -162,43 +161,34 @@ impl State for IkeSaInitRequestSent {
         let response = Message::deserialize(&mut message)?;
         match response.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
-                let (chosen_proposal, keys, nonce_r) = {
+                let default = StateData::default();
+                let default = StateDataCache::new_borrowed(&default);
+
+                let cache = {
                     let data = data.read().await;
-                    Self::handle_ike_sa_init_response(&data, &response)?
-                };
+                    let mut data = StateDataCache::new_borrowed(&data);
 
-                {
-                    let mut data = data.write().await;
-                    data.chosen_proposal = Some(chosen_proposal);
-                    data.keys = Some(keys);
-                    data.nonce_r = Some(nonce_r);
-                }
+                    handle_ike_sa_init_response(&mut data, &response)?;
+                    *data.ike_sa_init_response.to_mut() = Some(serialized_response.to_vec());
 
-                let request = {
-                    let data = data.read().await;
+                    let request = generate_ike_auth_request(config, &mut data, response.spi_r())?;
 
-                    Self::generate_ike_auth_request(config, &data, response.spi_r())?
-                };
+                    let len = request.size()?;
+                    let mut buf = BytesMut::with_capacity(len);
+                    request.serialize(&mut buf)?;
 
-                {
-                    let mut data = data.write().await;
-                    data.peer_spi = Some(request.spi_r().to_owned());
-                    data.message_id = request.id();
-                    data.ike_sa_init_response = Some(serialized_response.to_vec());
-                }
-
-                let len = request.size()?;
-                let mut buf = BytesMut::with_capacity(len);
-                request.serialize(&mut buf)?;
-
-                {
-                    let data = data.read().await;
                     if let Some(checksum) = data.message_sign(&buf)? {
                         buf.extend_from_slice(&checksum);
                     }
-                }
 
-                sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                    sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+                    data.swap(&default)
+                };
+
+                {
+                    let mut data = data.write().await;
+                    cache.write_into(&mut data);
+                }
 
                 Ok(Box::new(state::IkeAuthRequestSent {}))
             }

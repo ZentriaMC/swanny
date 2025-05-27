@@ -12,8 +12,13 @@ use crate::{
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::{TrySendError, UnboundedSender};
-use std::{borrow::{Borrow, Cow}, sync::Arc};
+use std::{
+    borrow::{Borrow, Cow},
+    ops::DerefMut,
+    sync::Arc,
+};
 use tokio::sync::RwLock;
+use tracing::debug;
 
 mod initial;
 pub(crate) use initial::Initial;
@@ -100,6 +105,7 @@ pub(crate) struct StateData {
     peer_spi: Option<Spi>,
     message_id: u32,
     chosen_proposal: Option<ChosenProposal>,
+    public_key: Option<Vec<u8>>,
     private_key: Option<GroupPrivateKey>,
     keys: Option<Keys>,
     nonce_i: Option<Vec<u8>>,
@@ -109,6 +115,8 @@ pub(crate) struct StateData {
     larval_child_sa: Option<LarvalChildSa>,
 }
 
+/// A data structure to cache `StateData` allowing temporary writes
+/// while it is borrowed as an immutable reference from `RwLock`.
 #[derive(Default)]
 pub(crate) struct StateDataCache<'a> {
     is_initiator: Cow<'a, Option<bool>>,
@@ -116,6 +124,7 @@ pub(crate) struct StateDataCache<'a> {
     peer_spi: Cow<'a, Option<Spi>>,
     message_id: Cow<'a, u32>,
     chosen_proposal: Cow<'a, Option<ChosenProposal>>,
+    public_key: Cow<'a, Option<Vec<u8>>>,
     private_key: Cow<'a, Option<GroupPrivateKey>>,
     keys: Cow<'a, Option<Keys>>,
     nonce_i: Cow<'a, Option<Vec<u8>>>,
@@ -126,6 +135,7 @@ pub(crate) struct StateDataCache<'a> {
 }
 
 impl<'a, 'b: 'c, 'c> StateDataCache<'a> {
+    /// Creates a new `StateDataCache` borrowing from a given data
     fn new_borrowed(data: &'a StateData) -> Self {
         Self {
             is_initiator: Cow::Borrowed(&data.is_initiator),
@@ -133,6 +143,7 @@ impl<'a, 'b: 'c, 'c> StateDataCache<'a> {
             peer_spi: Cow::Borrowed(&data.peer_spi),
             message_id: Cow::Borrowed(&data.message_id),
             chosen_proposal: Cow::Borrowed(&data.chosen_proposal),
+            public_key: Cow::Borrowed(&data.public_key),
             private_key: Cow::Borrowed(&data.private_key),
             keys: Cow::Borrowed(&data.keys),
             nonce_i: Cow::Borrowed(&data.nonce_i),
@@ -143,7 +154,8 @@ impl<'a, 'b: 'c, 'c> StateDataCache<'a> {
         }
     }
 
-    fn merge(&self, other: &'b StateDataCache<'b>) -> StateDataCache<'c> {
+    /// Swaps borrowed references to the ones from another
+    fn swap(&self, other: &'b StateDataCache<'b>) -> StateDataCache<'c> {
         StateDataCache {
             is_initiator: match &self.is_initiator {
                 Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
@@ -164,6 +176,10 @@ impl<'a, 'b: 'c, 'c> StateDataCache<'a> {
             chosen_proposal: match &self.chosen_proposal {
                 Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
                 _ => Cow::Borrowed(other.chosen_proposal.borrow()),
+            },
+            public_key: match &self.public_key {
+                Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
+                _ => Cow::Borrowed(other.public_key.borrow()),
             },
             private_key: match &self.private_key {
                 Cow::Owned(owned) => Cow::Owned(owned.to_owned()),
@@ -195,22 +211,68 @@ impl<'a, 'b: 'c, 'c> StateDataCache<'a> {
             },
         }
     }
-}
 
-impl StateData {
-    pub fn new(spi: &Spi) -> Self {
-        Self {
-            spi: spi.to_owned(),
-            ..Default::default()
+    /// Writes changed values in this `StateDataCache` into `StateData`
+    fn write_into<D>(self, dest: &mut D)
+    where
+        D: DerefMut<Target = StateData>,
+    {
+        if let Cow::Owned(owned) = self.is_initiator {
+            debug!("updating is_initiator");
+            dest.is_initiator = owned;
+        }
+        if let Cow::Owned(owned) = self.spi {
+            debug!("updating spi");
+            dest.spi = owned;
+        }
+        if let Cow::Owned(owned) = self.peer_spi {
+            debug!("updating peer_spi");
+            dest.peer_spi = owned;
+        }
+        if let Cow::Owned(owned) = self.message_id {
+            debug!("updating message_id");
+            dest.message_id = owned;
+        }
+        if let Cow::Owned(owned) = self.chosen_proposal {
+            debug!("updating chosen_proposal");
+            dest.chosen_proposal = owned;
+        }
+        if let Cow::Owned(owned) = self.public_key {
+            debug!("updating public_key");
+            dest.public_key = owned;
+        }
+        if let Cow::Owned(owned) = self.private_key {
+            debug!("updating private_key");
+            dest.private_key = owned;
+        }
+        if let Cow::Owned(owned) = self.keys {
+            debug!("updating keys");
+            dest.keys = owned;
+        }
+        if let Cow::Owned(owned) = self.nonce_i {
+            debug!("updating nonce_i");
+            dest.nonce_i = owned;
+        }
+        if let Cow::Owned(owned) = self.nonce_r {
+            debug!("updating nonce_r");
+            dest.nonce_r = owned;
+        }
+        if let Cow::Owned(owned) = self.ike_sa_init_request {
+            debug!("updating ike_sa_init_request");
+            dest.ike_sa_init_request = owned;
+        }
+        if let Cow::Owned(owned) = self.ike_sa_init_response {
+            debug!("updating ike_sa_init_response");
+            dest.ike_sa_init_response = owned;
+        }
+        if let Cow::Owned(owned) = self.larval_child_sa {
+            debug!("updating larval_child_sa");
+            dest.larval_child_sa = owned;
         }
     }
 
-    pub fn is_initiator(&self) -> Option<bool> {
-        self.is_initiator
-    }
-
     fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {
-        self.chosen_proposal
+        (*self.chosen_proposal)
             .as_ref()
             .ok_or(StateError::InvalidState(
                 InvalidStateError::NoProposalChosen,
@@ -218,7 +280,7 @@ impl StateData {
     }
 
     fn keys(&self) -> Result<&Keys, StateError> {
-        self.keys
+        (*self.keys)
             .as_ref()
             .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))
     }
@@ -229,12 +291,12 @@ impl StateData {
         id.serialize(&mut buf)?;
 
         let ike_sa_init_request =
-            self.ike_sa_init_request
+            (*self.ike_sa_init_request)
                 .as_ref()
                 .ok_or(StateError::InvalidState(
                     InvalidStateError::IkeSaInitNotRecorded,
                 ))?;
-        let nonce_r = self.nonce_r.as_ref().ok_or(StateError::InvalidState(
+        let nonce_r = (*self.nonce_r).as_ref().ok_or(StateError::InvalidState(
             InvalidStateError::NonceNotRecorded,
         ))?;
 
@@ -254,12 +316,12 @@ impl StateData {
         id.serialize(&mut buf)?;
 
         let ike_sa_init_response =
-            self.ike_sa_init_response
+            (*self.ike_sa_init_response)
                 .as_ref()
                 .ok_or(StateError::InvalidState(
                     InvalidStateError::IkeSaInitNotRecorded,
                 ))?;
-        let nonce_i = self.nonce_i.as_ref().ok_or(StateError::InvalidState(
+        let nonce_i = (*self.nonce_i).as_ref().ok_or(StateError::InvalidState(
             InvalidStateError::NonceNotRecorded,
         ))?;
 
@@ -274,7 +336,7 @@ impl StateData {
     }
 
     fn auth_data_for_signing(&self, id: &Id) -> Result<Vec<u8>, StateError> {
-        match self.is_initiator {
+        match *self.is_initiator {
             Some(true) => self.initiator_signed_data(id),
             Some(false) => self.responder_signed_data(id),
             None => Err(StateError::InvalidState(
@@ -284,7 +346,7 @@ impl StateData {
     }
 
     fn auth_data_for_verification(&self, id: &Id) -> Result<Vec<u8>, StateError> {
-        match self.is_initiator {
+        match *self.is_initiator {
             Some(true) => self.responder_signed_data(id),
             Some(false) => self.initiator_signed_data(id),
             None => Err(StateError::InvalidState(
@@ -298,7 +360,7 @@ impl StateData {
             return Ok(None);
         }
 
-        let key = match self.is_initiator() {
+        let key = match *self.is_initiator {
             Some(true) => &self.keys()?.protecting.ai,
             Some(false) => &self.keys()?.protecting.ar,
             None => {
@@ -317,7 +379,7 @@ impl StateData {
             return Ok(true);
         }
 
-        let key = match self.is_initiator() {
+        let key = match *self.is_initiator {
             Some(true) => &self.keys()?.protecting.ar,
             Some(false) => &self.keys()?.protecting.ai,
             None => {
@@ -336,5 +398,18 @@ impl StateData {
             .as_ref()
             .split_at(message.as_ref().len() - integ.output_size());
         Ok(integ.verify(key.as_ref().unwrap(), message, checksum)?)
+    }
+}
+
+impl StateData {
+    pub fn new(spi: &Spi) -> Self {
+        Self {
+            spi: spi.to_owned(),
+            ..Default::default()
+        }
+    }
+
+    pub fn is_initiator(&self) -> Option<bool> {
+        self.is_initiator
     }
 }

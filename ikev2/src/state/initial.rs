@@ -1,6 +1,6 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto::{self, GroupPrivateKey},
+    crypto,
     message::{
         Message, Spi,
         num::{ExchangeType, MessageFlags, PayloadType, Protocol},
@@ -9,12 +9,11 @@ use crate::{
         traffic_selector::TrafficSelector,
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
-    state::{self, Keys, State, StateData, StateError},
+    state::{self, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
 use bytes::BytesMut;
 use futures::channel::mpsc::UnboundedSender;
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
@@ -27,168 +26,167 @@ impl std::fmt::Display for Initial {
     }
 }
 
-impl Initial {
-    fn generate_ike_sa_init_request<D>(
-        config: &Config,
-        data: &D,
-    ) -> Result<(Message, ChosenProposal, GroupPrivateKey, Vec<u8>), StateError>
-    where
-        D: Deref<Target = StateData>,
-    {
-        let proposals: Vec<_> = config.ike_proposals(None).collect();
-        if proposals.is_empty() {
-            return Err(ConfigError::NoProposalsSet.into());
-        }
-
-        let chosen_proposal = ChosenProposal::new(&proposals[0])?;
-
-        let mut nonce = vec![0u8; 32];
-        crypto::rand_bytes(&mut nonce[..])?;
-
-        let group = chosen_proposal
-            .group()
-            .ok_or(ConfigError::InsufficientProposal)?;
-        let private_key = group.generate_key()?;
-        let public_key = private_key.public_key()?;
-
-        let mut message = Message::new(
-            &data.spi,
-            &Spi::default(),
-            ExchangeType::IKE_SA_INIT.into(),
-            MessageFlags::I,
-            1,
-        );
-
-        message.add_payloads([
-            Payload::new(
-                PayloadType::SA.into(),
-                payload::Content::Sa(payload::Sa::new(proposals)),
-                true,
-            ),
-            Payload::new(
-                PayloadType::NONCE.into(),
-                payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
-                true,
-            ),
-            Payload::new(
-                PayloadType::KE.into(),
-                payload::Content::Ke(payload::Ke::new(group.id().into(), &public_key)),
-                true,
-            ),
-        ]);
-
-        Ok((message, chosen_proposal, private_key, nonce))
+fn generate_ike_sa_init_request(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+) -> Result<Message, StateError> {
+    let proposals: Vec<_> = config.ike_proposals(None).collect();
+    if proposals.is_empty() {
+        return Err(ConfigError::NoProposalsSet.into());
     }
 
-    fn handle_ike_sa_init_request<D>(
-        config: &Config,
-        data: &D,
-        request: &Message,
-    ) -> Result<(ChosenProposal, Vec<u8>, Keys, Vec<u8>, Vec<u8>), StateError>
-    where
-        D: Deref<Target = StateData>,
-    {
-        let sa: &payload::Sa = request
-            .get(PayloadType::SA)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
+    let chosen_proposal = ChosenProposal::new(&proposals[0])?;
 
-        let ke: &payload::Ke = request
-            .get(PayloadType::KE)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
+    let mut nonce = vec![0u8; 32];
+    crypto::rand_bytes(&mut nonce[..])?;
 
-        let nonce_i: &payload::Nonce = request
-            .get(PayloadType::NONCE)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
+    let group = chosen_proposal
+        .group()
+        .ok_or(ConfigError::InsufficientProposal)?;
+    let private_key = group.generate_key()?;
+    let public_key = private_key.public_key()?;
 
-        let proposals: Vec<_> = config.ike_proposals(None).collect();
-        if proposals.is_empty() {
-            return Err(ConfigError::NoProposalsSet.into());
-        }
+    let mut request = Message::new(
+        &data.spi,
+        &Spi::default(),
+        ExchangeType::IKE_SA_INIT.into(),
+        MessageFlags::I,
+        (*data.message_id).wrapping_add(1),
+    );
 
-        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
+    request.add_payloads([
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(proposals)),
+            true,
+        ),
+        Payload::new(
+            PayloadType::NONCE.into(),
+            payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
+            true,
+        ),
+        Payload::new(
+            PayloadType::KE.into(),
+            payload::Content::Ke(payload::Ke::new(group.id().into(), &public_key)),
+            true,
+        ),
+    ]);
 
-        let group = chosen_proposal
-            .group()
-            .ok_or(ConfigError::InsufficientProposal)?;
-        let private_key = group.generate_key()?;
-        let public_key = private_key.public_key()?;
+    *data.is_initiator.to_mut() = Some(true);
+    *data.chosen_proposal.to_mut() = Some(chosen_proposal);
+    *data.private_key.to_mut() = Some(private_key);
+    *data.nonce_i.to_mut() = Some(nonce);
+    *data.message_id.to_mut() = request.id();
 
-        let mut nonce_r = vec![0u8; 32];
-        crypto::rand_bytes(&mut nonce_r)?;
+    Ok(request)
+}
 
-        let skeyseed = crypto::generate_skeyseed(
-            chosen_proposal.prf(),
-            nonce_i.nonce(),
-            &nonce_r[..],
-            &private_key,
-            ke.ke_data(),
-        )?;
-        debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
+fn handle_ike_sa_init_request(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+    request: &Message,
+) -> Result<(), StateError> {
+    let sa: &payload::Sa = request
+        .get(PayloadType::SA)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
-        let keys = chosen_proposal.generate_keys(
-            &skeyseed,
-            nonce_i.nonce(),
-            &nonce_r,
-            request.spi_i(),
-            &data.spi,
-        )?;
-        debug!(keys = ?&keys, "keys generated");
+    let ke: &payload::Ke = request
+        .get(PayloadType::KE)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
 
-        Ok((
-            chosen_proposal,
-            public_key,
-            keys,
-            nonce_i.nonce().to_vec(),
-            nonce_r,
-        ))
+    let nonce_i: &payload::Nonce = request
+        .get(PayloadType::NONCE)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
+
+    let proposals: Vec<_> = config.ike_proposals(None).collect();
+    if proposals.is_empty() {
+        return Err(ConfigError::NoProposalsSet.into());
     }
 
-    fn generate_ike_sa_init_response<D>(
-        data: &D,
-        public_key: impl AsRef<[u8]>,
-        message_id: u32,
-    ) -> Result<Message, StateError>
-    where
-        D: Deref<Target = StateData>,
-    {
-        let group = data
-            .chosen_proposal()?
-            .group()
-            .ok_or(ConfigError::InsufficientProposal)?;
-        let nonce_r = data.nonce_r.as_ref().unwrap();
+    let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
 
-        let mut message = Message::new(
-            data.peer_spi.as_ref().unwrap(),
-            &data.spi,
-            ExchangeType::IKE_SA_INIT.into(),
-            MessageFlags::R,
-            message_id,
-        );
+    let group = chosen_proposal
+        .group()
+        .ok_or(ConfigError::InsufficientProposal)?;
+    let private_key = group.generate_key()?;
+    let public_key = private_key.public_key()?;
 
-        message.add_payloads([
-            Payload::new(
-                PayloadType::KE.into(),
-                payload::Content::Ke(payload::Ke::new(group.id().into(), &public_key)),
-                true,
-            ),
-            Payload::new(
-                PayloadType::SA.into(),
-                payload::Content::Sa(payload::Sa::new(Some(data.chosen_proposal()?.proposal(
-                    1,
-                    Protocol::IKE.into(),
-                    b"",
-                )))),
-                true,
-            ),
-            Payload::new(
-                PayloadType::NONCE.into(),
-                payload::Content::Nonce(payload::Nonce::new(&nonce_r[..])),
-                true,
-            ),
-        ]);
+    let mut nonce_r = vec![0u8; 32];
+    crypto::rand_bytes(&mut nonce_r)?;
 
-        Ok(message)
-    }
+    let skeyseed = crypto::generate_skeyseed(
+        chosen_proposal.prf(),
+        nonce_i.nonce(),
+        &nonce_r[..],
+        &private_key,
+        ke.ke_data(),
+    )?;
+    debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
+
+    let keys = chosen_proposal.generate_keys(
+        &skeyseed,
+        nonce_i.nonce(),
+        &nonce_r,
+        request.spi_i(),
+        &data.spi,
+    )?;
+    debug!(keys = ?&keys, "keys generated");
+
+    *data.is_initiator.to_mut() = Some(false);
+    *data.chosen_proposal.to_mut() = Some(chosen_proposal);
+    *data.public_key.to_mut() = Some(public_key);
+    *data.keys.to_mut() = Some(keys);
+    *data.nonce_i.to_mut() = Some(nonce_i.nonce().to_vec());
+    *data.nonce_r.to_mut() = Some(nonce_r);
+    *data.peer_spi.to_mut() = Some(request.spi_i().to_owned());
+
+    Ok(())
+}
+
+fn generate_ike_sa_init_response(
+    data: &StateDataCache<'_>,
+    message_id: u32,
+) -> Result<Message, StateError> {
+    let group = data
+        .chosen_proposal()?
+        .group()
+        .ok_or(ConfigError::InsufficientProposal)?;
+    let nonce_r = (*data.nonce_r).as_ref().unwrap();
+
+    let mut response = Message::new(
+        data.peer_spi.as_ref().as_ref().unwrap(),
+        &data.spi,
+        ExchangeType::IKE_SA_INIT.into(),
+        MessageFlags::R,
+        message_id,
+    );
+
+    response.add_payloads([
+        Payload::new(
+            PayloadType::KE.into(),
+            payload::Content::Ke(payload::Ke::new(
+                group.id().into(),
+                (*data.public_key).as_ref().unwrap(),
+            )),
+            true,
+        ),
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(Some(data.chosen_proposal()?.proposal(
+                1,
+                Protocol::IKE.into(),
+                b"",
+            )))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::NONCE.into(),
+            payload::Content::Nonce(payload::Nonce::new(&nonce_r[..])),
+            true,
+        ),
+    ]);
+
+    Ok(response)
 }
 
 #[async_trait]
@@ -204,39 +202,34 @@ impl State for Initial {
         let request = Message::deserialize(&mut message)?;
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
-                let (chosen_proposal, public_key, keys, nonce_i, nonce_r) = {
-                    let data = data.read().await;
+                let default = StateData::default();
+                let default = StateDataCache::new_borrowed(&default);
 
-                    Self::handle_ike_sa_init_request(config, &data, &request)?
+                let cache = {
+                    let data = data.read().await;
+                    let mut data = StateDataCache::new_borrowed(&data);
+
+                    handle_ike_sa_init_request(config, &mut data, &request)?;
+
+                    let response = generate_ike_sa_init_response(&data, request.id())?;
+
+                    let len = response.size()?;
+                    let mut buf = BytesMut::with_capacity(len);
+                    response.serialize(&mut buf)?;
+
+                    *data.ike_sa_init_request.to_mut() = Some(serialized_request.to_vec());
+                    *data.ike_sa_init_response.to_mut() = Some(buf.to_vec());
+                    data.swap(&default)
                 };
+
+                sender.unbounded_send(ControlMessage::IkeMessage(
+                    (*cache.ike_sa_init_response).to_owned().unwrap(),
+                ))?;
 
                 {
                     let mut data = data.write().await;
-                    data.is_initiator = Some(false);
-                    data.chosen_proposal = Some(chosen_proposal);
-                    data.keys = Some(keys);
-                    data.nonce_i = Some(nonce_i);
-                    data.nonce_r = Some(nonce_r);
-                    data.peer_spi = Some(request.spi_i().to_owned());
+                    cache.write_into(&mut data);
                 }
-
-                let response = {
-                    let data = data.read().await;
-
-                    Self::generate_ike_sa_init_response(&data, &public_key, request.id())?
-                };
-
-                let len = response.size()?;
-                let mut buf = BytesMut::with_capacity(len);
-                response.serialize(&mut buf)?;
-
-                {
-                    let mut data = data.write().await;
-                    data.ike_sa_init_request = Some(serialized_request.to_vec());
-                    data.ike_sa_init_response = Some(buf.to_vec());
-                }
-
-                sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
                 Ok(Box::new(state::IkeSaInitResponseSent {}))
             }
@@ -255,28 +248,32 @@ impl State for Initial {
         ts_r: &TrafficSelector,
         _index: u32,
     ) -> Result<Box<dyn State>, StateError> {
-        let (request, chosen_proposal, private_key, nonce) = {
-            let data = data.read().await;
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
 
-            Self::generate_ike_sa_init_request(config, &data)?
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            let request = generate_ike_sa_init_request(config, &mut data)?;
+
+            let len = request.size()?;
+            let mut buf = BytesMut::with_capacity(len);
+            request.serialize(&mut buf)?;
+
+            *data.ike_sa_init_request.to_mut() = Some(buf.to_vec());
+            *data.larval_child_sa.to_mut() = Some(LarvalChildSa::new(config, ts_i, ts_r)?);
+            data.swap(&default)
         };
 
-        let len = request.size()?;
-        let mut buf = BytesMut::with_capacity(len);
-        request.serialize(&mut buf)?;
+        sender.unbounded_send(ControlMessage::IkeMessage(
+            (*cache.ike_sa_init_request).to_owned().unwrap(),
+        ))?;
 
         {
             let mut data = data.write().await;
-            data.is_initiator = Some(true);
-            data.chosen_proposal = Some(chosen_proposal);
-            data.private_key = Some(private_key);
-            data.nonce_i = Some(nonce);
-            data.message_id = request.id();
-            data.larval_child_sa = Some(LarvalChildSa::new(config, ts_i, ts_r)?);
-            data.ike_sa_init_request = Some(buf.to_vec());
+            cache.write_into(&mut data);
         }
-
-        sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
 
         Ok(Box::new(state::IkeSaInitRequestSent {}))
     }
