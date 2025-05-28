@@ -1,14 +1,14 @@
 use crate::{
     config::{Config, ConfigError},
     message::{
-        ProtectedMessage,
+        EspSpi, ProtectedMessage,
         num::{ExchangeType, PayloadType},
         payload,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, ProtocolError},
-    state::{self, State, StateData, StateDataCache, StateError},
+    state::{self, CreateChildSa, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
@@ -17,6 +17,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 pub struct IkeAuthRequestSent;
+
+impl CreateChildSa for IkeAuthRequestSent {}
 
 impl std::fmt::Display for IkeAuthRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -112,9 +114,7 @@ impl State for IkeAuthRequestSent {
                     }
 
                     let child_sa = handle_ike_auth_response(config, &mut data, &response)?;
-                    debug!(child_sa = ?&child_sa, "Child SA created");
-
-                    sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
+                    Self::create_child_sa(sender.clone(), &mut data, Box::new(child_sa))?;
                     data.swap(&default)
                 };
 
@@ -139,6 +139,16 @@ impl State for IkeAuthRequestSent {
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
         _index: u32,
+    ) -> Result<Box<dyn State>, StateError> {
+        Ok(self)
+    }
+
+    async fn handle_expire(
+        self: Box<Self>,
+        _config: &Config,
+        _sender: UnboundedSender<ControlMessage>,
+        _data: Arc<RwLock<StateData>>,
+        _spi: &EspSpi,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }

@@ -65,6 +65,7 @@ use tracing::info;
 pub enum ControlMessage {
     IkeMessage(Vec<u8>),
     CreateChildSa(Box<ChildSa>),
+    DeleteChildSa(Box<ChildSa>),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -197,6 +198,29 @@ impl IkeSa {
                     &ts_r,
                     index,
                 )
+                .await?;
+
+            let new_state_name = new_state.to_string();
+
+            let mut state = self.state.lock().await;
+            *state = Some(new_state);
+
+            info!("state transitioned from {old_state_name} to {new_state_name}");
+        }
+
+        Ok(())
+    }
+
+    /// Processes XFRM acquire message
+    pub async fn handle_expire(&self, spi: EspSpi) -> Result<(), StateError> {
+        let mut state = self.state.lock().await;
+        if let Some(old_state) = state.take() {
+            drop(state);
+
+            let old_state_name = old_state.to_string();
+
+            let new_state = old_state
+                .handle_expire(&self.config, self.sender.clone(), self.data.clone(), &spi)
                 .await?;
 
             let new_state_name = new_state.to_string();

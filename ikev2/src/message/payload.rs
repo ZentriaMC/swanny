@@ -1,6 +1,7 @@
 use crate::{
     crypto::{self, Cipher, Key, Prf},
     message::{
+        EspSpi,
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
         proposal::{self, Proposal},
         serialize::{self, Deserialize, Serialize},
@@ -22,6 +23,7 @@ pub enum Content {
     Notify(Notify),
     Ts(Ts),
     Sk(Sk),
+    Delete(Delete),
 }
 
 impl Serialize for Content {
@@ -35,6 +37,7 @@ impl Serialize for Content {
             Content::Notify(notify) => notify.serialize(buf),
             Content::Ts(ts) => ts.serialize(buf),
             Content::Sk(sk) => sk.serialize(buf),
+            Content::Delete(delete) => delete.serialize(buf),
         }
     }
 
@@ -48,6 +51,7 @@ impl Serialize for Content {
             Content::Notify(notify) => notify.size(),
             Content::Ts(ts) => ts.size(),
             Content::Sk(sk) => sk.size(),
+            Content::Delete(delete) => delete.size(),
         }
     }
 }
@@ -143,6 +147,9 @@ impl Payload {
                 next_payload_type,
                 &mut &buf.chunk()[..len],
             )?),
+            Some(PayloadType::DELETE) => {
+                Content::Delete(Delete::deserialize(&mut &buf.chunk()[..len])?)
+            }
             _ => {
                 return Err(serialize::DeserializeError::UnknownPayloadType(
                     payload_type,
@@ -187,6 +194,7 @@ emit_try_from_payload!(PayloadType::NONCE, Nonce);
 emit_try_from_payload!(PayloadType::NOTIFY, Notify);
 emit_try_from_payload!(PayloadType::TSi | PayloadType::TSr, Ts);
 emit_try_from_payload!(PayloadType::SK, Sk);
+emit_try_from_payload!(PayloadType::DELETE, Delete);
 
 /// Security Association content
 #[derive(Debug, PartialEq)]
@@ -726,6 +734,79 @@ impl serialize::Serialize for Sk {
 
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         Ok(self.ciphertext.len())
+    }
+}
+
+/// Delete content
+#[derive(Debug, PartialEq)]
+pub struct Delete {
+    protocol: Num<u8, Protocol>,
+    spis: Vec<EspSpi>,
+}
+
+impl Delete {
+    /// Creates a new `Delete` content with given traffic selectors
+    pub fn new<S>(protocol: Num<u8, Protocol>, spis: S) -> Self
+    where
+        S: IntoIterator,
+        S::Item: Into<EspSpi>,
+    {
+        Self {
+            protocol,
+            spis: spis.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Returns the protocol of the `Delete` content
+    pub fn protocol(&self) -> Num<u8, Protocol> {
+        self.protocol
+    }
+
+    /// Returns the iterator over the SPIs in the `Delete` content
+    pub fn spis(&self) -> impl Iterator<Item = &EspSpi> {
+        self.spis.iter()
+    }
+}
+
+impl serialize::Serialize for Delete {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
+        buf.put_u8(self.protocol.into());
+        buf.put_u8(4);
+        buf.put_u16(self.spis.len().try_into()?);
+        for spi in &self.spis {
+            buf.put_slice(&spi[..]);
+        }
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
+        4usize
+            .checked_mul(self.spis.len())
+            .ok_or(serialize::SerializeError::Overflow)?
+            .checked_add(4)
+            .ok_or(serialize::SerializeError::Overflow)
+    }
+}
+
+impl serialize::Deserialize for Delete {
+    fn deserialize(buf: &mut dyn Buf) -> Result<Self, serialize::DeserializeError>
+    where
+        Self: Sized,
+    {
+        let protocol = buf.try_get_u8()?;
+        let spi_size = buf.try_get_u8()?;
+        let count = buf.try_get_u16()?;
+
+        let mut spis: Vec<EspSpi> = Vec::new();
+        for _ in 0..count {
+            let mut spi = vec![0; spi_size as usize];
+            buf.try_copy_to_slice(&mut spi)?;
+            spis.push(spi.as_slice().try_into()?);
+        }
+        if buf.has_remaining() {
+            return Err(serialize::DeserializeError::Overlong);
+        }
+        Ok(Self::new(protocol.into(), spis))
     }
 }
 

@@ -27,6 +27,9 @@ pub enum DeserializeError {
     #[error("the data is not available in the buffer")]
     TryGetError(#[from] bytes::TryGetError),
 
+    #[error("slice to array conversion error")]
+    TryFromSlice(#[from] std::array::TryFromSliceError),
+
     #[error("premature EOF")]
     PrematureEof,
 

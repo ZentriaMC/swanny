@@ -9,7 +9,7 @@ use netlink_packet_core::{NLM_F_ACK, NLM_F_REQUEST, NetlinkMessage, NetlinkPaylo
 use netlink_packet_xfrm::{
     Alg, AlgAead, AlgAuth, XFRM_ALG_AEAD_NAME_LEN, XFRM_ALG_AUTH_NAME_LEN, XFRM_ALG_NAME_LEN,
     XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmAttrs, XfrmMessage, address::Address,
-    state::ModifyMessage,
+    state::DelGetMessage, state::ModifyMessage,
 };
 use netlink_proto::{
     ConnectionHandle,
@@ -176,6 +176,7 @@ fn create_modify_message(
     integ_key: Option<impl AsRef<[u8]>>,
     cipher: &Cipher,
     cipher_key: impl AsRef<[u8]>,
+    expires: Option<u64>,
 ) -> Result<ModifyMessage> {
     let mut message = ModifyMessage::default();
     message.user_sa_info.source(src_address);
@@ -209,6 +210,10 @@ fn create_modify_message(
     message.user_sa_info.lifetime_cfg.hard_byte_limit = 0xFFFFFFFFFFFFFFFF;
     message.user_sa_info.lifetime_cfg.soft_packet_limit = 0xFFFFFFFFFFFFFFFF;
     message.user_sa_info.lifetime_cfg.hard_packet_limit = 0xFFFFFFFFFFFFFFFF;
+    if let Some(expires) = expires {
+        message.user_sa_info.lifetime_cfg.soft_add_expires_seconds = expires;
+        message.user_sa_info.lifetime_cfg.hard_add_expires_seconds = expires + 10;
+    }
 
     if let (Some(integ), Some(integ_key)) = (integ, integ_key) {
         let alg_auth = create_alg_auth(integ, integ_key)?;
@@ -241,6 +246,7 @@ async fn create_sa(
     integ_key: Option<impl AsRef<[u8]>>,
     cipher: &Cipher,
     cipher_key: impl AsRef<[u8]>,
+    expires: Option<u64>,
 ) -> Result<()> {
     let message = create_modify_message(
         src_address,
@@ -252,6 +258,7 @@ async fn create_sa(
         integ_key,
         cipher,
         cipher_key,
+        expires,
     )?;
     let mut request = NetlinkMessage::from(XfrmMessage::AddSa(message));
     request.header.flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -267,6 +274,7 @@ async fn create_child_sa(
     handle: ConnectionHandle<XfrmMessage>,
     child_sa: &ChildSa,
     is_initiator: bool,
+    expires: Option<u64>,
 ) -> Result<()> {
     create_sa(
         handle.clone(),
@@ -287,6 +295,7 @@ async fn create_child_sa(
         } else {
             &child_sa.keys().unwrap().er
         },
+        expires,
     )
     .await?;
     debug!("created inbound state");
@@ -309,9 +318,34 @@ async fn create_child_sa(
         } else {
             &child_sa.keys().unwrap().ei
         },
+        expires,
     )
     .await?;
     debug!("created outbound state");
+    Ok(())
+}
+
+async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &ChildSa) -> Result<()> {
+    let mut message = DelGetMessage::default();
+    message
+        .user_sa_id
+        .destination(child_sa.ts_r().start_address());
+    message.nlas.push(XfrmAttrs::SrcAddr(Address::from_ip(
+        child_sa.ts_i().start_address(),
+    )));
+    message.user_sa_id.proto = match child_sa.chosen_proposal().protocol() {
+        Protocol::AH => libc::IPPROTO_AH.try_into()?,
+        Protocol::ESP => libc::IPPROTO_ESP.try_into()?,
+        _ => return Err(anyhow::anyhow!("unsupported IPsec protocol")),
+    };
+    message.user_sa_id.spi = u32::from_be_bytes(*child_sa.spi());
+    let mut request = NetlinkMessage::from(XfrmMessage::DeleteSa(message));
+    request.header.flags = NLM_F_REQUEST | NLM_F_ACK;
+    debug!(request = ?&request, "sending netlink request");
+    let mut response = handle.request(request, SocketAddr::new(0, 0))?;
+    while let Some(message) = response.next().await {
+        debug!(message = ?message, "received netlink response");
+    }
     Ok(())
 }
 
@@ -373,9 +407,12 @@ async fn main() -> Result<()> {
                                 &acquire.acquire.selector.saddr,
                                 acquire.acquire.selector.sport,
                             )?;
-                            pending_operations.push(Either::Left(ike_sa.handle_acquire(ts_i, ts_r, acquire.acquire.policy.index)));
+                            pending_operations.push(Either::Left(Either::Right(ike_sa.handle_acquire(ts_i, ts_r, acquire.acquire.policy.index))));
                         },
-                        XfrmMessage::Expire(_expire) => {
+                        XfrmMessage::Expire(expire) => {
+                            let spi = expire.expire.state.id.spi.to_be_bytes();
+                            debug!("expired: {:?}", &spi);
+                            pending_operations.push(Either::Left(Either::Left(ike_sa.handle_expire(spi))));
                         },
                         _ => info!("Other XFRM event message - {:?}", xfrm_message),
                     };
@@ -395,6 +432,13 @@ async fn main() -> Result<()> {
                             handle.clone(),
                             &child_sa,
                             ike_sa.is_initiator().await.unwrap(),
+                            config.expires,
+                        ).await?;
+                    }
+                    ControlMessage::DeleteChildSa(child_sa) => {
+                        delete_child_sa(
+                            handle.clone(),
+                            &child_sa,
                         ).await?;
                     }
                 }

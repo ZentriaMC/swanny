@@ -1,14 +1,16 @@
 use crate::{
     config::{Config, ConfigError},
     message::{
-        Message, ProtectedMessage,
+        EspSpi, Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
-    state::{self, SendProtectedMessage, State, StateData, StateDataCache, StateError},
+    state::{
+        self, CreateChildSa, SendProtectedMessage, State, StateData, StateDataCache, StateError,
+    },
 };
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
@@ -19,6 +21,7 @@ use tracing::{debug, info};
 pub struct IkeSaInitResponseSent;
 
 impl SendProtectedMessage for IkeSaInitResponseSent {}
+impl CreateChildSa for IkeSaInitResponseSent {}
 
 impl std::fmt::Display for IkeSaInitResponseSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -177,13 +180,12 @@ impl State for IkeSaInitResponseSent {
 
                     let child_sa = handle_ike_auth_request(config, &mut data, &request)?;
 
-                    debug!(child_sa = ?&child_sa, "Child SA created");
-
                     let response =
                         generate_ike_auth_response(config, &mut data, &request, &child_sa)?;
 
                     Self::send_message(sender.clone(), &mut data, response)?;
-                    sender.unbounded_send(ControlMessage::CreateChildSa(Box::new(child_sa)))?;
+
+                    Self::create_child_sa(sender.clone(), &mut data, Box::new(child_sa))?;
                     data.swap(&default)
                 };
 
@@ -208,6 +210,16 @@ impl State for IkeSaInitResponseSent {
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
         _index: u32,
+    ) -> Result<Box<dyn State>, StateError> {
+        Ok(self)
+    }
+
+    async fn handle_expire(
+        self: Box<Self>,
+        _config: &Config,
+        _sender: UnboundedSender<ControlMessage>,
+        _data: Arc<RwLock<StateData>>,
+        _spi: &EspSpi,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }

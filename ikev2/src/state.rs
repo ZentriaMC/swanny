@@ -1,14 +1,14 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto::{CryptoError, GroupPrivateKey},
+    crypto::{CryptoError, GroupPrivateKey, Key},
     message::{
-        Message, ProtectedMessage, Spi,
+        EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags},
         payload::{self, Id},
         serialize::{DeserializeError, Serialize, SerializeError},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, Keys, LarvalChildSa, ProtocolError},
+    sa::{ChildSa, ChosenProposal, ControlMessage, Keys, LarvalChildSa, ProtocolError},
 };
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -36,6 +36,9 @@ pub(crate) use ike_auth_request_sent::IkeAuthRequestSent;
 mod established;
 pub(crate) use established::Established;
 
+mod delete_child_request_sent;
+pub(crate) use delete_child_request_sent::DeleteChildRequestSent;
+
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidStateError {
     #[error("no proposal chosen")]
@@ -43,6 +46,9 @@ pub enum InvalidStateError {
 
     #[error("no keys set")]
     NoKeysSet,
+
+    #[error("peer SPI not set")]
+    PeerSpiNotSet,
 
     #[error("IKE_SA_INIT not recorded")]
     IkeSaInitNotRecorded,
@@ -52,6 +58,9 @@ pub enum InvalidStateError {
 
     #[error("initiator/responder not determined")]
     InitiatorNotDetermined,
+
+    #[error("unknown child SA")]
+    UnknownChildSa(EspSpi),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -96,6 +105,14 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
         index: u32,
+    ) -> Result<Box<dyn State>, StateError>;
+
+    async fn handle_expire(
+        self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+        spi: &EspSpi,
     ) -> Result<Box<dyn State>, StateError>;
 }
 
@@ -180,10 +197,60 @@ cache_cow! {
         ike_sa_init_response: Option<Vec<u8>>,
         last_message: Option<Vec<u8>>,
         larval_child_sa: Option<LarvalChildSa>,
+        child_sas: Vec<Box<ChildSa>>,
+        deleted_child_sas: Vec<Box<ChildSa>>,
     }
 }
 
 impl StateDataCache<'_> {
+    fn initiator_spi(&self) -> Result<&Spi, StateError> {
+        match *self.is_initiator {
+            Some(true) => Ok(&*self.spi),
+            Some(false) => (*self.peer_spi)
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::PeerSpiNotSet)),
+            None => Err(StateError::InvalidState(
+                InvalidStateError::InitiatorNotDetermined,
+            )),
+        }
+    }
+
+    fn responder_spi(&self) -> Result<&Spi, StateError> {
+        match *self.is_initiator {
+            Some(false) => Ok(&*self.spi),
+            Some(true) => (*self.peer_spi)
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::PeerSpiNotSet)),
+            None => Err(StateError::InvalidState(
+                InvalidStateError::InitiatorNotDetermined,
+            )),
+        }
+    }
+
+    fn encrypting_key(&self) -> Result<&Key, StateError> {
+        match *self.is_initiator {
+            Some(true) => Ok(&self.keys()?.protecting.ei),
+            Some(false) => Ok(&self.keys()?.protecting.er),
+            None => Err(StateError::InvalidState(
+                InvalidStateError::InitiatorNotDetermined,
+            )),
+        }
+    }
+
+    fn decrypting_key(&self) -> Result<&Key, StateError> {
+        match *self.is_initiator {
+            Some(true) => Ok(&self.keys()?.protecting.er),
+            Some(false) => Ok(&self.keys()?.protecting.ei),
+            None => Err(StateError::InvalidState(
+                InvalidStateError::InitiatorNotDetermined,
+            )),
+        }
+    }
+
+    fn child_sa(&self, spi: &EspSpi) -> Option<&Box<ChildSa>> {
+        self.child_sas.iter().find(|child_sa| child_sa.spi() == spi)
+    }
+
     fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {
         (*self.chosen_proposal)
             .as_ref()
@@ -370,5 +437,29 @@ trait SendProtectedMessage {
         *data.last_message.to_mut() = Some(buf.to_vec());
 
         Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)
+    }
+}
+
+trait CreateChildSa {
+    fn create_child_sa(
+        sender: UnboundedSender<ControlMessage>,
+        data: &mut StateDataCache<'_>,
+        child_sa: Box<ChildSa>,
+    ) -> Result<(), StateError> {
+        debug!(child_sa = ?&child_sa, "Child SA created");
+        data.child_sas.to_mut().push(child_sa.clone());
+        sender.unbounded_send(ControlMessage::CreateChildSa(child_sa))?;
+        Ok(())
+    }
+}
+
+trait DeleteChildSa {
+    fn delete_child_sa(
+        sender: UnboundedSender<ControlMessage>,
+        child_sa: Box<ChildSa>,
+    ) -> Result<(), StateError> {
+        debug!(child_sa = ?&child_sa, "Child SA deleted");
+        sender.unbounded_send(ControlMessage::DeleteChildSa(child_sa))?;
+        Ok(())
     }
 }

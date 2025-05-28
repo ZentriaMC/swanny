@@ -178,7 +178,7 @@ impl From<PayloadType> for Num<u8, PayloadType> {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, FromPrimitive)]
 pub enum Protocol {
     IKE = 1,
     AH = 2,

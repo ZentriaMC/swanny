@@ -11,6 +11,7 @@ pub struct Config {
     pub address: IpAddr,
     pub peer_address: IpAddr,
     pub psk: Vec<u8>,
+    pub expires: Option<u64>,
 }
 
 impl Config {
@@ -42,6 +43,13 @@ impl Config {
                     --psk <PSK> "Pre shared key"
                 )
                 .required(true),
+            )
+            .arg(
+                arg!(
+                    --expires <SECONDS> "SA expiry in seconds"
+                )
+                .required(false)
+                .value_parser(value_parser!(u64)),
             )
             .get_matches();
 
@@ -77,10 +85,22 @@ impl Config {
             .as_bytes()
             .to_vec();
 
+        let expires: Option<u64> = config
+            .get("expires")
+            .map(|expires| {
+                expires
+                    .as_integer()
+                    .ok_or_else(|| anyhow!("value must be integer"))
+            })
+            .transpose()?
+            .map(|expires| expires.try_into())
+            .transpose()?;
+
         Ok(Self {
             address,
             peer_address,
             psk,
+            expires,
         })
     }
 
@@ -88,10 +108,12 @@ impl Config {
         let address = *matches.try_get_one::<IpAddr>("address")?.unwrap();
         let peer_address = *matches.try_get_one::<IpAddr>("peer-address")?.unwrap();
         let psk = matches.try_get_one::<String>("psk")?.unwrap().clone();
+        let expires = matches.try_get_one::<u64>("expires")?.copied();
         Ok(Self {
             address,
             peer_address,
             psk: psk.as_bytes().to_vec(),
+            expires,
         })
     }
 }

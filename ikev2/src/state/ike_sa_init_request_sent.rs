@@ -2,7 +2,7 @@ use crate::{
     config::{Config, ConfigError},
     crypto,
     message::{
-        Message, ProtectedMessage, Spi,
+        EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
         serialize::Deserialize,
@@ -198,6 +198,16 @@ impl State for IkeSaInitRequestSent {
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
         _index: u32,
+    ) -> Result<Box<dyn State>, StateError> {
+        Ok(self)
+    }
+
+    async fn handle_expire(
+        self: Box<Self>,
+        _config: &Config,
+        _sender: UnboundedSender<ControlMessage>,
+        _data: Arc<RwLock<StateData>>,
+        _spi: &EspSpi,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }
