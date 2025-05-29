@@ -5,6 +5,7 @@ use crate::message::{
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
 
+/// Traffic Selector
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrafficSelector {
     ty: Num<u8, TrafficSelectorType>,
@@ -16,6 +17,7 @@ pub struct TrafficSelector {
 }
 
 impl TrafficSelector {
+    /// Creates a new `TrafficSelector`
     pub fn new(
         ty: Num<u8, TrafficSelectorType>,
         ip_proto: u8,
@@ -34,28 +36,72 @@ impl TrafficSelector {
         }
     }
 
+    /// Returns the type of the `TrafficSelector`
     pub fn ty(&self) -> Num<u8, TrafficSelectorType> {
         self.ty
     }
 
+    /// Returns the IP protocol of the `TrafficSelector`
     pub fn ip_proto(&self) -> u8 {
         self.ip_proto
     }
 
-    pub fn start_port(&self) -> u16 {
-        self.start_port
-    }
-
-    pub fn end_port(&self) -> u16 {
-        self.end_port
-    }
-
+    /// Returns the starting address of the `TrafficSelector`
     pub fn start_address(&self) -> &IpAddr {
         &self.start_address
     }
 
+    /// Returns the ending address of the `TrafficSelector`
     pub fn end_address(&self) -> &IpAddr {
         &self.end_address
+    }
+
+    /// Returns the starting port of the `TrafficSelector`
+    pub fn start_port(&self) -> u16 {
+        self.start_port
+    }
+
+    /// Returns the ending port of the `TrafficSelector`
+    pub fn end_port(&self) -> u16 {
+        self.end_port
+    }
+
+    /// Returns the first matching `TrafficSelector`
+    pub fn negotiate<'a, 'b>(
+        this: impl IntoIterator<Item = &'a TrafficSelector>,
+        other: impl IntoIterator<Item = &'a TrafficSelector>,
+    ) -> Option<Self> {
+        let mut this = this.into_iter();
+        let mut other = other.into_iter();
+        this.find_map(|tx| other.find_map(|ty| tx.intersection(ty)))
+    }
+
+    fn intersection(&self, other: &Self) -> Option<Self> {
+        if self.ty != other.ty {
+            return None;
+        }
+        if self.ip_proto != other.ip_proto {
+            return None;
+        }
+        if self.end_address < other.start_address ||
+            other.end_address < self.start_address
+        {
+            return None;
+        }
+        if self.end_port < other.start_port ||
+            other.end_port < self.start_port
+        {
+            return None;
+        }
+
+        Some(Self::new(
+            self.ty,
+            self.ip_proto,
+            &self.start_address.max(other.start_address),
+            &self.end_address.min(other.end_address),
+            self.start_port.max(other.start_port),
+            self.end_port.min(other.end_port),
+        ))
     }
 }
 
@@ -112,6 +158,7 @@ impl serialize::Deserialize for TrafficSelector {
 
         let start_port = buf.try_get_u16()?;
         let end_port = buf.try_get_u16()?;
+
         let (start_address, end_address): (IpAddr, IpAddr) = match ty.assigned() {
             Some(TrafficSelectorType::TS_IPV4_ADDR_RANGE) => {
                 let mut address = [0; 4];
@@ -133,6 +180,10 @@ impl serialize::Deserialize for TrafficSelector {
             }
             _ => return Err(serialize::DeserializeError::UnknownTrafficSelectorType(ty)),
         };
+
+        if start_address > end_address || start_port > end_port {
+            return Err(serialize::DeserializeError::InvalidTrafficSelectorRange)
+        }
 
         Ok(Self {
             ty,
@@ -179,5 +230,33 @@ pub(crate) mod tests {
             .expect("unable to deserialize traffic selector");
 
         assert_eq!(traffic_selector, traffic_selector2);
+    }
+
+    #[test]
+    fn test_intersection() {
+        let this = TrafficSelector::new(
+            TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
+            0,
+            &"192.168.1.1".parse().unwrap(),
+            &"192.168.1.255".parse().unwrap(),
+            1000,
+            2000,
+        );
+        let other = TrafficSelector::new(
+            TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
+            0,
+            &"192.168.1.1".parse().unwrap(),
+            &"192.168.255.255".parse().unwrap(),
+            500,
+            1500,
+        );
+        let intersection = this.intersection(&other)
+            .expect("intersection should be found");
+        assert_eq!(intersection.ty(), TrafficSelectorType::TS_IPV4_ADDR_RANGE.into());
+        assert_eq!(intersection.ip_proto(), 0);
+        assert_eq!(intersection.start_address(), this.start_address());
+        assert_eq!(intersection.end_address(), this.end_address());
+        assert_eq!(intersection.start_port(), 1000);
+        assert_eq!(intersection.end_port(), 1500);
     }
 }

@@ -45,6 +45,9 @@ pub enum DeserializeError {
     #[error("unknown traffic selector type")]
     UnknownTrafficSelectorType(Num<u8, TrafficSelectorType>),
 
+    #[error("invalid traffic selector range")]
+    InvalidTrafficSelectorRange,
+
     #[error("unknown IKE version")]
     UnknownVersion(u8),
 
