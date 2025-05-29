@@ -67,12 +67,7 @@ fn handle_ike_auth_response(
         return Err(ProtocolError::AuthenticationFailed.into());
     }
 
-    let proposals = (*data.larval_child_sa)
-        .as_ref()
-        .unwrap()
-        .proposals
-        .as_ref()
-        .unwrap();
+    let proposals = &(*data.larval_child_sa).as_ref().unwrap().proposals;
 
     let chosen_proposal = ChosenProposal::negotiate(proposals, sa.proposals())?;
 

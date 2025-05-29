@@ -92,7 +92,7 @@ impl DeleteChildSaRequestSent {
                 Ok(Box::new(Established {}))
             }
             _ => {
-                return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+                Err(ProtocolError::UnexpectedExchange(response.exchange()).into())
             }
         }
     }

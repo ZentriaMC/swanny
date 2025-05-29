@@ -83,14 +83,10 @@ impl TrafficSelector {
         if self.ip_proto != other.ip_proto {
             return None;
         }
-        if self.end_address < other.start_address ||
-            other.end_address < self.start_address
-        {
+        if self.end_address < other.start_address || other.end_address < self.start_address {
             return None;
         }
-        if self.end_port < other.start_port ||
-            other.end_port < self.start_port
-        {
+        if self.end_port < other.start_port || other.end_port < self.start_port {
             return None;
         }
 
@@ -182,7 +178,7 @@ impl serialize::Deserialize for TrafficSelector {
         };
 
         if start_address > end_address || start_port > end_port {
-            return Err(serialize::DeserializeError::InvalidTrafficSelectorRange)
+            return Err(serialize::DeserializeError::InvalidTrafficSelectorRange);
         }
 
         Ok(Self {
@@ -250,9 +246,13 @@ pub(crate) mod tests {
             500,
             1500,
         );
-        let intersection = this.intersection(&other)
+        let intersection = this
+            .intersection(&other)
             .expect("intersection should be found");
-        assert_eq!(intersection.ty(), TrafficSelectorType::TS_IPV4_ADDR_RANGE.into());
+        assert_eq!(
+            intersection.ty(),
+            TrafficSelectorType::TS_IPV4_ADDR_RANGE.into()
+        );
         assert_eq!(intersection.ip_proto(), 0);
         assert_eq!(intersection.start_address(), this.start_address());
         assert_eq!(intersection.end_address(), this.end_address());

@@ -59,14 +59,14 @@ fn handle_create_child_sa_response(
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
 
-        let proposals = larval_child_sa.proposals.as_ref().unwrap();
+        let proposals = &larval_child_sa.proposals;
 
         let chosen_proposal = ChosenProposal::negotiate(proposals, sa.proposals())?;
 
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
             &data.keys()?.deriving.d,
-            (*data.nonce_i).as_ref().unwrap(),
+            (*data.nonce_i).as_ref().expect("nonce should be set"),
             nonce_r.nonce(),
         )?;
         *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
@@ -113,7 +113,7 @@ impl CreateChildSaRequestSent {
                 Ok(Box::new(Established {}))
             }
             _ => {
-                return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+                Err(ProtocolError::UnexpectedExchange(response.exchange()).into())
             }
         }
     }

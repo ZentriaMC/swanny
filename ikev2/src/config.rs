@@ -12,13 +12,16 @@ use crate::{
         EspSpi, Spi,
         num::{
             AttributeFormat, AttributeType, DhId, EncrId, EsnId, IntegId, PrfId, Protocol,
-            TransformType,
+            TrafficSelectorType, TransformType,
         },
         payload::Id,
         proposal::Proposal,
+        traffic_selector::TrafficSelector,
         transform::{Attribute, Transform},
     },
 };
+
+use std::net::IpAddr;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -30,6 +33,9 @@ pub enum ConfigError {
 
     #[error("no PSK set")]
     NoPSK,
+
+    #[error("inconsistent traffic selector")]
+    InconsistentTrafficSelector,
 }
 
 /// Builder to create a cryptographic proposal
@@ -131,12 +137,94 @@ impl ProposalBuilder {
     }
 }
 
+/// Builder to create a traffic selector
+#[derive(Clone, Debug, Default)]
+pub struct TrafficSelectorBuilder {
+    ip_proto: Option<u8>,
+    start_address: Option<IpAddr>,
+    end_address: Option<IpAddr>,
+    start_port: Option<u16>,
+    end_port: Option<u16>,
+}
+
+impl TrafficSelectorBuilder {
+    /// Sets the IP protocol
+    pub fn ip_proto(mut self, ip_proto: u8) -> Self {
+        self.ip_proto = Some(ip_proto);
+        self
+    }
+
+    /// Sets the starting address
+    pub fn start_address(mut self, start_address: IpAddr) -> Self {
+        self.start_address = Some(start_address);
+        self
+    }
+
+    /// Sets the ending address
+    pub fn end_address(mut self, end_address: IpAddr) -> Self {
+        self.end_address = Some(end_address);
+        self
+    }
+
+    /// Sets the starting port
+    pub fn start_port(mut self, start_port: u16) -> Self {
+        self.start_port = Some(start_port);
+        self
+    }
+
+    /// Sets the ending port
+    pub fn end_port(mut self, end_port: u16) -> Self {
+        self.end_port = Some(end_port);
+        self
+    }
+
+    /// Turn this `TrafficSelectorBuilder` into an actual `TrafficSelector`
+    pub fn build(self) -> Result<TrafficSelector, ConfigError> {
+        let (start_address, end_address) = match (self.start_address, self.end_address) {
+            (Some(start_address @ IpAddr::V4(_)), Some(end_address @ IpAddr::V4(_)))
+            | (Some(start_address @ IpAddr::V6(_)), Some(end_address @ IpAddr::V6(_))) => {
+                (start_address, end_address)
+            }
+            (Some(start_address @ IpAddr::V4(_)), None) => (start_address, start_address),
+            (Some(start_address @ IpAddr::V6(_)), None) => (start_address, start_address),
+            _ => return Err(ConfigError::InconsistentTrafficSelector),
+        };
+
+        let (start_port, end_port) = match (self.start_port, self.end_port) {
+            (Some(start_port), Some(end_port)) => (start_port, end_port),
+            (Some(start_port), None) => (start_port, start_port),
+            (None, None) => (0, 0),
+            (None, Some(_)) => return Err(ConfigError::InconsistentTrafficSelector),
+        };
+
+        if start_address > end_address || start_port > end_port {
+            return Err(ConfigError::InconsistentTrafficSelector);
+        }
+
+        let ty = match start_address {
+            IpAddr::V4(_) => TrafficSelectorType::TS_IPV4_ADDR_RANGE,
+            IpAddr::V6(_) => TrafficSelectorType::TS_IPV6_ADDR_RANGE,
+        };
+
+        Ok(TrafficSelector::new(
+            ty.into(),
+            self.ip_proto.unwrap_or(0),
+            &start_address,
+            &end_address,
+            start_port,
+            end_port,
+        ))
+    }
+}
+
 /// Builder to create an IKE SA configuration
 #[derive(Default)]
 pub struct ConfigBuilder {
     ike_proposals: Vec<ProposalBuilder>,
     ipsec_proposals: Vec<ProposalBuilder>,
     ipsec_protocol: Option<Protocol>,
+    inbound_traffic_selectors: Vec<TrafficSelectorBuilder>,
+    outbound_traffic_selectors: Vec<TrafficSelectorBuilder>,
     psk: Option<Key>,
 }
 
@@ -171,15 +259,47 @@ impl ConfigBuilder {
         self
     }
 
+    /// Adds an inbound traffic selector
+    pub fn inbound_traffic_selector<F>(mut self, func: F) -> Self
+    where
+        F: FnOnce(TrafficSelectorBuilder) -> TrafficSelectorBuilder,
+    {
+        self.inbound_traffic_selectors
+            .push(func(TrafficSelectorBuilder::default()));
+        self
+    }
+
+    /// Adds an outbound traffic selector
+    pub fn outbound_traffic_selector<F>(mut self, func: F) -> Self
+    where
+        F: FnOnce(TrafficSelectorBuilder) -> TrafficSelectorBuilder,
+    {
+        self.outbound_traffic_selectors
+            .push(func(TrafficSelectorBuilder::default()));
+        self
+    }
+
     /// Turn this `ConfigBuilder` into an actual `Config`
-    pub fn build(mut self, id: Id) -> Config {
-        Config {
+    pub fn build(mut self, id: Id) -> Result<Config, ConfigError> {
+        let inbound_traffic_selectors: Result<Vec<_>, _> = self
+            .inbound_traffic_selectors
+            .into_iter()
+            .map(|tb| tb.build())
+            .collect();
+        let outbound_traffic_selectors: Result<Vec<_>, _> = self
+            .outbound_traffic_selectors
+            .into_iter()
+            .map(|tb| tb.build())
+            .collect();
+        Ok(Config {
             ike_proposals: self.ike_proposals,
             ipsec_protocol: self.ipsec_protocol.take().unwrap_or(Protocol::ESP),
             ipsec_proposals: self.ipsec_proposals,
-            id,
+            inbound_traffic_selectors: inbound_traffic_selectors?,
+            outbound_traffic_selectors: outbound_traffic_selectors?,
             psk: self.psk.take(),
-        }
+            id,
+        })
     }
 }
 
@@ -189,8 +309,10 @@ pub struct Config {
     ike_proposals: Vec<ProposalBuilder>,
     ipsec_protocol: Protocol,
     ipsec_proposals: Vec<ProposalBuilder>,
-    id: Id,
+    inbound_traffic_selectors: Vec<TrafficSelector>,
+    outbound_traffic_selectors: Vec<TrafficSelector>,
     psk: Option<Key>,
+    id: Id,
 }
 
 impl Config {
@@ -222,14 +344,24 @@ impl Config {
             .map(|(i, pb)| pb.build(i as u8 + 1, self.ipsec_protocol, spi.as_ref()))
     }
 
-    /// Returns the identity of IKE SA
-    pub fn id(&self) -> &Id {
-        &self.id
+    /// Returns an interator over inbound traffic selectors
+    pub fn inbound_traffic_selectors(&self) -> impl Iterator<Item = &TrafficSelector> {
+        self.inbound_traffic_selectors.iter()
+    }
+
+    /// Returns an interator over inbound traffic selectors
+    pub fn outbound_traffic_selectors(&self) -> impl Iterator<Item = &TrafficSelector> {
+        self.outbound_traffic_selectors.iter()
     }
 
     /// Returns the PSK for authentication if set
     pub fn psk(&self) -> Option<&Key> {
         self.psk.as_ref()
+    }
+
+    /// Returns the identity of IKE SA
+    pub fn id(&self) -> &Id {
+        &self.id
     }
 }
 
@@ -265,8 +397,17 @@ pub(crate) mod tests {
                     .integrity(IntegId::AUTH_HMAC_SHA1_96)
                     .dh(DhId::MODP2048)
             })
+            .inbound_traffic_selector(|tc| {
+                tc.start_address("192.168.1.1".parse().unwrap())
+                    .start_port(2000)
+            })
+            .outbound_traffic_selector(|tc| {
+                tc.start_address("192.168.1.2".parse().unwrap())
+                    .start_port(2000)
+            })
             .psk(b"test test test")
             .build(Id::new(IdType::ID_KEY_ID.into(), id.as_ref()))
+            .expect("building config should succeed")
     }
 
     #[test]

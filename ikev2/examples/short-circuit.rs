@@ -33,6 +33,7 @@ fn create_config(id: impl AsRef<[u8]>) -> Config {
         })
         .psk(b"test test test")
         .build(Id::new(IdType::ID_KEY_ID.into(), id.as_ref()))
+        .expect("building config should succeed")
 }
 
 fn create_traffic_selector(address: &IpAddr) -> TrafficSelector {

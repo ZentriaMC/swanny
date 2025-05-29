@@ -103,6 +103,9 @@ pub enum ProtocolError {
     #[error("no proposals received from peer")]
     NoProposalsReceived,
 
+    #[error("no traffic selectors received from peer are acceptable")]
+    TrafficSelectorUnacceptable,
+
     #[error("inconsistent KE group received")]
     InconsistentKeGroup(Num<u16, DhId>),
 
@@ -466,10 +469,10 @@ pub struct ProtectingKeys {
 
 #[derive(Clone, Debug)]
 pub(crate) struct LarvalChildSa {
-    pub ts_i: Option<TrafficSelector>,
-    pub ts_r: Option<TrafficSelector>,
-    pub spi: Option<EspSpi>,
-    pub proposals: Option<Vec<Proposal>>,
+    pub ts_i: TrafficSelector,
+    pub ts_r: TrafficSelector,
+    pub spi: EspSpi,
+    pub proposals: Vec<Proposal>,
 }
 
 impl LarvalChildSa {
@@ -484,24 +487,24 @@ impl LarvalChildSa {
         let proposals: Vec<_> = config.ipsec_proposals(&spi).collect();
 
         Ok(Self {
-            ts_i: Some(ts_i.to_owned()),
-            ts_r: Some(ts_r.to_owned()),
-            spi: Some(spi),
-            proposals: Some(proposals),
+            ts_i: ts_i.to_owned(),
+            ts_r: ts_r.to_owned(),
+            spi,
+            proposals,
         })
     }
 
     pub fn build(
-        mut self,
+        self,
         chosen_proposal: &ChosenProposal,
         d: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<ChildSa, CryptoError> {
         let mut child_sa = ChildSa {
-            ts_i: self.ts_i.take().unwrap(),
-            ts_r: self.ts_r.take().unwrap(),
-            spi: self.spi.take().unwrap(),
+            ts_i: self.ts_i,
+            ts_r: self.ts_r,
+            spi: self.spi,
             chosen_proposal: chosen_proposal.to_owned(),
             keys: None,
         };

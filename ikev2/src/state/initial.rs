@@ -152,10 +152,13 @@ fn generate_ike_sa_init_response(
         .chosen_proposal()?
         .group()
         .ok_or(ConfigError::InsufficientProposal)?;
-    let nonce_r = (*data.nonce_r).as_ref().unwrap();
+    let nonce_r = (*data.nonce_r).as_ref().expect("nonce should be set");
 
     let mut response = Message::new(
-        data.peer_spi.as_ref().as_ref().unwrap(),
+        data.peer_spi
+            .as_ref()
+            .as_ref()
+            .expect("peer SPI should be set"),
         &data.spi,
         ExchangeType::IKE_SA_INIT.into(),
         MessageFlags::R,
@@ -167,7 +170,9 @@ fn generate_ike_sa_init_response(
             PayloadType::KE.into(),
             payload::Content::Ke(payload::Ke::new(
                 group.id().into(),
-                (*data.public_key).as_ref().unwrap(),
+                (*data.public_key)
+                    .as_ref()
+                    .expect("DH public key should be set"),
             )),
             true,
         ),

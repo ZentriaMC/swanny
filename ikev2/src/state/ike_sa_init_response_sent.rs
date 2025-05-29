@@ -80,14 +80,18 @@ fn handle_ike_auth_request(
         return Err(ProtocolError::AuthenticationFailed.into());
     }
 
-    let larval_child_sa = LarvalChildSa::new(
-        config,
-        ts_r.traffic_selectors().next().unwrap(),
-        ts_i.traffic_selectors().next().unwrap(),
-    )?;
-    let proposals: Vec<_> = config
-        .ipsec_proposals(larval_child_sa.spi.as_ref().unwrap())
-        .collect();
+    let ts_i =
+        TrafficSelector::negotiate(config.inbound_traffic_selectors(), ts_i.traffic_selectors())
+            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+
+    let ts_r = TrafficSelector::negotiate(
+        config.outbound_traffic_selectors(),
+        ts_r.traffic_selectors(),
+    )
+    .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+
+    let larval_child_sa = LarvalChildSa::new(config, &ts_r, &ts_i)?;
+    let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
     }

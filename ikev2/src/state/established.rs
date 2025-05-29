@@ -118,20 +118,25 @@ fn handle_create_child_sa_request(
         .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
 
     let ts_i: Option<&payload::Ts> = request.get(PayloadType::TSi);
-
     let ts_r: Option<&payload::Ts> = request.get(PayloadType::TSr);
 
     if let (Some(ts_i), Some(ts_r)) = (ts_i, ts_r) {
         // Create a new Child SA, if TSi and TSr are present
 
-        let larval_child_sa = LarvalChildSa::new(
-            config,
-            ts_r.traffic_selectors().next().unwrap(),
-            ts_i.traffic_selectors().next().unwrap(),
-        )?;
-        let proposals: Vec<_> = config
-            .ipsec_proposals(larval_child_sa.spi.as_ref().unwrap())
-            .collect();
+        let ts_i = TrafficSelector::negotiate(
+            config.inbound_traffic_selectors(),
+            ts_i.traffic_selectors(),
+        )
+        .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+
+        let ts_r = TrafficSelector::negotiate(
+            config.outbound_traffic_selectors(),
+            ts_r.traffic_selectors(),
+        )
+        .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+
+        let larval_child_sa = LarvalChildSa::new(config, &ts_r, &ts_i)?;
+        let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
         if proposals.is_empty() {
             return Err(ConfigError::NoProposalsSet.into());
         }
@@ -180,7 +185,7 @@ fn generate_create_child_sa_response(
         ),
         Payload::new(
             PayloadType::NONCE.into(),
-            payload::Content::Nonce(payload::Nonce::new(&(*data.nonce_r).as_ref().unwrap())),
+            payload::Content::Nonce(payload::Nonce::new((*data.nonce_r).as_ref().unwrap())),
             true,
         ),
         Payload::new(
@@ -251,7 +256,7 @@ fn generate_create_child_sa_request(
     crypto::rand_bytes(&mut nonce[..])?;
 
     let larval_child_sa = LarvalChildSa::new(config, ts_i, ts_r)?;
-    let proposals = larval_child_sa.proposals.as_ref().unwrap();
+    let proposals = &larval_child_sa.proposals;
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
     }
@@ -269,16 +274,12 @@ fn generate_create_child_sa_request(
         ),
         Payload::new(
             PayloadType::TSi.into(),
-            payload::Content::Ts(payload::Ts::new(Some(
-                larval_child_sa.ts_i.as_ref().unwrap().clone(),
-            ))),
+            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_i.clone()))),
             true,
         ),
         Payload::new(
             PayloadType::TSr.into(),
-            payload::Content::Ts(payload::Ts::new(Some(
-                larval_child_sa.ts_r.as_ref().unwrap().clone(),
-            ))),
+            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r.clone()))),
             true,
         ),
     ]);
@@ -323,7 +324,7 @@ impl State for Established {
 
                     Self::send_message(sender.clone(), &mut data, response)?;
 
-                    for child_sa in data.deleted_child_sas.to_mut().into_iter() {
+                    for child_sa in data.deleted_child_sas.to_mut().iter_mut() {
                         Self::delete_child_sa(sender.clone(), child_sa.clone())?;
                     }
 

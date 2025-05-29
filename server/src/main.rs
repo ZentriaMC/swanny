@@ -57,6 +57,7 @@ fn create_ike_sa_config(address: &IpAddr, psk: impl AsRef<[u8]>) -> Config {
         })
         .psk(psk.as_ref())
         .build(id)
+        .expect("building config should succeed")
 }
 
 fn create_traffic_selector(

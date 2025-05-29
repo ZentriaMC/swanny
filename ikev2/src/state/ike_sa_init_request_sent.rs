@@ -97,7 +97,7 @@ fn generate_ike_auth_request(
     );
 
     let larval_child_sa = data.larval_child_sa.as_ref().as_ref().unwrap();
-    let proposals = larval_child_sa.proposals.as_ref().unwrap();
+    let proposals = &larval_child_sa.proposals;
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
     }
@@ -125,16 +125,12 @@ fn generate_ike_auth_request(
         Payload::new(PayloadType::AUTH.into(), payload::Content::Auth(auth), true),
         Payload::new(
             PayloadType::TSi.into(),
-            payload::Content::Ts(payload::Ts::new(Some(
-                larval_child_sa.ts_i.as_ref().unwrap().clone(),
-            ))),
+            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_i.clone()))),
             true,
         ),
         Payload::new(
             PayloadType::TSr.into(),
-            payload::Content::Ts(payload::Ts::new(Some(
-                larval_child_sa.ts_r.as_ref().unwrap().clone(),
-            ))),
+            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r.clone()))),
             true,
         ),
     ]);
