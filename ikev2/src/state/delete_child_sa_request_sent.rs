@@ -19,14 +19,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-pub struct DeleteChildRequestSent;
+pub struct DeleteChildSaRequestSent;
 
-impl SendProtectedMessage for DeleteChildRequestSent {}
-impl DeleteChildSa for DeleteChildRequestSent {}
+impl SendProtectedMessage for DeleteChildSaRequestSent {}
+impl DeleteChildSa for DeleteChildSaRequestSent {}
 
-impl std::fmt::Display for DeleteChildRequestSent {
+impl std::fmt::Display for DeleteChildSaRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        f.debug_struct("DeleteChildRequestSent").finish()
+        f.debug_struct("DeleteChildSaRequestSent").finish()
     }
 }
 
@@ -54,7 +54,7 @@ fn handle_informational_response(
     Ok(())
 }
 
-impl DeleteChildRequestSent {
+impl DeleteChildSaRequestSent {
     async fn handle_response(
         self: Box<Self>,
         sender: UnboundedSender<ControlMessage>,
@@ -102,7 +102,7 @@ impl DeleteChildRequestSent {
 }
 
 #[async_trait]
-impl State for DeleteChildRequestSent {
+impl State for DeleteChildSaRequestSent {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,

@@ -36,8 +36,8 @@ pub(crate) use ike_auth_request_sent::IkeAuthRequestSent;
 mod established;
 pub(crate) use established::Established;
 
-mod delete_child_request_sent;
-pub(crate) use delete_child_request_sent::DeleteChildRequestSent;
+mod delete_child_sa_request_sent;
+pub(crate) use delete_child_sa_request_sent::DeleteChildSaRequestSent;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidStateError {

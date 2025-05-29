@@ -333,12 +333,10 @@ async fn delete_sa(
     spi: &EspSpi,
 ) -> Result<()> {
     let mut message = DelGetMessage::default();
+    message.user_sa_id.destination(dst_addr);
     message
-        .user_sa_id
-        .destination(dst_addr);
-    message.nlas.push(XfrmAttrs::SrcAddr(Address::from_ip(
-        src_addr,
-    )));
+        .nlas
+        .push(XfrmAttrs::SrcAddr(Address::from_ip(src_addr)));
     message.user_sa_id.proto = match ipsec_protocol {
         Protocol::AH => libc::IPPROTO_AH.try_into()?,
         Protocol::ESP => libc::IPPROTO_ESP.try_into()?,
@@ -362,7 +360,8 @@ async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &Child
         child_sa.ts_r().start_address(),
         child_sa.chosen_proposal().protocol(),
         child_sa.spi(),
-    ).await?;
+    )
+    .await?;
 
     delete_sa(
         handle.clone(),
@@ -370,7 +369,8 @@ async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &Child
         child_sa.ts_i().start_address(),
         child_sa.chosen_proposal().protocol(),
         child_sa.chosen_proposal().spi().try_into()?,
-    ).await?;
+    )
+    .await?;
 
     Ok(())
 }

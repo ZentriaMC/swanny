@@ -94,7 +94,7 @@ fn generate_informational_response(
         .map_err(Into::into)
 }
 
-fn generate_delete_child_request(
+fn generate_delete_child_sa_request(
     data: &mut StateDataCache<'_>,
     spi: &EspSpi,
 ) -> Result<ProtectedMessage, StateError> {
@@ -204,7 +204,7 @@ impl State for Established {
             let data = data.read().await;
             let mut data = StateDataCache::new_borrowed(&data);
 
-            let request = generate_delete_child_request(&mut data, spi)?;
+            let request = generate_delete_child_sa_request(&mut data, spi)?;
 
             Self::send_message(sender.clone(), &mut data, request)?;
             data.swap(&default)
@@ -215,6 +215,6 @@ impl State for Established {
             cache.write_into(&mut data);
         }
 
-        Ok(Box::new(state::DeleteChildRequestSent {}))
+        Ok(Box::new(state::DeleteChildSaRequestSent {}))
     }
 }
