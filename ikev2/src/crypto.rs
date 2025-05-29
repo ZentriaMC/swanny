@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn test_prf() {
         let prf = Prf::new(PrfId::PRF_HMAC_SHA1).expect("unable to create PRF");
-        prf.prf(&vec![0u8; 20], b"foo")
+        prf.prf(&Key::new(vec![0u8; 20]), b"foo")
             .expect("unable to calculate PRF");
     }
 
@@ -628,7 +628,7 @@ mod tests {
     fn test_cipher() {
         let cipher = Cipher::new(EncrId::ENCR_AES_CBC, Some(128)).expect("");
 
-        let key = vec![1; 16];
+        let key = Key::new(vec![1; 16]);
         let plaintext = b"hello world";
         let ciphertext = cipher.encrypt(&key, &plaintext).expect("");
         assert_eq!(
