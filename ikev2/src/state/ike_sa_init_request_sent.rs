@@ -160,6 +160,11 @@ impl State for IkeSaInitRequestSent {
     ) -> Result<Box<dyn State>, StateError> {
         let serialized_response = message;
         let response = Message::deserialize(&mut message)?;
+
+        if !response.flags().contains(MessageFlags::R) {
+            return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+        }
+
         match response.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
                 let default = StateData::default();

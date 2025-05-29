@@ -39,6 +39,9 @@ pub(crate) use established::Established;
 mod delete_child_sa_request_sent;
 pub(crate) use delete_child_sa_request_sent::DeleteChildSaRequestSent;
 
+mod create_child_sa_request_sent;
+pub(crate) use create_child_sa_request_sent::CreateChildSaRequestSent;
+
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidStateError {
     #[error("no proposal chosen")]
@@ -197,6 +200,7 @@ cache_cow! {
         ike_sa_init_response: Option<Vec<u8>>,
         last_message: Option<Vec<u8>>,
         larval_child_sa: Option<LarvalChildSa>,
+        created_child_sa: Option<Box<ChildSa>>,
         child_sas: Vec<Box<ChildSa>>,
         deleted_child_sas: Vec<Box<ChildSa>>,
     }
@@ -461,5 +465,16 @@ trait DeleteChildSa {
         debug!(child_sa = ?&child_sa, "Child SA deleted");
         sender.unbounded_send(ControlMessage::DeleteChildSa(child_sa))?;
         Ok(())
+    }
+}
+
+trait VerifyMessage {
+    fn verify_message(data: &StateDataCache<'_>, message: &[u8]) -> Result<(), StateError> {
+        if data.message_verify(message)? {
+            debug!("checksum verified");
+            Ok(())
+        } else {
+            Err(ProtocolError::IntegrityCheckFailed.into())
+        }
     }
 }

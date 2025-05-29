@@ -1,5 +1,6 @@
 use crate::{
-    config::Config,
+    config::{Config, ConfigError},
+    crypto,
     message::{
         EspSpi, Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType, Protocol},
@@ -7,10 +8,10 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::ControlMessage,
+    sa::{ChosenProposal, ControlMessage, LarvalChildSa},
     state::{
-        self, ChildSa, DeleteChildSa, InvalidStateError, ProtocolError, SendProtectedMessage,
-        State, StateData, StateDataCache, StateError,
+        self, ChildSa, CreateChildSa, DeleteChildSa, InvalidStateError, ProtocolError,
+        SendProtectedMessage, State, StateData, StateDataCache, StateError, VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -22,6 +23,8 @@ use tracing::debug;
 pub struct Established;
 
 impl SendProtectedMessage for Established {}
+impl VerifyMessage for Established {}
+impl CreateChildSa for Established {}
 impl DeleteChildSa for Established {}
 
 impl std::fmt::Display for Established {
@@ -94,6 +97,108 @@ fn generate_informational_response(
         .map_err(Into::into)
 }
 
+fn handle_create_child_sa_request(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+    request: &ProtectedMessage,
+) -> Result<(), StateError> {
+    let request = request.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
+
+    debug!(request = ?&request, "unprotected request");
+
+    let mut nonce = vec![0u8; 32];
+    crypto::rand_bytes(&mut nonce[..])?;
+
+    let sa: &payload::Sa = request
+        .get(PayloadType::SA)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
+
+    let nonce_i: &payload::Nonce = request
+        .get(PayloadType::NONCE)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
+
+    let ts_i: Option<&payload::Ts> = request.get(PayloadType::TSi);
+
+    let ts_r: Option<&payload::Ts> = request.get(PayloadType::TSr);
+
+    if let (Some(ts_i), Some(ts_r)) = (ts_i, ts_r) {
+        // Create a new Child SA, if TSi and TSr are present
+
+        let larval_child_sa = LarvalChildSa::new(
+            config,
+            ts_r.traffic_selectors().next().unwrap(),
+            ts_i.traffic_selectors().next().unwrap(),
+        )?;
+        let proposals: Vec<_> = config
+            .ipsec_proposals(larval_child_sa.spi.as_ref().unwrap())
+            .collect();
+        if proposals.is_empty() {
+            return Err(ConfigError::NoProposalsSet.into());
+        }
+
+        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
+        let child_sa = larval_child_sa.build(
+            &chosen_proposal,
+            &data.keys()?.deriving.d,
+            nonce_i.nonce(),
+            &nonce[..],
+        )?;
+        *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
+    } else {
+        // Otherwise, rekey SA
+    }
+
+    *data.nonce_r.to_mut() = Some(nonce);
+
+    Ok(())
+}
+
+fn generate_create_child_sa_response(
+    data: &mut StateDataCache<'_>,
+    request: &ProtectedMessage,
+) -> Result<ProtectedMessage, StateError> {
+    let mut response = Message::new(
+        data.initiator_spi()?,
+        data.responder_spi()?,
+        ExchangeType::CREATE_CHILD_SA.into(),
+        MessageFlags::R,
+        request.id(),
+    );
+
+    let child_sa = (*data.created_child_sa).as_ref().unwrap();
+    let proposal = child_sa.chosen_proposal().proposal(
+        1,
+        child_sa.chosen_proposal().protocol().into(),
+        child_sa.spi(),
+    );
+
+    response.add_payloads([
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(Some(proposal))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::NONCE.into(),
+            payload::Content::Nonce(payload::Nonce::new(&(*data.nonce_r).as_ref().unwrap())),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSi.into(),
+            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_i().clone()))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSr.into(),
+            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_r().clone()))),
+            true,
+        ),
+    ]);
+    response
+        .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)
+        .map_err(Into::into)
+}
+
 fn generate_delete_child_sa_request(
     data: &mut StateDataCache<'_>,
     spi: &EspSpi,
@@ -121,16 +226,80 @@ fn generate_delete_child_sa_request(
         false,
     )));
 
-    request
-        .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)
-        .map_err(Into::into)
+    let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
+
+    *data.message_id.to_mut() = request.id();
+
+    Ok(request)
+}
+
+fn generate_create_child_sa_request(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+    ts_i: &TrafficSelector,
+    ts_r: &TrafficSelector,
+) -> Result<ProtectedMessage, StateError> {
+    let mut request = Message::new(
+        data.initiator_spi()?,
+        data.responder_spi()?,
+        ExchangeType::CREATE_CHILD_SA.into(),
+        MessageFlags::I,
+        data.message_id.wrapping_add(1),
+    );
+
+    let mut nonce = vec![0u8; 32];
+    crypto::rand_bytes(&mut nonce[..])?;
+
+    let larval_child_sa = LarvalChildSa::new(config, ts_i, ts_r)?;
+    let proposals = larval_child_sa.proposals.as_ref().unwrap();
+    if proposals.is_empty() {
+        return Err(ConfigError::NoProposalsSet.into());
+    }
+
+    request.add_payloads([
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(proposals.clone())),
+            true,
+        ),
+        Payload::new(
+            PayloadType::NONCE.into(),
+            payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSi.into(),
+            payload::Content::Ts(payload::Ts::new(Some(
+                larval_child_sa.ts_i.as_ref().unwrap().clone(),
+            ))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSr.into(),
+            payload::Content::Ts(payload::Ts::new(Some(
+                larval_child_sa.ts_r.as_ref().unwrap().clone(),
+            ))),
+            true,
+        ),
+    ]);
+
+    let request = request.protect(
+        data.chosen_proposal()?.cipher(),
+        &data.keys()?.protecting.ei,
+    )?;
+
+    *data.message_id.to_mut() = request.id();
+    *data.larval_child_sa.to_mut() = Some(larval_child_sa);
+    *data.nonce_i.to_mut() = Some(nonce);
+
+    Ok(request)
 }
 
 #[async_trait]
 impl State for Established {
     async fn handle_message(
         self: Box<Self>,
-        _config: &Config,
+        config: &Config,
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         mut message: &[u8],
@@ -146,11 +315,7 @@ impl State for Established {
                     let data = data.read().await;
                     let mut data = StateDataCache::new_borrowed(&data);
 
-                    if data.message_verify(serialized_request)? {
-                        debug!("checksum verified");
-                    } else {
-                        return Err(ProtocolError::IntegrityCheckFailed.into());
-                    }
+                    Self::verify_message(&data, serialized_request)?;
 
                     handle_informational_request(&mut data, &request)?;
 
@@ -158,10 +323,37 @@ impl State for Established {
 
                     Self::send_message(sender.clone(), &mut data, response)?;
 
-                    for child_sa in data.deleted_child_sas.iter() {
+                    for child_sa in data.deleted_child_sas.to_mut().into_iter() {
                         Self::delete_child_sa(sender.clone(), child_sa.clone())?;
                     }
-                    data.deleted_child_sas.to_mut().clear();
+
+                    data.swap(&default)
+                };
+
+                {
+                    let mut data = data.write().await;
+                    cache.write_into(&mut data);
+                }
+            }
+            Some(ExchangeType::CREATE_CHILD_SA) => {
+                let default = StateData::default();
+                let default = StateDataCache::new_borrowed(&default);
+
+                let cache = {
+                    let data = data.read().await;
+                    let mut data = StateDataCache::new_borrowed(&data);
+
+                    Self::verify_message(&data, serialized_request)?;
+
+                    handle_create_child_sa_request(config, &mut data, &request)?;
+
+                    let response = generate_create_child_sa_response(&mut data, &request)?;
+
+                    Self::send_message(sender.clone(), &mut data, response)?;
+
+                    if let Some(child_sa) = data.created_child_sa.to_mut().take() {
+                        Self::create_child_sa(sender.clone(), &mut data, child_sa)?;
+                    }
 
                     data.swap(&default)
                 };
@@ -180,14 +372,31 @@ impl State for Established {
 
     async fn handle_acquire(
         self: Box<Self>,
-        _config: &Config,
-        _sender: UnboundedSender<ControlMessage>,
-        _data: Arc<RwLock<StateData>>,
-        _ts_i: &TrafficSelector,
-        _ts_r: &TrafficSelector,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+        ts_i: &TrafficSelector,
+        ts_r: &TrafficSelector,
         _index: u32,
     ) -> Result<Box<dyn State>, StateError> {
-        Ok(self)
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
+
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            let request = generate_create_child_sa_request(config, &mut data, ts_i, ts_r)?;
+            Self::send_message(sender.clone(), &mut data, request)?;
+            data.swap(&default)
+        };
+
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
+        }
+
+        Ok(Box::new(state::CreateChildSaRequestSent {}))
     }
 
     async fn handle_expire(

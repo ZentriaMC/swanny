@@ -201,6 +201,11 @@ impl State for Initial {
     ) -> Result<Box<dyn State>, StateError> {
         let serialized_request = message;
         let request = Message::deserialize(&mut message)?;
+
+        if !request.flags().contains(MessageFlags::I) {
+            return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
+        }
+
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
                 let default = StateData::default();

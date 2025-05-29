@@ -7,9 +7,9 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::ControlMessage,
+    sa::{ChosenProposal, ControlMessage},
     state::{
-        DeleteChildSa, Established, ProtocolError, SendProtectedMessage, State, StateData,
+        CreateChildSa, Established, ProtocolError, SendProtectedMessage, State, StateData,
         StateDataCache, StateError, VerifyMessage,
     },
 };
@@ -19,19 +19,19 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-pub struct DeleteChildSaRequestSent;
+pub struct CreateChildSaRequestSent;
 
-impl SendProtectedMessage for DeleteChildSaRequestSent {}
-impl VerifyMessage for DeleteChildSaRequestSent {}
-impl DeleteChildSa for DeleteChildSaRequestSent {}
+impl SendProtectedMessage for CreateChildSaRequestSent {}
+impl VerifyMessage for CreateChildSaRequestSent {}
+impl CreateChildSa for CreateChildSaRequestSent {}
 
-impl std::fmt::Display for DeleteChildSaRequestSent {
+impl std::fmt::Display for CreateChildSaRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        f.debug_struct("DeleteChildSaRequestSent").finish()
+        f.debug_struct("CreateChildSaRequestSent").finish()
     }
 }
 
-fn handle_informational_response(
+fn handle_create_child_sa_response(
     data: &mut StateDataCache<'_>,
     response: &ProtectedMessage,
 ) -> Result<(), StateError> {
@@ -39,23 +39,45 @@ fn handle_informational_response(
 
     debug!(response = ?&response, "unprotected response");
 
-    let delete: Option<&payload::Delete> = response.get(PayloadType::DELETE);
-    if let Some(delete) = delete {
-        for spi in delete.spis() {
-            let child_sas = data.child_sas.to_mut();
-            let index = child_sas
-                .iter()
-                .position(|child_sa| child_sa.chosen_proposal().spi() == spi);
-            if let Some(index) = index {
-                let child_sa = child_sas.swap_remove(index);
-                data.deleted_child_sas.to_mut().push(child_sa);
-            }
-        }
+    let sa: &payload::Sa = response
+        .get(PayloadType::SA)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
+
+    let nonce_r: &payload::Nonce = response
+        .get(PayloadType::NONCE)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
+
+    let larval_child_sa = data.larval_child_sa.to_mut().take();
+
+    if let Some(larval_child_sa) = larval_child_sa {
+        // Create a new Child SA, if larval_child_sa is set
+        let _ts_i: &payload::Ts = response
+            .get(PayloadType::TSi)
+            .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
+
+        let _ts_r: &payload::Ts = response
+            .get(PayloadType::TSr)
+            .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
+
+        let proposals = larval_child_sa.proposals.as_ref().unwrap();
+
+        let chosen_proposal = ChosenProposal::negotiate(proposals, sa.proposals())?;
+
+        let child_sa = larval_child_sa.build(
+            &chosen_proposal,
+            &data.keys()?.deriving.d,
+            (*data.nonce_i).as_ref().unwrap(),
+            nonce_r.nonce(),
+        )?;
+        *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
+    } else {
+        // Otherwise, rekey SA
     }
+
     Ok(())
 }
 
-impl DeleteChildSaRequestSent {
+impl CreateChildSaRequestSent {
     async fn handle_response(
         self: Box<Self>,
         sender: UnboundedSender<ControlMessage>,
@@ -64,7 +86,7 @@ impl DeleteChildSaRequestSent {
         serialized_response: &[u8],
     ) -> Result<Box<dyn State>, StateError> {
         match response.exchange().assigned() {
-            Some(ExchangeType::INFORMATIONAL) => {
+            Some(ExchangeType::CREATE_CHILD_SA) => {
                 let default = StateData::default();
                 let default = StateDataCache::new_borrowed(&default);
 
@@ -74,12 +96,11 @@ impl DeleteChildSaRequestSent {
 
                     Self::verify_message(&data, serialized_response)?;
 
-                    handle_informational_response(&mut data, &response)?;
+                    handle_create_child_sa_response(&mut data, &response)?;
 
-                    for child_sa in data.deleted_child_sas.iter() {
-                        Self::delete_child_sa(sender.clone(), child_sa.clone())?;
+                    if let Some(child_sa) = data.created_child_sa.to_mut().take() {
+                        Self::create_child_sa(sender.clone(), &mut data, child_sa)?;
                     }
-                    data.deleted_child_sas.to_mut().clear();
 
                     data.swap(&default)
                 };
@@ -99,7 +120,7 @@ impl DeleteChildSaRequestSent {
 }
 
 #[async_trait]
-impl State for DeleteChildSaRequestSent {
+impl State for CreateChildSaRequestSent {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,

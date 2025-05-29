@@ -10,6 +10,7 @@ use crate::{
     sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
     state::{
         self, CreateChildSa, SendProtectedMessage, State, StateData, StateDataCache, StateError,
+        VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -21,6 +22,7 @@ use tracing::{debug, info};
 pub struct IkeSaInitResponseSent;
 
 impl SendProtectedMessage for IkeSaInitResponseSent {}
+impl VerifyMessage for IkeSaInitResponseSent {}
 impl CreateChildSa for IkeSaInitResponseSent {}
 
 impl std::fmt::Display for IkeSaInitResponseSent {
@@ -163,6 +165,11 @@ impl State for IkeSaInitResponseSent {
     ) -> Result<Box<dyn State>, StateError> {
         let serialized_request = message;
         let request = ProtectedMessage::deserialize(&mut message)?;
+
+        if !request.flags().contains(MessageFlags::I) {
+            return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
+        }
+
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
                 let default = StateData::default();
@@ -172,11 +179,7 @@ impl State for IkeSaInitResponseSent {
                     let data = data.read().await;
                     let mut data = StateDataCache::new_borrowed(&data);
 
-                    if data.message_verify(serialized_request)? {
-                        debug!("checksum verified");
-                    } else {
-                        return Err(ProtocolError::IntegrityCheckFailed.into());
-                    }
+                    Self::verify_message(&data, serialized_request)?;
 
                     let child_sa = handle_ike_auth_request(config, &mut data, &request)?;
 
