@@ -80,6 +80,9 @@ async fn main() -> Result<()> {
                         ControlMessage::CreateChildSa(child_sa) => {
                             eprintln!("INITIATOR: created Child SA {:?}", child_sa);
                         }
+                        ControlMessage::DeleteChildSa(child_sa) => {
+                            eprintln!("INITIATOR: deleted Child SA {:?}", child_sa);
+                        }
                     }
                 },
                 message = messages_r.select_next_some() => {
@@ -94,6 +97,9 @@ async fn main() -> Result<()> {
                         }
                         ControlMessage::CreateChildSa(child_sa) => {
                             eprintln!("RESPONDER: created Child SA {:?}", child_sa);
+                        }
+                        ControlMessage::DeleteChildSa(child_sa) => {
+                            eprintln!("RESPONDER: deleted Child SA {:?}", child_sa);
                         }
                     }
                 },
