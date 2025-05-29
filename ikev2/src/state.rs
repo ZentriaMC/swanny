@@ -251,8 +251,11 @@ impl StateDataCache<'_> {
         }
     }
 
-    fn child_sa(&self, spi: &EspSpi) -> Option<&Box<ChildSa>> {
-        self.child_sas.iter().find(|child_sa| child_sa.spi() == spi)
+    fn child_sa(&self, spi: &EspSpi) -> Option<&ChildSa> {
+        self.child_sas
+            .iter()
+            .find(|child_sa| child_sa.spi() == spi)
+            .map(|child_sa| &**child_sa)
     }
 
     fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {

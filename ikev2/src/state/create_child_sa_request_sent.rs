@@ -112,9 +112,7 @@ impl CreateChildSaRequestSent {
 
                 Ok(Box::new(Established {}))
             }
-            _ => {
-                Err(ProtocolError::UnexpectedExchange(response.exchange()).into())
-            }
+            _ => Err(ProtocolError::UnexpectedExchange(response.exchange()).into()),
         }
     }
 }
