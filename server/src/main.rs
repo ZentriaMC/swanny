@@ -325,20 +325,26 @@ async fn create_child_sa(
     Ok(())
 }
 
-async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &ChildSa) -> Result<()> {
+async fn delete_sa(
+    handle: ConnectionHandle<XfrmMessage>,
+    src_addr: &IpAddr,
+    dst_addr: &IpAddr,
+    ipsec_protocol: Protocol,
+    spi: &EspSpi,
+) -> Result<()> {
     let mut message = DelGetMessage::default();
     message
         .user_sa_id
-        .destination(child_sa.ts_r().start_address());
+        .destination(dst_addr);
     message.nlas.push(XfrmAttrs::SrcAddr(Address::from_ip(
-        child_sa.ts_i().start_address(),
+        src_addr,
     )));
-    message.user_sa_id.proto = match child_sa.chosen_proposal().protocol() {
+    message.user_sa_id.proto = match ipsec_protocol {
         Protocol::AH => libc::IPPROTO_AH.try_into()?,
         Protocol::ESP => libc::IPPROTO_ESP.try_into()?,
         _ => return Err(anyhow::anyhow!("unsupported IPsec protocol")),
     };
-    message.user_sa_id.spi = u32::from_be_bytes(*child_sa.spi());
+    message.user_sa_id.spi = u32::from_be_bytes(*spi);
     let mut request = NetlinkMessage::from(XfrmMessage::DeleteSa(message));
     request.header.flags = NLM_F_REQUEST | NLM_F_ACK;
     debug!(request = ?&request, "sending netlink request");
@@ -346,6 +352,26 @@ async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &Child
     while let Some(message) = response.next().await {
         debug!(message = ?message, "received netlink response");
     }
+    Ok(())
+}
+
+async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &ChildSa) -> Result<()> {
+    delete_sa(
+        handle.clone(),
+        child_sa.ts_i().start_address(),
+        child_sa.ts_r().start_address(),
+        child_sa.chosen_proposal().protocol(),
+        child_sa.spi(),
+    ).await?;
+
+    delete_sa(
+        handle.clone(),
+        child_sa.ts_r().start_address(),
+        child_sa.ts_i().start_address(),
+        child_sa.chosen_proposal().protocol(),
+        child_sa.chosen_proposal().spi().try_into()?,
+    ).await?;
+
     Ok(())
 }
 
