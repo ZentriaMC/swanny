@@ -421,6 +421,53 @@ impl ChosenProposal {
         })
     }
 
+    /// Generates key materials used by a Child SA
+    fn generate_child_sa_keys(
+        &self,
+        d: &Key,
+        nonce_i: impl AsRef<[u8]>,
+        nonce_r: impl AsRef<[u8]>,
+        on_initiator: bool,
+    ) -> Result<ProtectingKeys, CryptoError> {
+        let mut buf = nonce_i.as_ref().to_vec();
+        buf.extend_from_slice(nonce_r.as_ref());
+        let integ_key_size = self
+            .integ()
+            .as_ref()
+            .map(|integ| integ.key_size())
+            .unwrap_or(0);
+        let encryption_key_size = self.cipher().key_size() + self.cipher().salt_size().unwrap_or(0);
+        let buf = self
+            .prf()
+            .prfplus(d, &buf, encryption_key_size * 2 + integ_key_size * 2)?;
+        let mut buf = buf.as_slice();
+
+        let mut ei = vec![0; encryption_key_size];
+        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
+        let ei = Key::new(ei);
+
+        let mut er = vec![0; encryption_key_size];
+        buf.try_copy_to_slice(&mut er).expect("buffer too short");
+        let er = Key::new(er);
+
+        let (ai, ar) = if self.integ().is_some() {
+            let mut ai = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ai).expect("buffer too short");
+
+            let mut ar = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ar).expect("buffer too short");
+            (Some(Key::new(ai)), Some(Key::new(ar)))
+        } else {
+            (None, None)
+        };
+
+        if on_initiator {
+            Ok(ProtectingKeys { ei, er, ai, ar })
+        } else {
+            Ok(ProtectingKeys { er, ei, ar, ai })
+        }
+    }
+
     /// Turns this into a `Proposal` data structure sent over the wire
     pub fn proposal(
         &self,
@@ -473,6 +520,7 @@ pub(crate) struct LarvalChildSa {
     pub ts_r: TrafficSelector,
     pub spi: EspSpi,
     pub proposals: Vec<Proposal>,
+    pub on_initiator: bool,
 }
 
 impl LarvalChildSa {
@@ -480,6 +528,7 @@ impl LarvalChildSa {
         config: &Config,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
+        on_initiator: bool,
     ) -> Result<Self, CryptoError> {
         let mut spi = EspSpi::default();
         crypto::rand_bytes(&mut spi)?;
@@ -491,6 +540,7 @@ impl LarvalChildSa {
             ts_r: ts_r.to_owned(),
             spi,
             proposals,
+            on_initiator,
         })
     }
 
@@ -501,15 +551,23 @@ impl LarvalChildSa {
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<ChildSa, CryptoError> {
-        let mut child_sa = ChildSa {
-            ts_i: self.ts_i,
-            ts_r: self.ts_r,
+        let (ts_i, ts_r) = if self.on_initiator {
+            (self.ts_i, self.ts_r)
+        } else {
+            (self.ts_r, self.ts_i)
+        };
+        Ok(ChildSa {
+            ts_i,
+            ts_r,
             spi: self.spi,
             chosen_proposal: chosen_proposal.to_owned(),
-            keys: None,
-        };
-        child_sa.generate_keys(d, nonce_i.as_ref(), nonce_r.as_ref())?;
-        Ok(child_sa)
+            keys: chosen_proposal.generate_child_sa_keys(
+                d,
+                nonce_i.as_ref(),
+                nonce_r.as_ref(),
+                self.on_initiator,
+            )?,
+        })
     }
 }
 
@@ -523,58 +581,10 @@ pub struct ChildSa {
     ts_r: TrafficSelector,
     spi: EspSpi,
     chosen_proposal: ChosenProposal,
-    keys: Option<ProtectingKeys>,
+    keys: ProtectingKeys,
 }
 
 impl ChildSa {
-    /// Generates key materials used by this Child SA
-    pub(crate) fn generate_keys(
-        &mut self,
-        d: &Key,
-        nonce_i: impl AsRef<[u8]>,
-        nonce_r: impl AsRef<[u8]>,
-    ) -> Result<(), CryptoError> {
-        let mut buf = nonce_i.as_ref().to_vec();
-        buf.extend_from_slice(nonce_r.as_ref());
-        let integ_key_size = self
-            .chosen_proposal
-            .integ()
-            .as_ref()
-            .map(|integ| integ.key_size())
-            .unwrap_or(0);
-        let encryption_key_size = self.chosen_proposal.cipher().key_size()
-            + self.chosen_proposal.cipher().salt_size().unwrap_or(0);
-        let buf = self.chosen_proposal.prf().prfplus(
-            d,
-            &buf,
-            encryption_key_size * 2 + integ_key_size * 2,
-        )?;
-        let mut buf = buf.as_slice();
-
-        let mut ei = vec![0; encryption_key_size];
-        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
-        let ei = Key::new(ei);
-
-        let mut er = vec![0; encryption_key_size];
-        buf.try_copy_to_slice(&mut er).expect("buffer too short");
-        let er = Key::new(er);
-
-        let (ai, ar) = if self.chosen_proposal.integ().is_some() {
-            let mut ai = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ai).expect("buffer too short");
-
-            let mut ar = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ar).expect("buffer too short");
-            (Some(Key::new(ai)), Some(Key::new(ar)))
-        } else {
-            (None, None)
-        };
-
-        self.keys = Some(ProtectingKeys { ei, er, ai, ar });
-
-        Ok(())
-    }
-
     /// Returns the intiator's traffic selector
     pub fn ts_i(&self) -> &TrafficSelector {
         &self.ts_i
@@ -596,8 +606,8 @@ impl ChildSa {
     }
 
     /// Returns the key materials
-    pub fn keys(&self) -> Option<&ProtectingKeys> {
-        self.keys.as_ref()
+    pub fn keys(&self) -> &ProtectingKeys {
+        &self.keys
     }
 }
 

@@ -294,7 +294,6 @@ async fn create_sa(
 async fn create_child_sa(
     handle: ConnectionHandle<XfrmMessage>,
     child_sa: &ChildSa,
-    is_initiator: bool,
     expires: Option<u64>,
 ) -> Result<()> {
     create_sa(
@@ -305,17 +304,9 @@ async fn create_child_sa(
         child_sa.chosen_proposal().protocol(),
         child_sa.spi(),
         child_sa.chosen_proposal().integ(),
-        if is_initiator {
-            child_sa.keys().unwrap().ai.as_ref()
-        } else {
-            child_sa.keys().unwrap().ar.as_ref()
-        },
+        child_sa.keys().ai.as_ref(),
         child_sa.chosen_proposal().cipher(),
-        if is_initiator {
-            &child_sa.keys().unwrap().ei
-        } else {
-            &child_sa.keys().unwrap().er
-        },
+        &child_sa.keys().ei,
         expires,
     )
     .await?;
@@ -328,17 +319,9 @@ async fn create_child_sa(
         child_sa.chosen_proposal().protocol(),
         child_sa.chosen_proposal().spi().try_into().unwrap(),
         child_sa.chosen_proposal().integ(),
-        if is_initiator {
-            child_sa.keys().unwrap().ar.as_ref()
-        } else {
-            child_sa.keys().unwrap().ai.as_ref()
-        },
+        child_sa.keys().ar.as_ref(),
         child_sa.chosen_proposal().cipher(),
-        if is_initiator {
-            &child_sa.keys().unwrap().er
-        } else {
-            &child_sa.keys().unwrap().ei
-        },
+        &child_sa.keys().er,
         expires,
     )
     .await?;
@@ -478,7 +461,6 @@ async fn main() -> Result<()> {
                         create_child_sa(
                             handle.clone(),
                             &child_sa,
-                            ike_sa.is_initiator().await.unwrap(),
                             config.expires,
                         ).await?;
                     }

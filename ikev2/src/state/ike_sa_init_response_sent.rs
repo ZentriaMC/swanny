@@ -90,7 +90,7 @@ fn handle_ike_auth_request(
     )
     .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
-    let larval_child_sa = LarvalChildSa::new(config, &ts_r, &ts_i)?;
+    let larval_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
     let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());

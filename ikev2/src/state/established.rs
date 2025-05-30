@@ -134,7 +134,7 @@ fn handle_create_child_sa_request(
         )
         .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
-        let larval_child_sa = LarvalChildSa::new(config, &ts_r, &ts_i)?;
+        let larval_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
         let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
         if proposals.is_empty() {
             return Err(ConfigError::NoProposalsSet.into());
@@ -253,7 +253,7 @@ fn generate_create_child_sa_request(
 
     let nonce = Nonce::new()?;
 
-    let larval_child_sa = LarvalChildSa::new(config, ts_i, ts_r)?;
+    let larval_child_sa = LarvalChildSa::new(config, ts_i, ts_r, true)?;
     let proposals = &larval_child_sa.proposals;
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
