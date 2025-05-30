@@ -323,8 +323,8 @@ impl ChosenProposal {
         other: impl IntoIterator<Item = &'b Proposal>,
     ) -> Result<Self, ProtocolError> {
         let mut this = this.into_iter();
-        let mut other = other.into_iter();
-        match this.find_map(|px| other.find_map(|py| px.intersection(py))) {
+        let other: Vec<_> = other.into_iter().collect();
+        match this.find_map(|px| other.iter().find_map(|py| px.intersection(py))) {
             Some(proposal) => Self::new(&proposal),
             None => Err(ProtocolError::NoProposalChosen),
         }
