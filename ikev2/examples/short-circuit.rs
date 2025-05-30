@@ -84,6 +84,9 @@ async fn main() -> Result<()> {
                         ControlMessage::DeleteChildSa(child_sa) => {
                             eprintln!("INITIATOR: deleted Child SA {:?}", child_sa);
                         }
+                        ControlMessage::RekeyChildSa(child_sa) => {
+                            eprintln!("INITIATOR: rekeyed Child SA {:?}", child_sa);
+                        }
                     }
                 },
                 message = messages_r.select_next_some() => {
@@ -101,6 +104,9 @@ async fn main() -> Result<()> {
                         }
                         ControlMessage::DeleteChildSa(child_sa) => {
                             eprintln!("RESPONDER: deleted Child SA {:?}", child_sa);
+                        }
+                        ControlMessage::RekeyChildSa(child_sa) => {
+                            eprintln!("RESPONDER: rekeyed Child SA {:?}", child_sa);
                         }
                     }
                 },

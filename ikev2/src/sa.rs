@@ -66,6 +66,7 @@ pub enum ControlMessage {
     IkeMessage(Vec<u8>),
     CreateChildSa(Box<ChildSa>),
     DeleteChildSa(Box<ChildSa>),
+    RekeyChildSa(Box<ChildSa>),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -75,6 +76,9 @@ pub enum ProtocolError {
 
     #[error("missing transform")]
     MissingTransform(TransformType),
+
+    #[error("missing SPI")]
+    MissingSpi,
 
     #[error("transform ID conversion error")]
     TryFromTransformId(#[from] TryFromTransformIdError),
@@ -430,8 +434,20 @@ impl ChosenProposal {
         d: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
-    ) -> Result<ProtectingKeys, CryptoError> {
-        let mut buf = nonce_i.as_ref().to_vec();
+        peer_public_key: Option<&[u8]>,
+    ) -> Result<(ProtectingKeys, Option<Vec<u8>>), CryptoError> {
+        let mut buf = Vec::new();
+
+        let public_key = if let Some(peer_public_key) = peer_public_key {
+            let private_key = self.group().expect("group must be set").generate_key()?;
+            let g_ir = private_key.compute_key(peer_public_key)?;
+            buf.extend_from_slice(g_ir.as_ref());
+            Some(private_key.public_key()?)
+        } else {
+            None
+        };
+
+        buf.extend_from_slice(nonce_i.as_ref());
         buf.extend_from_slice(nonce_r.as_ref());
         let integ_key_size = self
             .integ()
@@ -463,7 +479,7 @@ impl ChosenProposal {
             (None, None)
         };
 
-        Ok(ProtectingKeys { ei, er, ai, ar })
+        Ok((ProtectingKeys { ei, er, ai, ar }, public_key))
     }
 
     /// Turns this into a `Proposal` data structure sent over the wire
@@ -549,12 +565,14 @@ impl LarvalChildSa {
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<ChildSa, CryptoError> {
+        let (keys, _) =
+            chosen_proposal.generate_child_sa_keys(d, nonce_i.as_ref(), nonce_r.as_ref(), None)?;
         Ok(ChildSa {
             ts_i: self.ts_i,
             ts_r: self.ts_r,
             spi: self.spi,
             chosen_proposal: chosen_proposal.to_owned(),
-            keys: chosen_proposal.generate_child_sa_keys(d, nonce_i.as_ref(), nonce_r.as_ref())?,
+            keys,
             on_initiator: self.on_initiator,
         })
     }
@@ -618,6 +636,21 @@ impl ChildSa {
     /// Returns the key materials
     pub fn keys(&self) -> &ProtectingKeys {
         &self.keys
+    }
+
+    /// Rekey this Child SA
+    pub fn rekey(
+        &mut self,
+        key: &Key,
+        nonce_i: impl AsRef<[u8]>,
+        nonce_r: impl AsRef<[u8]>,
+        peer_public_key: Option<&[u8]>,
+    ) -> Result<Option<Vec<u8>>, CryptoError> {
+        let (keys, public_key) =
+            self.chosen_proposal
+                .generate_child_sa_keys(key, nonce_i, nonce_r, peer_public_key)?;
+        self.keys = keys;
+        Ok(public_key)
     }
 }
 

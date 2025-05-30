@@ -54,7 +54,7 @@ pub enum CryptoError {
     TryFromInt(#[from] std::num::TryFromIntError),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Key(Zeroizing<Vec<u8>>);
 
 impl Key {
@@ -356,7 +356,7 @@ impl GroupPrivateKey {
         }
     }
 
-    pub fn compute_key(&self, public_key: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
+    pub fn compute_key(&self, public_key: impl AsRef<[u8]>) -> Result<Key, CryptoError> {
         let public_key = match *self.group.variant {
             GroupVariant::Ffdh(ref params) => {
                 let public_key = bn::BigNum::from_slice(public_key.as_ref())?;
@@ -377,7 +377,7 @@ impl GroupPrivateKey {
         };
         let mut deriver = Deriver::new(&self.pkey)?;
         deriver.set_peer(&public_key)?;
-        Ok(deriver.derive_to_vec()?)
+        Ok(Key::new(deriver.derive_to_vec()?))
     }
 }
 

@@ -470,6 +470,8 @@ async fn main() -> Result<()> {
                             &child_sa,
                         ).await?;
                     }
+                    ControlMessage::RekeyChildSa(_child_sa) => {
+                    }
                 }
             },
             result = incoming_framed.select_next_some() => {
