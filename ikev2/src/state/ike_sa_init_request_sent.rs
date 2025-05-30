@@ -135,12 +135,7 @@ fn generate_ike_auth_request(
         ),
     ]);
 
-    let request = request.protect(
-        data.chosen_proposal()?.cipher(),
-        &data.keys()?.protecting.ei,
-    )?;
-
-    *data.message_id.to_mut() = request.id();
+    let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
 
     Ok(request)
 }

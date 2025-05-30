@@ -593,7 +593,7 @@ impl ChildSa {
             &self.spi
         } else {
             let spi = self.chosen_proposal.spi.as_slice();
-            spi.try_into().unwrap()
+            spi.try_into().expect("SPI should be longer than 4 octets")
         }
     }
 
@@ -601,7 +601,7 @@ impl ChildSa {
     pub fn spi_r(&self) -> &EspSpi {
         if self.on_initiator {
             let spi = self.chosen_proposal.spi.as_slice();
-            spi.try_into().unwrap()
+            spi.try_into().expect("SPI should be longer than 4 octets")
         } else {
             &self.spi
         }

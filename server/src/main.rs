@@ -363,7 +363,7 @@ async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &Child
         child_sa.ts_i().start_address(),
         child_sa.ts_r().start_address(),
         child_sa.chosen_proposal().protocol(),
-        child_sa.spi(),
+        child_sa.spi_i(),
     )
     .await?;
 
@@ -372,7 +372,7 @@ async fn delete_child_sa(handle: ConnectionHandle<XfrmMessage>, child_sa: &Child
         child_sa.ts_r().start_address(),
         child_sa.ts_i().start_address(),
         child_sa.chosen_proposal().protocol(),
-        child_sa.chosen_proposal().spi().try_into()?,
+        child_sa.spi_r(),
     )
     .await?;
 

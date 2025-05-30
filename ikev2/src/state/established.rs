@@ -10,8 +10,8 @@ use crate::{
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa},
     state::{
-        self, ChildSa, CreateChildSa, DeleteChildSa, InvalidStateError, ProtocolError,
-        SendProtectedMessage, State, StateData, StateDataCache, StateError, VerifyMessage,
+        self, ChildSa, CreateChildSa, DeleteChildSa, ProtocolError, SendProtectedMessage, State,
+        StateData, StateDataCache, StateError, VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -92,9 +92,8 @@ fn generate_informational_response(
         })
         .collect();
     response.add_payloads(payloads);
-    response
-        .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)
-        .map_err(Into::into)
+    let response = response.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
+    Ok(response)
 }
 
 fn handle_create_child_sa_request(
@@ -204,15 +203,9 @@ fn generate_create_child_sa_response(
 }
 
 fn generate_delete_child_sa_request(
-    data: &mut StateDataCache<'_>,
-    spi: &EspSpi,
+    data: &StateDataCache<'_>,
+    child_sa: &ChildSa,
 ) -> Result<ProtectedMessage, StateError> {
-    let child_sa =
-        data.child_sa(spi)
-            .ok_or(StateError::InvalidState(InvalidStateError::UnknownChildSa(
-                *spi,
-            )))?;
-
     let mut request = Message::new(
         data.initiator_spi()?,
         data.responder_spi()?,
@@ -231,8 +224,6 @@ fn generate_delete_child_sa_request(
     )));
 
     let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
-
-    *data.message_id.to_mut() = request.id();
 
     Ok(request)
 }
@@ -282,12 +273,8 @@ fn generate_create_child_sa_request(
         ),
     ]);
 
-    let request = request.protect(
-        data.chosen_proposal()?.cipher(),
-        &data.keys()?.protecting.ei,
-    )?;
+    let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
 
-    *data.message_id.to_mut() = request.id();
     *data.larval_child_sa.to_mut() = Some(larval_child_sa);
     *data.nonce_i.to_mut() = Some(nonce);
 
@@ -325,6 +312,7 @@ impl State for Established {
                     for child_sa in data.deleted_child_sas.to_mut().iter_mut() {
                         Self::delete_child_sa(sender.clone(), child_sa.clone())?;
                     }
+                    data.deleted_child_sas.to_mut().clear();
 
                     data.swap(&default)
                 };
@@ -405,6 +393,8 @@ impl State for Established {
         data: Arc<RwLock<StateData>>,
         spi: &EspSpi,
     ) -> Result<Box<dyn State>, StateError> {
+        let mut deleted_child_sas = Vec::new();
+
         let default = StateData::default();
         let default = StateDataCache::new_borrowed(&default);
 
@@ -412,9 +402,18 @@ impl State for Established {
             let data = data.read().await;
             let mut data = StateDataCache::new_borrowed(&data);
 
-            let request = generate_delete_child_sa_request(&mut data, spi)?;
+            let child_sas = data.child_sas.to_mut();
+            let index = child_sas.iter().position(|child_sa| child_sa.spi() == spi);
+            if let Some(index) = index {
+                let child_sa = child_sas.swap_remove(index);
+                deleted_child_sas.push(child_sa);
+            }
 
-            Self::send_message(sender.clone(), &mut data, request)?;
+            for child_sa in deleted_child_sas.iter() {
+                debug!(spi = ?spi, "sending delete Child SA request");
+                let request = generate_delete_child_sa_request(&data, &child_sa)?;
+                Self::send_message(sender.clone(), &mut data, request)?;
+            }
             data.swap(&default)
         };
 
@@ -423,6 +422,10 @@ impl State for Established {
             cache.write_into(&mut data);
         }
 
-        Ok(Box::new(state::DeleteChildSaRequestSent {}))
+        if deleted_child_sas.is_empty() {
+            Ok(self)
+        } else {
+            Ok(Box::new(state::DeleteChildSaRequestSent {}))
+        }
     }
 }

@@ -76,7 +76,6 @@ fn generate_ike_sa_init_request(
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
     *data.private_key.to_mut() = Some(private_key);
     *data.nonce_i.to_mut() = Some(nonce);
-    *data.message_id.to_mut() = request.id();
 
     Ok(request)
 }

@@ -31,10 +31,7 @@ fn handle_ike_auth_response(
     data: &mut StateDataCache<'_>,
     response: &ProtectedMessage,
 ) -> Result<ChildSa, StateError> {
-    let response = response.unprotect(
-        data.chosen_proposal()?.cipher(),
-        &data.keys()?.protecting.er,
-    )?;
+    let response = response.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
 
     debug!(response = ?&response, "unprotected response");
 

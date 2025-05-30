@@ -198,7 +198,7 @@ cache_cow! {
         nonce_r: Option<Nonce>,
         ike_sa_init_request: Option<Vec<u8>>,
         ike_sa_init_response: Option<Vec<u8>>,
-        last_message: Option<Vec<u8>>,
+        last_request: Option<Vec<u8>>,
         larval_child_sa: Option<LarvalChildSa>,
         created_child_sa: Option<Box<ChildSa>>,
         child_sas: Vec<Box<ChildSa>>,
@@ -249,13 +249,6 @@ impl StateDataCache<'_> {
                 InvalidStateError::InitiatorNotDetermined,
             )),
         }
-    }
-
-    fn child_sa(&self, spi: &EspSpi) -> Option<&ChildSa> {
-        self.child_sas
-            .iter()
-            .find(|child_sa| child_sa.spi() == spi)
-            .map(|child_sa| &**child_sa)
     }
 
     fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {
@@ -419,8 +412,9 @@ trait SendMessage {
             } else {
                 debug!("message flags are not set");
             }
-        } else {
-            *data.last_message.to_mut() = Some(buf.to_vec());
+        } else if message.flags().contains(MessageFlags::I) {
+            *data.last_request.to_mut() = Some(buf.to_vec());
+            *data.message_id.to_mut() = message.id();
         }
 
         Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)
@@ -441,7 +435,10 @@ trait SendProtectedMessage {
             buf.extend_from_slice(&checksum);
         }
 
-        *data.last_message.to_mut() = Some(buf.to_vec());
+        if message.flags().contains(MessageFlags::I) {
+            *data.last_request.to_mut() = Some(buf.to_vec());
+            *data.message_id.to_mut() = message.id();
+        }
 
         Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)
     }
