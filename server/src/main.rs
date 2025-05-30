@@ -445,14 +445,14 @@ async fn main() -> Result<()> {
                             let ts_i = create_traffic_selector(
                                 acquire.acquire.selector.family,
                                 acquire.acquire.selector.proto,
-                                &acquire.acquire.selector.daddr,
-                                acquire.acquire.selector.dport,
+                                &acquire.acquire.selector.saddr,
+                                acquire.acquire.selector.sport,
                             )?;
                             let ts_r = create_traffic_selector(
                                 acquire.acquire.selector.family,
                                 acquire.acquire.selector.proto,
-                                &acquire.acquire.selector.saddr,
-                                acquire.acquire.selector.sport,
+                                &acquire.acquire.selector.daddr,
+                                acquire.acquire.selector.dport,
                             )?;
                             pending_operations.push(Either::Left(Either::Right(ike_sa.handle_acquire(ts_i, ts_r, acquire.acquire.policy.index))));
                         },
