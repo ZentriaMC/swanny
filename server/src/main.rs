@@ -35,11 +35,11 @@ use tracing::{debug, info};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 mod config;
 
-fn create_ike_sa_config(address: &IpAddr, psk: impl AsRef<[u8]>) -> Config {
+fn create_ike_sa_config(config: &config::Config) -> Config {
     use swanny_ikev2::config::ConfigBuilder;
     use swanny_ikev2::message::num::{DhId, EncrId, IntegId, PrfId, Protocol};
 
-    let id = match address {
+    let id = match &config.address {
         IpAddr::V4(v4) => Id::new(IdType::ID_IPV4_ADDR.into(), &v4.octets()[..]),
         IpAddr::V6(v6) => Id::new(IdType::ID_IPV6_ADDR.into(), &v6.octets()[..]),
     };
@@ -55,7 +55,27 @@ fn create_ike_sa_config(address: &IpAddr, psk: impl AsRef<[u8]>) -> Config {
             pc.encryption(EncrId::ENCR_AES_GCM_8, Some(128))
                 .prf(PrfId::PRF_HMAC_SHA2_256)
         })
-        .psk(psk.as_ref())
+        .inbound_traffic_selector(|tc| {
+            tc.start_address(config.address)
+                .start_port(0)
+                .end_port(65535)
+        })
+        .inbound_traffic_selector(|tc| {
+            tc.start_address(config.peer_address)
+                .start_port(0)
+                .end_port(65535)
+        })
+        .outbound_traffic_selector(|tc| {
+            tc.start_address(config.address)
+                .start_port(0)
+                .end_port(65535)
+        })
+        .outbound_traffic_selector(|tc| {
+            tc.start_address(config.peer_address)
+                .start_port(0)
+                .end_port(65535)
+        })
+        .psk(&config.psk)
         .build(id)
         .expect("building config should succeed")
 }
@@ -66,8 +86,8 @@ fn create_traffic_selector(
     address: &Address,
     port: u16,
 ) -> Result<TrafficSelector> {
-    match family {
-        2 => Ok(TrafficSelector::new(
+    match family as i32 {
+        libc::AF_INET => Ok(TrafficSelector::new(
             TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
             proto,
             &IpAddr::V4(address.to_ipv4()),
@@ -75,7 +95,7 @@ fn create_traffic_selector(
             port,
             port,
         )),
-        10 => Ok(TrafficSelector::new(
+        libc::AF_INET6 => Ok(TrafficSelector::new(
             TrafficSelectorType::TS_IPV6_ADDR_RANGE.into(),
             proto,
             &IpAddr::V6(address.to_ipv6()),
@@ -408,7 +428,7 @@ async fn main() -> Result<()> {
     let outgoing_socket = UdpSocket::from_std(outgoing_socket)?;
     let mut outgoing_framed = UdpFramed::new(outgoing_socket, BytesCodec::new()).fuse();
 
-    let ike_sa_config = create_ike_sa_config(&config.address, &config.psk);
+    let ike_sa_config = create_ike_sa_config(&config);
 
     let (ike_sa, mut ike_sa_messages) = IkeSa::new(&ike_sa_config)?;
 
