@@ -427,7 +427,6 @@ impl ChosenProposal {
         d: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
-        on_initiator: bool,
     ) -> Result<ProtectingKeys, CryptoError> {
         let mut buf = nonce_i.as_ref().to_vec();
         buf.extend_from_slice(nonce_r.as_ref());
@@ -461,11 +460,7 @@ impl ChosenProposal {
             (None, None)
         };
 
-        if on_initiator {
-            Ok(ProtectingKeys { ei, er, ai, ar })
-        } else {
-            Ok(ProtectingKeys { er, ei, ar, ai })
-        }
+        Ok(ProtectingKeys { ei, er, ai, ar })
     }
 
     /// Turns this into a `Proposal` data structure sent over the wire
@@ -551,22 +546,17 @@ impl LarvalChildSa {
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<ChildSa, CryptoError> {
-        let (ts_i, ts_r) = if self.on_initiator {
-            (self.ts_i, self.ts_r)
-        } else {
-            (self.ts_r, self.ts_i)
-        };
         Ok(ChildSa {
-            ts_i,
-            ts_r,
+            ts_i: self.ts_i,
+            ts_r: self.ts_r,
             spi: self.spi,
             chosen_proposal: chosen_proposal.to_owned(),
             keys: chosen_proposal.generate_child_sa_keys(
                 d,
                 nonce_i.as_ref(),
                 nonce_r.as_ref(),
-                self.on_initiator,
             )?,
+            on_initiator: self.on_initiator,
         })
     }
 }
@@ -582,6 +572,7 @@ pub struct ChildSa {
     spi: EspSpi,
     chosen_proposal: ChosenProposal,
     keys: ProtectingKeys,
+    on_initiator: bool,
 }
 
 impl ChildSa {
@@ -598,6 +589,26 @@ impl ChildSa {
     /// Returns the SPI
     pub fn spi(&self) -> &EspSpi {
         &self.spi
+    }
+
+    /// Returns the initiator SPI
+    pub fn spi_i(&self) -> &EspSpi {
+        if self.on_initiator {
+            &self.spi
+        } else {
+            let spi = self.chosen_proposal.spi.as_slice();
+            spi.try_into().unwrap()
+        }
+    }
+
+    /// Returns the responder SPI
+    pub fn spi_r(&self) -> &EspSpi {
+        if self.on_initiator {
+            let spi = self.chosen_proposal.spi.as_slice();
+            spi.try_into().unwrap()
+        } else {
+            &self.spi
+        }
     }
 
     /// Returns the cryptographic proposal chosen
