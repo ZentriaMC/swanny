@@ -72,21 +72,24 @@ impl TrafficSelector {
         other: impl IntoIterator<Item = &'a TrafficSelector>,
     ) -> Option<Self> {
         let mut this = this.into_iter();
-        let mut other = other.into_iter();
-        this.find_map(|tx| other.find_map(|ty| tx.intersection(ty)))
+        let other: Vec<_> = other.into_iter().collect();
+        this.find_map(|tx| other.iter().find_map(|ty| tx.intersection(ty)))
     }
 
     fn intersection(&self, other: &Self) -> Option<Self> {
         if self.ty != other.ty {
             return None;
         }
-        if self.ip_proto != other.ip_proto {
+        if self.ip_proto != 0 && self.ip_proto != other.ip_proto {
             return None;
         }
         if self.end_address < other.start_address || other.end_address < self.start_address {
             return None;
         }
-        if self.end_port < other.start_port || other.end_port < self.start_port {
+        if self.start_port != 0
+            && self.end_port != 0
+            && (self.end_port < other.start_port || other.end_port < self.start_port)
+        {
             return None;
         }
 
