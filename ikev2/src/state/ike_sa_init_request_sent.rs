@@ -77,7 +77,7 @@ fn handle_ike_sa_init_response(
 
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
     *data.keys.to_mut() = Some(keys);
-    *data.nonce_r.to_mut() = Some(nonce_r.nonce().to_vec());
+    *data.nonce_r.to_mut() = Some(nonce_r.nonce().clone());
     *data.peer_spi.to_mut() = Some(response.spi_r().to_owned());
 
     Ok(())

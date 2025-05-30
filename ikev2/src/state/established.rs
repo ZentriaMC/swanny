@@ -1,6 +1,6 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto,
+    crypto::Nonce,
     message::{
         EspSpi, Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType, Protocol},
@@ -106,8 +106,7 @@ fn handle_create_child_sa_request(
 
     debug!(request = ?&request, "unprotected request");
 
-    let mut nonce = vec![0u8; 32];
-    crypto::rand_bytes(&mut nonce[..])?;
+    let nonce = Nonce::new()?;
 
     let sa: &payload::Sa = request
         .get(PayloadType::SA)
@@ -146,7 +145,7 @@ fn handle_create_child_sa_request(
             &chosen_proposal,
             &data.keys()?.deriving.d,
             nonce_i.nonce(),
-            &nonce[..],
+            nonce.as_ref(),
         )?;
         *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
     } else {
@@ -252,8 +251,7 @@ fn generate_create_child_sa_request(
         data.message_id.wrapping_add(1),
     );
 
-    let mut nonce = vec![0u8; 32];
-    crypto::rand_bytes(&mut nonce[..])?;
+    let nonce = Nonce::new()?;
 
     let larval_child_sa = LarvalChildSa::new(config, ts_i, ts_r)?;
     let proposals = &larval_child_sa.proposals;
@@ -269,7 +267,7 @@ fn generate_create_child_sa_request(
         ),
         Payload::new(
             PayloadType::NONCE.into(),
-            payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
+            payload::Content::Nonce(payload::Nonce::new(nonce.as_ref())),
             true,
         ),
         Payload::new(

@@ -464,31 +464,31 @@ impl serialize::Deserialize for Auth {
 /// Nonce content
 #[derive(Debug, PartialEq)]
 pub struct Nonce {
-    nonce: Vec<u8>,
+    nonce: crypto::Nonce,
 }
 
 impl Nonce {
     /// Creates a new `Nonce` content
     pub fn new(nonce: impl AsRef<[u8]>) -> Self {
         Self {
-            nonce: nonce.as_ref().to_vec(),
+            nonce: nonce.as_ref().into(),
         }
     }
 
     /// Returns the nonce value of the `Nonce` content
-    pub fn nonce(&self) -> &[u8] {
+    pub fn nonce(&self) -> &crypto::Nonce {
         &self.nonce
     }
 }
 
 impl serialize::Serialize for Nonce {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
-        buf.put_slice(&self.nonce[..]);
+        buf.put_slice(self.nonce.as_ref());
         Ok(())
     }
 
     fn size(&self) -> Result<usize, serialize::SerializeError> {
-        Ok(self.nonce.len())
+        Ok(self.nonce.as_ref().len())
     }
 }
 

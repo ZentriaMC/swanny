@@ -1,6 +1,6 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto::{CryptoError, GroupPrivateKey, Key},
+    crypto::{CryptoError, GroupPrivateKey, Key, Nonce},
     message::{
         EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags},
@@ -194,8 +194,8 @@ cache_cow! {
         public_key: Option<Vec<u8>>,
         private_key: Option<GroupPrivateKey>,
         keys: Option<Keys>,
-        nonce_i: Option<Vec<u8>>,
-        nonce_r: Option<Vec<u8>>,
+        nonce_i: Option<Nonce>,
+        nonce_r: Option<Nonce>,
         ike_sa_init_request: Option<Vec<u8>>,
         ike_sa_init_response: Option<Vec<u8>>,
         last_message: Option<Vec<u8>>,
@@ -292,7 +292,7 @@ impl StateDataCache<'_> {
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_request.to_vec());
-        signed_data.append(&mut nonce_r.to_vec());
+        signed_data.append(&mut nonce_r.as_ref().to_vec());
         signed_data.append(&mut mac);
         Ok(signed_data)
     }
@@ -317,7 +317,7 @@ impl StateDataCache<'_> {
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_response.to_vec());
-        signed_data.append(&mut nonce_i.to_vec());
+        signed_data.append(&mut nonce_i.as_ref().to_vec());
         signed_data.append(&mut mac);
         Ok(signed_data)
     }

@@ -69,6 +69,29 @@ impl AsRef<[u8]> for Key {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Nonce(Vec<u8>);
+
+impl Nonce {
+    pub fn new() -> Result<Self, CryptoError> {
+        let mut nonce = vec![0u8; 32];
+        rand_bytes(&mut nonce[..])?;
+        Ok(Self(nonce))
+    }
+}
+
+impl AsRef<[u8]> for Nonce {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+impl From<&[u8]> for Nonce {
+    fn from(value: &[u8]) -> Self {
+        Self(value.to_vec())
+    }
+}
+
 pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<(), CryptoError> {
     Ok(rand::rand_bytes(buf)?)
 }

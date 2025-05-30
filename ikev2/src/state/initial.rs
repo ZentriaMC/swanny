@@ -1,6 +1,6 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto,
+    crypto::{self, Nonce},
     message::{
         EspSpi, Message, Spi,
         num::{ExchangeType, MessageFlags, PayloadType, Protocol},
@@ -38,8 +38,7 @@ fn generate_ike_sa_init_request(
 
     let chosen_proposal = ChosenProposal::new(&proposals[0])?;
 
-    let mut nonce = vec![0u8; 32];
-    crypto::rand_bytes(&mut nonce[..])?;
+    let nonce = Nonce::new()?;
 
     let group = chosen_proposal
         .group()
@@ -63,7 +62,7 @@ fn generate_ike_sa_init_request(
         ),
         Payload::new(
             PayloadType::NONCE.into(),
-            payload::Content::Nonce(payload::Nonce::new(&nonce[..])),
+            payload::Content::Nonce(payload::Nonce::new(nonce.as_ref())),
             true,
         ),
         Payload::new(
@@ -112,13 +111,12 @@ fn handle_ike_sa_init_request(
     let private_key = group.generate_key()?;
     let public_key = private_key.public_key()?;
 
-    let mut nonce_r = vec![0u8; 32];
-    crypto::rand_bytes(&mut nonce_r)?;
+    let nonce = Nonce::new()?;
 
     let skeyseed = crypto::generate_skeyseed(
         chosen_proposal.prf(),
         nonce_i.nonce(),
-        &nonce_r[..],
+        nonce.as_ref(),
         &private_key,
         ke.ke_data(),
     )?;
@@ -127,7 +125,7 @@ fn handle_ike_sa_init_request(
     let keys = chosen_proposal.generate_keys(
         &skeyseed,
         nonce_i.nonce(),
-        &nonce_r,
+        nonce.as_ref(),
         request.spi_i(),
         &data.spi,
     )?;
@@ -137,8 +135,8 @@ fn handle_ike_sa_init_request(
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
     *data.public_key.to_mut() = Some(public_key);
     *data.keys.to_mut() = Some(keys);
-    *data.nonce_i.to_mut() = Some(nonce_i.nonce().to_vec());
-    *data.nonce_r.to_mut() = Some(nonce_r);
+    *data.nonce_i.to_mut() = Some(nonce_i.nonce().clone());
+    *data.nonce_r.to_mut() = Some(nonce);
     *data.peer_spi.to_mut() = Some(request.spi_i().to_owned());
 
     Ok(())
@@ -187,7 +185,7 @@ fn generate_ike_sa_init_response(
         ),
         Payload::new(
             PayloadType::NONCE.into(),
-            payload::Content::Nonce(payload::Nonce::new(&nonce_r[..])),
+            payload::Content::Nonce(payload::Nonce::new(nonce_r.as_ref())),
             true,
         ),
     ]);
