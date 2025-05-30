@@ -551,11 +551,7 @@ impl LarvalChildSa {
             ts_r: self.ts_r,
             spi: self.spi,
             chosen_proposal: chosen_proposal.to_owned(),
-            keys: chosen_proposal.generate_child_sa_keys(
-                d,
-                nonce_i.as_ref(),
-                nonce_r.as_ref(),
-            )?,
+            keys: chosen_proposal.generate_child_sa_keys(d, nonce_i.as_ref(), nonce_r.as_ref())?,
             on_initiator: self.on_initiator,
         })
     }
