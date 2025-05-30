@@ -4,6 +4,7 @@ use crate::{
         EspSpi, Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload::{self, Payload},
+        proposal::Proposal,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
@@ -38,7 +39,7 @@ fn handle_ike_auth_request(
 ) -> Result<ChildSa, StateError> {
     let request = request.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
 
-    debug!(request = ?&request, "unprotected request");
+    debug!(request = ?&request, "received protected request");
 
     let auth: &payload::Auth = request
         .get(PayloadType::AUTH)
@@ -80,12 +81,14 @@ fn handle_ike_auth_request(
     let ts_i =
         TrafficSelector::negotiate(config.inbound_traffic_selectors(), ts_i.traffic_selectors())
             .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+    info!(ts_i = ?&ts_i, "negotiated TSi");
 
     let ts_r = TrafficSelector::negotiate(
         config.outbound_traffic_selectors(),
         ts_r.traffic_selectors(),
     )
     .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+    info!(ts_r = ?&ts_r, "negotiated TSr");
 
     let larval_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
     let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
@@ -93,7 +96,11 @@ fn handle_ike_auth_request(
         return Err(ConfigError::NoProposalsSet.into());
     }
 
-    let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
+    let proposal =
+        Proposal::negotiate(&proposals, sa.proposals()).ok_or(ProtocolError::NoProposalChosen)?;
+    info!(proposal = ?&proposal, "negotiated proposal");
+    let chosen_proposal = ChosenProposal::new(&proposal)?;
+
     larval_child_sa
         .build(
             &chosen_proposal,
@@ -146,6 +153,8 @@ fn generate_ike_auth_response(
             true,
         ),
     ]);
+
+    debug!(response = ?&response, "sending protected response");
 
     response
         .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)

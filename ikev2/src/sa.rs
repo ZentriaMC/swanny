@@ -41,7 +41,7 @@
 //!
 use crate::{
     config::Config,
-    crypto::{self, Cipher, CryptoError, Group, Integ, Key, Prf},
+    crypto::{self, Cipher, CryptoError, Group, GroupPrivateKey, Integ, Key, Prf},
     message::{
         EspSpi, Spi,
         num::{
@@ -318,18 +318,6 @@ impl ChosenProposal {
         })
     }
 
-    pub(crate) fn negotiate<'a, 'b>(
-        this: impl IntoIterator<Item = &'a Proposal>,
-        other: impl IntoIterator<Item = &'b Proposal>,
-    ) -> Result<Self, ProtocolError> {
-        let mut this = this.into_iter();
-        let other: Vec<_> = other.into_iter().collect();
-        match this.find_map(|px| other.iter().find_map(|py| px.intersection(py))) {
-            Some(proposal) => Self::new(&proposal),
-            None => Err(ProtocolError::NoProposalChosen),
-        }
-    }
-
     /// Returns the protocol (IKE, ESP, or AH)
     pub fn protocol(&self) -> Protocol {
         self.protocol
@@ -360,6 +348,21 @@ impl ChosenProposal {
         self.group.as_ref()
     }
 
+    /// Generates SKEYSEED
+    pub(crate) fn generate_skeyseed(
+        &self,
+        nonce_i: impl AsRef<[u8]>,
+        nonce_r: impl AsRef<[u8]>,
+        private_key: &GroupPrivateKey,
+        peer_public_key: impl AsRef<[u8]>,
+    ) -> Result<Key, CryptoError> {
+        let g_ir = private_key.compute_key(peer_public_key)?;
+        let mut buf = nonce_i.as_ref().to_vec();
+        buf.extend_from_slice(nonce_r.as_ref());
+        Ok(Key::new(self.prf.prf(&Key::new(buf), g_ir)?))
+    }
+
+    /// Generates key materials for IKE SA
     pub(crate) fn generate_keys(
         &self,
         skeyseed: &Key,

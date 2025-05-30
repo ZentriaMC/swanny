@@ -4,6 +4,7 @@ use crate::{
         EspSpi, ProtectedMessage,
         num::{ExchangeType, PayloadType},
         payload,
+        proposal::Proposal,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
@@ -33,7 +34,7 @@ fn handle_ike_auth_response(
 ) -> Result<ChildSa, StateError> {
     let response = response.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
 
-    debug!(response = ?&response, "unprotected response");
+    debug!(response = ?&response, "received protected response");
 
     let auth: &payload::Auth = response
         .get(PayloadType::AUTH)
@@ -66,7 +67,10 @@ fn handle_ike_auth_response(
 
     let proposals = &(*data.larval_child_sa).as_ref().unwrap().proposals;
 
-    let chosen_proposal = ChosenProposal::negotiate(proposals, sa.proposals())?;
+    let proposal =
+        Proposal::negotiate(proposals, sa.proposals()).ok_or(ProtocolError::NoProposalChosen)?;
+    info!(proposal = ?&proposal, "negotiated proposal");
+    let chosen_proposal = ChosenProposal::new(&proposal)?;
 
     let larval_child_sa = data.larval_child_sa.to_mut().take().unwrap();
     larval_child_sa

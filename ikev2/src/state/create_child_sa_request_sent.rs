@@ -4,6 +4,7 @@ use crate::{
         EspSpi, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload,
+        proposal::Proposal,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
@@ -17,7 +18,7 @@ use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, info};
 
 pub struct CreateChildSaRequestSent;
 
@@ -37,7 +38,7 @@ fn handle_create_child_sa_response(
 ) -> Result<(), StateError> {
     let response = response.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
 
-    debug!(response = ?&response, "unprotected response");
+    debug!(response = ?&response, "received protected response");
 
     let sa: &payload::Sa = response
         .get(PayloadType::SA)
@@ -61,7 +62,10 @@ fn handle_create_child_sa_response(
 
         let proposals = &larval_child_sa.proposals;
 
-        let chosen_proposal = ChosenProposal::negotiate(proposals, sa.proposals())?;
+        let proposal = Proposal::negotiate(proposals, sa.proposals())
+            .ok_or(ProtocolError::NoProposalChosen)?;
+        info!(proposal = ?&proposal, "negotiated proposal");
+        let chosen_proposal = ChosenProposal::new(&proposal)?;
 
         let child_sa = larval_child_sa.build(
             &chosen_proposal,

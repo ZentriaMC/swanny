@@ -72,6 +72,8 @@ impl TrafficSelector {
         other: impl IntoIterator<Item = &'a TrafficSelector>,
     ) -> Option<Self> {
         let mut this = this.into_iter();
+        // Need a copy as it is iterated over multiple times in the
+        // nested find_map.
         let other: Vec<_> = other.into_iter().collect();
         this.find_map(|tx| other.iter().find_map(|ty| tx.intersection(ty)))
     }

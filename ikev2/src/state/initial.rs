@@ -1,10 +1,11 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto::{self, Nonce},
+    crypto::Nonce,
     message::{
         EspSpi, Message, Spi,
         num::{ExchangeType, MessageFlags, PayloadType, Protocol},
         payload::{self, Payload},
+        proposal::Proposal,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
@@ -15,7 +16,7 @@ use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, info};
 
 pub struct Initial;
 
@@ -85,6 +86,8 @@ fn handle_ike_sa_init_request(
     data: &mut StateDataCache<'_>,
     request: &Message,
 ) -> Result<(), StateError> {
+    debug!(request = ?&request, "received unprotected request");
+
     let sa: &payload::Sa = request
         .get(PayloadType::SA)
         .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
@@ -102,7 +105,10 @@ fn handle_ike_sa_init_request(
         return Err(ConfigError::NoProposalsSet.into());
     }
 
-    let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
+    let proposal =
+        Proposal::negotiate(&proposals, sa.proposals()).ok_or(ProtocolError::NoProposalChosen)?;
+    info!(proposal = ?&proposal, "negotiated proposal");
+    let chosen_proposal = ChosenProposal::new(&proposal)?;
 
     let group = chosen_proposal
         .group()
@@ -112,14 +118,13 @@ fn handle_ike_sa_init_request(
 
     let nonce = Nonce::new()?;
 
-    let skeyseed = crypto::generate_skeyseed(
-        chosen_proposal.prf(),
+    let skeyseed = chosen_proposal.generate_skeyseed(
         nonce_i.nonce(),
         nonce.as_ref(),
         &private_key,
         ke.ke_data(),
     )?;
-    debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
+    debug!(skeyseed = ?&skeyseed, "generated SKEYSEED");
 
     let keys = chosen_proposal.generate_keys(
         &skeyseed,
@@ -128,7 +133,7 @@ fn handle_ike_sa_init_request(
         request.spi_i(),
         &data.spi,
     )?;
-    debug!(keys = ?&keys, "keys generated");
+    debug!(keys = ?&keys, "generated keys");
 
     *data.is_initiator.to_mut() = Some(false);
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
@@ -188,6 +193,8 @@ fn generate_ike_sa_init_response(
             true,
         ),
     ]);
+
+    debug!(response = ?&response, "sending unprotected response");
 
     Ok(response)
 }

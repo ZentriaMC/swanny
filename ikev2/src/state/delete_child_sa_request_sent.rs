@@ -37,7 +37,7 @@ fn handle_informational_response(
 ) -> Result<(), StateError> {
     let response = response.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
 
-    debug!(response = ?&response, "unprotected response");
+    debug!(response = ?&response, "received protected response");
 
     let delete: Option<&payload::Delete> = response.get(PayloadType::DELETE);
     if let Some(delete) = delete {

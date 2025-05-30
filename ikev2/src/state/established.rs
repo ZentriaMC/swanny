@@ -5,6 +5,7 @@ use crate::{
         EspSpi, Message, ProtectedMessage,
         num::{ExchangeType, MessageFlags, PayloadType, Protocol},
         payload::{self, Payload},
+        proposal::Proposal,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
@@ -18,7 +19,7 @@ use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, info};
 
 pub struct Established;
 
@@ -39,7 +40,7 @@ fn handle_informational_request(
 ) -> Result<(), StateError> {
     let request = request.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
 
-    debug!(request = ?&request, "unprotected request");
+    debug!(request = ?&request, "received protected request");
 
     let delete: Option<&payload::Delete> = request.get(PayloadType::DELETE);
     if let Some(delete) = delete {
@@ -92,6 +93,9 @@ fn generate_informational_response(
         })
         .collect();
     response.add_payloads(payloads);
+
+    debug!(response = ?&response, "sending protected response");
+
     let response = response.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
     Ok(response)
 }
@@ -103,7 +107,7 @@ fn handle_create_child_sa_request(
 ) -> Result<(), StateError> {
     let request = request.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
 
-    debug!(request = ?&request, "unprotected request");
+    debug!(request = ?&request, "received protected request");
 
     let nonce = Nonce::new()?;
 
@@ -126,12 +130,14 @@ fn handle_create_child_sa_request(
             ts_i.traffic_selectors(),
         )
         .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+        info!(ts_i = ?&ts_i, "negotiated TSi");
 
         let ts_r = TrafficSelector::negotiate(
             config.outbound_traffic_selectors(),
             ts_r.traffic_selectors(),
         )
         .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+        info!(ts_r = ?&ts_r, "negotiated TSr");
 
         let larval_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
         let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
@@ -139,7 +145,11 @@ fn handle_create_child_sa_request(
             return Err(ConfigError::NoProposalsSet.into());
         }
 
-        let chosen_proposal = ChosenProposal::negotiate(&proposals, sa.proposals())?;
+        let proposal = Proposal::negotiate(&proposals, sa.proposals())
+            .ok_or(ProtocolError::NoProposalChosen)?;
+        info!(proposal = ?&proposal, "negotiated proposal");
+        let chosen_proposal = ChosenProposal::new(&proposal)?;
+
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
             &data.keys()?.deriving.d,
@@ -197,6 +207,9 @@ fn generate_create_child_sa_response(
             true,
         ),
     ]);
+
+    debug!(response = ?&response, "sending protected response");
+
     response
         .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)
         .map_err(Into::into)
@@ -272,6 +285,8 @@ fn generate_create_child_sa_request(
             true,
         ),
     ]);
+
+    debug!(request = ?&request, "sending protected request");
 
     let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
 

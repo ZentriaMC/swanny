@@ -50,7 +50,19 @@ impl Proposal {
         }
     }
 
-    pub(crate) fn intersection(&self, other: &Self) -> Option<Self> {
+    /// Returns the first matching `Proposal`
+    pub fn negotiate<'a, 'b>(
+        this: impl IntoIterator<Item = &'a Proposal>,
+        other: impl IntoIterator<Item = &'b Proposal>,
+    ) -> Option<Self> {
+        let mut this = this.into_iter();
+        // Need a copy as it is iterated over multiple times in the
+        // nested find_map.
+        let other: Vec<_> = other.into_iter().collect();
+        this.find_map(|px| other.iter().find_map(|py| px.intersection(py)))
+    }
+
+    fn intersection(&self, other: &Self) -> Option<Self> {
         let transforms: Vec<_> = self
             .transforms()
             .filter_map(|tx| {

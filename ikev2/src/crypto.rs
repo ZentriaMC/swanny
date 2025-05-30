@@ -589,19 +589,6 @@ impl From<&Cipher> for Transform {
     }
 }
 
-pub(crate) fn generate_skeyseed(
-    prf: &Prf,
-    n_i: impl AsRef<[u8]>,
-    n_r: impl AsRef<[u8]>,
-    private_key: &GroupPrivateKey,
-    peer_public_key: impl AsRef<[u8]>,
-) -> Result<Key, CryptoError> {
-    let g_ir = private_key.compute_key(peer_public_key)?;
-    let mut buf = n_i.as_ref().to_vec();
-    buf.extend_from_slice(n_r.as_ref());
-    Ok(Key::new(prf.prf(&Key::new(buf), g_ir)?))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

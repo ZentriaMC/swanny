@@ -1,6 +1,5 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto,
     message::{
         EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags, PayloadType},
@@ -57,14 +56,9 @@ fn handle_ike_sa_init_response(
     }
 
     let nonce_i = data.nonce_i.as_ref().as_ref().unwrap();
-    let skeyseed = crypto::generate_skeyseed(
-        chosen_proposal.prf(),
-        nonce_i,
-        nonce_r.nonce(),
-        private_key,
-        ke.ke_data(),
-    )?;
-    debug!(skeyseed = ?&skeyseed, "SKEYSEED generated");
+    let skeyseed =
+        chosen_proposal.generate_skeyseed(nonce_i, nonce_r.nonce(), private_key, ke.ke_data())?;
+    debug!(skeyseed = ?&skeyseed, "generated SKEYSEED");
 
     let keys = chosen_proposal.generate_keys(
         &skeyseed,
@@ -73,7 +67,7 @@ fn handle_ike_sa_init_response(
         response.spi_i(),
         response.spi_r(),
     )?;
-    debug!(keys = ?&keys, "keys generated");
+    debug!(keys = ?&keys, "generated keys");
 
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
     *data.keys.to_mut() = Some(keys);
@@ -134,6 +128,8 @@ fn generate_ike_auth_request(
             true,
         ),
     ]);
+
+    debug!(request = ?&request, "sending protected request");
 
     let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
 
