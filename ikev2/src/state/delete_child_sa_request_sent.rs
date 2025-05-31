@@ -137,6 +137,7 @@ impl State for DeleteChildSaRequestSent {
         _sender: UnboundedSender<ControlMessage>,
         _data: Arc<RwLock<StateData>>,
         _spi: &EspSpi,
+        _hard: bool,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }

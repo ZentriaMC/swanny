@@ -526,7 +526,7 @@ impl State for Established {
             cache.write_into(&mut data);
         }
 
-        Ok(Box::new(state::CreateChildSaRequestSent {}))
+        Ok(Box::new(state::NewChildSaRequestSent {}))
     }
 
     async fn handle_expire(
@@ -535,6 +535,7 @@ impl State for Established {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         spi: &EspSpi,
+        _hard: bool,
     ) -> Result<Box<dyn State>, StateError> {
         let mut deleted_child_sas = Vec::new();
 

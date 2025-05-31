@@ -219,7 +219,7 @@ impl IkeSa {
     }
 
     /// Processes XFRM acquire message
-    pub async fn handle_expire(&self, spi: EspSpi) -> Result<(), StateError> {
+    pub async fn handle_expire(&self, spi: EspSpi, hard: bool) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
             drop(state);
@@ -227,7 +227,13 @@ impl IkeSa {
             let old_state_name = old_state.to_string();
 
             let new_state = old_state
-                .handle_expire(&self.config, self.sender.clone(), self.data.clone(), &spi)
+                .handle_expire(
+                    &self.config,
+                    self.sender.clone(),
+                    self.data.clone(),
+                    &spi,
+                    hard,
+                )
                 .await?;
 
             let new_state_name = new_state.to_string();

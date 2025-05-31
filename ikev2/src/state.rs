@@ -39,8 +39,8 @@ pub(crate) use established::Established;
 mod delete_child_sa_request_sent;
 pub(crate) use delete_child_sa_request_sent::DeleteChildSaRequestSent;
 
-mod create_child_sa_request_sent;
-pub(crate) use create_child_sa_request_sent::CreateChildSaRequestSent;
+mod new_child_sa_request_sent;
+pub(crate) use new_child_sa_request_sent::NewChildSaRequestSent;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidStateError {
@@ -116,6 +116,7 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         spi: &EspSpi,
+        hard: bool,
     ) -> Result<Box<dyn State>, StateError>;
 }
 

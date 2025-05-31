@@ -20,15 +20,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-pub struct CreateChildSaRequestSent;
+pub struct NewChildSaRequestSent;
 
-impl SendProtectedMessage for CreateChildSaRequestSent {}
-impl VerifyMessage for CreateChildSaRequestSent {}
-impl CreateChildSa for CreateChildSaRequestSent {}
+impl SendProtectedMessage for NewChildSaRequestSent {}
+impl VerifyMessage for NewChildSaRequestSent {}
+impl CreateChildSa for NewChildSaRequestSent {}
 
-impl std::fmt::Display for CreateChildSaRequestSent {
+impl std::fmt::Display for NewChildSaRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        f.debug_struct("CreateChildSaRequestSent").finish()
+        f.debug_struct("NewChildSaRequestSent").finish()
     }
 }
 
@@ -81,7 +81,7 @@ fn handle_create_child_sa_response(
     Ok(())
 }
 
-impl CreateChildSaRequestSent {
+impl NewChildSaRequestSent {
     async fn handle_response(
         self: Box<Self>,
         sender: UnboundedSender<ControlMessage>,
@@ -122,7 +122,7 @@ impl CreateChildSaRequestSent {
 }
 
 #[async_trait]
-impl State for CreateChildSaRequestSent {
+impl State for NewChildSaRequestSent {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,
@@ -162,6 +162,7 @@ impl State for CreateChildSaRequestSent {
         _sender: UnboundedSender<ControlMessage>,
         _data: Arc<RwLock<StateData>>,
         _spi: &EspSpi,
+        _hard: bool,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }

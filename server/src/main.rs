@@ -442,7 +442,7 @@ async fn main() -> Result<()> {
                         XfrmMessage::Expire(expire) => {
                             let spi = expire.expire.state.id.spi.to_be_bytes();
                             debug!("expired: {:?}", &spi);
-                            pending_operations.push(Either::Left(Either::Left(ike_sa.handle_expire(spi))));
+                            pending_operations.push(Either::Left(Either::Left(ike_sa.handle_expire(spi, expire.expire.hard != 0))));
                         },
                         _ => info!("Other XFRM event message - {:?}", xfrm_message),
                     };
