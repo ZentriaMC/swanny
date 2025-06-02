@@ -347,11 +347,12 @@ impl GroupPrivateKey {
             GroupVariant::Ffdh(_) => Ok(self.pkey.dh()?.public_key().to_vec()),
             GroupVariant::Ecdh(ref group) => {
                 let mut bn_ctx = bn::BigNumContext::new()?;
-                Ok(self.pkey.ec_key()?.public_key().to_bytes(
+                let mut uncompressed = self.pkey.ec_key()?.public_key().to_bytes(
                     group,
                     ec::PointConversionForm::UNCOMPRESSED,
                     &mut bn_ctx,
-                )?)
+                )?;
+                Ok(uncompressed.split_off(1))
             }
         }
     }
@@ -370,7 +371,10 @@ impl GroupPrivateKey {
             }
             GroupVariant::Ecdh(ref group) => {
                 let mut bn_ctx = bn::BigNumContext::new()?;
-                let point = ec::EcPoint::from_bytes(group, public_key.as_ref(), &mut bn_ctx)?;
+                let mut public_key_bytes = Vec::new();
+                public_key_bytes.push(4);
+                public_key_bytes.extend_from_slice(public_key.as_ref());
+                let point = ec::EcPoint::from_bytes(group, &public_key_bytes, &mut bn_ctx)?;
                 let key = ec::EcKey::from_public_key(group, &point)?;
                 PKey::<pkey::Public>::from_ec_key(key)?
             }
