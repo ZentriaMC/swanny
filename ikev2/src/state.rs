@@ -416,7 +416,7 @@ trait SendMessage {
             }
         } else if message.flags().contains(MessageFlags::I) {
             *data.last_request.to_mut() = Some(buf.to_vec());
-            *data.message_id.to_mut() = message.id();
+            *data.message_id.to_mut() = message.id().wrapping_add(1);
         }
 
         Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)
@@ -439,7 +439,7 @@ trait SendProtectedMessage {
 
         if message.flags().contains(MessageFlags::I) {
             *data.last_request.to_mut() = Some(buf.to_vec());
-            *data.message_id.to_mut() = message.id();
+            *data.message_id.to_mut() = message.id().wrapping_add(1);
         }
 
         Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)

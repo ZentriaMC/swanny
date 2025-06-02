@@ -87,7 +87,7 @@ fn generate_ike_auth_request(
         spi_r,
         ExchangeType::IKE_AUTH.into(),
         MessageFlags::I,
-        data.message_id.wrapping_add(1),
+        *data.message_id,
     );
 
     let larval_child_sa = data.larval_child_sa.as_ref().as_ref().unwrap();

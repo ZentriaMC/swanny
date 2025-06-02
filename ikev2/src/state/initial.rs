@@ -52,7 +52,7 @@ fn generate_ike_sa_init_request(
         &Spi::default(),
         ExchangeType::IKE_SA_INIT.into(),
         MessageFlags::I,
-        (*data.message_id).wrapping_add(1),
+        *data.message_id,
     );
 
     request.add_payloads([

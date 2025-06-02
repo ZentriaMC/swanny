@@ -348,7 +348,7 @@ fn generate_delete_child_sa_request(
         data.responder_spi()?,
         ExchangeType::INFORMATIONAL.into(),
         MessageFlags::I,
-        (*data.message_id).wrapping_add(1),
+        *data.message_id,
     );
 
     request.add_payloads(Some(Payload::new(
@@ -376,7 +376,7 @@ fn generate_create_child_sa_request(
         data.responder_spi()?,
         ExchangeType::CREATE_CHILD_SA.into(),
         MessageFlags::I,
-        data.message_id.wrapping_add(1),
+        *data.message_id,
     );
 
     let nonce = Nonce::new()?;
