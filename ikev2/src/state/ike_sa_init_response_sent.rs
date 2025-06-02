@@ -37,7 +37,11 @@ fn handle_ike_auth_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<ChildSa, StateError> {
-    let request = request.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
+    let request = request.unprotect(
+        data.chosen_proposal()?.cipher(),
+        data.decrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -62,7 +66,7 @@ fn handle_ike_auth_request(
         .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
 
     let authenticated = if let Some(psk) = config.psk() {
-        let prf = data.chosen_proposal()?.prf();
+        let prf = data.chosen_proposal()?.prf().expect("PRF must be set");
         let signed_data = data.auth_data_for_verification(id_i)?;
         Ok(auth.verify_with_psk(prf, psk, &signed_data)?)
     } else {
@@ -104,6 +108,7 @@ fn handle_ike_auth_request(
     larval_child_sa
         .build(
             &chosen_proposal,
+            data.chosen_proposal()?.prf().expect("PRF must be set"),
             &data.keys()?.deriving.d,
             (*data.nonce_i).as_ref().unwrap(),
             (*data.nonce_r).as_ref().unwrap(),
@@ -132,7 +137,7 @@ fn generate_ike_auth_response(
     );
 
     let auth = if let Some(psk) = config.psk() {
-        let prf = data.chosen_proposal()?.prf();
+        let prf = data.chosen_proposal()?.prf().expect("PRF must be set");
         let signed_data = data.auth_data_for_signing(config.id())?;
         Ok(payload::Auth::sign_with_psk(prf, psk, &signed_data)?)
     } else {
@@ -157,7 +162,11 @@ fn generate_ike_auth_response(
     debug!(response = ?&response, "sending protected response");
 
     response
-        .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)
+        .protect(
+            data.chosen_proposal()?.cipher(),
+            data.encrypting_key()?,
+            data.chosen_proposal()?.integ(),
+        )
         .map_err(Into::into)
 }
 

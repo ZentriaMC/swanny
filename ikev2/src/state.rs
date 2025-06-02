@@ -4,7 +4,7 @@ use crate::{
     message::{
         EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags},
-        payload::{self, Id},
+        payload::Id,
         serialize::{DeserializeError, Serialize, SerializeError},
         traffic_selector::TrafficSelector,
     },
@@ -282,8 +282,8 @@ impl StateDataCache<'_> {
             InvalidStateError::NonceNotRecorded,
         ))?;
 
-        let prf = self.chosen_proposal()?.prf();
-        let mut mac = prf.prf(&self.keys()?.deriving.pi, &buf[payload::HEADER_SIZE..])?;
+        let prf = self.chosen_proposal()?.prf().expect("PRF must be set");
+        let mut mac = prf.prf(&self.keys()?.deriving.pi, &buf[..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_request.to_vec());
@@ -307,8 +307,8 @@ impl StateDataCache<'_> {
             InvalidStateError::NonceNotRecorded,
         ))?;
 
-        let prf = self.chosen_proposal()?.prf();
-        let mut mac = prf.prf(&self.keys()?.deriving.pr, &buf[payload::HEADER_SIZE..])?;
+        let prf = self.chosen_proposal()?.prf().expect("PRF must be set");
+        let mut mac = prf.prf(&self.keys()?.deriving.pr, &buf[..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_response.to_vec());
@@ -353,6 +353,9 @@ impl StateDataCache<'_> {
         };
 
         let integ = self.chosen_proposal()?.integ().unwrap();
+
+        debug!(key = ?&key, message = ?message.as_ref(), integ =?&integ, "signing message");
+
         Ok(Some(integ.sign(key.as_ref().unwrap(), message.as_ref())?))
     }
 
@@ -414,7 +417,9 @@ trait SendMessage {
             } else {
                 debug!("message flags are not set");
             }
-        } else if message.flags().contains(MessageFlags::I) {
+        }
+
+        if message.flags().contains(MessageFlags::I) {
             *data.last_request.to_mut() = Some(buf.to_vec());
             *data.message_id.to_mut() = message.id().wrapping_add(1);
         }
@@ -434,6 +439,7 @@ trait SendProtectedMessage {
         message.serialize(&mut buf)?;
 
         if let Some(checksum) = data.message_sign(&buf)? {
+            debug!(checksum = ?&checksum, "signature");
             buf.extend_from_slice(&checksum);
         }
 

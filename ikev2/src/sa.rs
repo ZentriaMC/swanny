@@ -254,7 +254,7 @@ pub struct ChosenProposal {
     protocol: Protocol,
     spi: Vec<u8>,
     cipher: Cipher,
-    prf: Prf,
+    prf: Option<Prf>,
     integ: Option<Integ>,
     group: Option<Group>,
 }
@@ -281,12 +281,16 @@ impl ChosenProposal {
             )),
         )?;
 
-        let transform = proposal
-            .transforms()
-            .find(|t| matches!(t.ty().assigned(), Some(TransformType::PRF)))
-            .ok_or(ProtocolError::MissingTransform(TransformType::PRF))?;
-        let id: PrfId = transform.id().try_into()?;
-        let prf = Prf::new(id)?;
+        let prf = if let Some(Protocol::IKE) = proposal.protocol().assigned() {
+            let transform = proposal
+                .transforms()
+                .find(|t| matches!(t.ty().assigned(), Some(TransformType::PRF)))
+                .ok_or(ProtocolError::MissingTransform(TransformType::PRF))?;
+            let id: PrfId = transform.id().try_into()?;
+            Some(Prf::new(id)?)
+        } else {
+            None
+        };
 
         let integ = if cipher.is_aead() {
             None
@@ -344,8 +348,8 @@ impl ChosenProposal {
     }
 
     /// Returns the PRF algorithm
-    pub fn prf(&self) -> &Prf {
-        &self.prf
+    pub fn prf(&self) -> Option<&Prf> {
+        self.prf.as_ref()
     }
 
     /// Returns the integrity checking algorithm
@@ -369,7 +373,11 @@ impl ChosenProposal {
         let g_ir = private_key.compute_key(peer_public_key)?;
         let mut buf = nonce_i.as_ref().to_vec();
         buf.extend_from_slice(nonce_r.as_ref());
-        Ok(Key::new(self.prf.prf(&Key::new(buf), g_ir)?))
+        Ok(Key::new(
+            self.prf()
+                .expect("PRF must be set")
+                .prf(&Key::new(buf), g_ir)?,
+        ))
     }
 
     /// Generates key materials for IKE SA
@@ -390,24 +398,17 @@ impl ChosenProposal {
             .as_ref()
             .map(|integ| integ.key_size())
             .unwrap_or(0);
-        let buf = self.prf.prfplus(
+        let prf = self.prf().expect("PRF must be set");
+        let buf = prf.prfplus(
             skeyseed,
             &buf,
-            self.prf.size() * 3 + self.cipher.key_size() * 2 + integ_key_size * 2,
+            prf.size() * 3 + self.cipher.key_size() * 2 + integ_key_size * 2,
         )?;
         let mut buf = buf.as_slice();
 
-        let mut d = vec![0; self.prf.size()];
+        let mut d = vec![0; prf.size()];
         buf.try_copy_to_slice(&mut d).expect("buffer too short");
         let d = Key::new(d);
-
-        let mut ei = vec![0; self.cipher.key_size()];
-        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
-        let ei = Key::new(ei);
-
-        let mut er = vec![0; self.cipher.key_size()];
-        buf.try_copy_to_slice(&mut er).expect("buffer too short");
-        let er = Key::new(er);
 
         let (ai, ar) = if self.integ.is_some() {
             let mut ai = vec![0; integ_key_size];
@@ -420,11 +421,19 @@ impl ChosenProposal {
             (None, None)
         };
 
-        let mut pi = vec![0; self.prf.size()];
+        let mut ei = vec![0; self.cipher.key_size()];
+        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
+        let ei = Key::new(ei);
+
+        let mut er = vec![0; self.cipher.key_size()];
+        buf.try_copy_to_slice(&mut er).expect("buffer too short");
+        let er = Key::new(er);
+
+        let mut pi = vec![0; prf.size()];
         buf.try_copy_to_slice(&mut pi).expect("buffer too short");
         let pi = Key::new(pi);
 
-        let mut pr = vec![0; self.prf.size()];
+        let mut pr = vec![0; prf.size()];
         buf.try_copy_to_slice(&mut pr).expect("buffer too short");
         let pr = Key::new(pr);
 
@@ -437,6 +446,7 @@ impl ChosenProposal {
     /// Generates key materials used by a Child SA
     fn generate_child_sa_keys(
         &self,
+        prf: &Prf,
         d: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
@@ -461,18 +471,8 @@ impl ChosenProposal {
             .map(|integ| integ.key_size())
             .unwrap_or(0);
         let encryption_key_size = self.cipher().key_size() + self.cipher().salt_size().unwrap_or(0);
-        let buf = self
-            .prf()
-            .prfplus(d, &buf, encryption_key_size * 2 + integ_key_size * 2)?;
+        let buf = prf.prfplus(d, &buf, encryption_key_size * 2 + integ_key_size * 2)?;
         let mut buf = buf.as_slice();
-
-        let mut ei = vec![0; encryption_key_size];
-        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
-        let ei = Key::new(ei);
-
-        let mut er = vec![0; encryption_key_size];
-        buf.try_copy_to_slice(&mut er).expect("buffer too short");
-        let er = Key::new(er);
 
         let (ai, ar) = if self.integ().is_some() {
             let mut ai = vec![0; integ_key_size];
@@ -484,6 +484,14 @@ impl ChosenProposal {
         } else {
             (None, None)
         };
+
+        let mut ei = vec![0; encryption_key_size];
+        buf.try_copy_to_slice(&mut ei).expect("buffer too short");
+        let ei = Key::new(ei);
+
+        let mut er = vec![0; encryption_key_size];
+        buf.try_copy_to_slice(&mut er).expect("buffer too short");
+        let er = Key::new(er);
 
         Ok((ProtectingKeys { ei, er, ai, ar }, public_key))
     }
@@ -498,7 +506,9 @@ impl ChosenProposal {
         let mut transforms: Vec<Transform> = Vec::new();
 
         transforms.push(self.cipher().into());
-        transforms.push(self.prf().into());
+        if let Some(prf) = self.prf() {
+            transforms.push(prf.into());
+        }
         if let Some(integ) = self.integ() {
             transforms.push(integ.into());
         }
@@ -567,12 +577,18 @@ impl LarvalChildSa {
     pub fn build(
         self,
         chosen_proposal: &ChosenProposal,
+        prf: &Prf,
         d: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<ChildSa, CryptoError> {
-        let (keys, _) =
-            chosen_proposal.generate_child_sa_keys(d, nonce_i.as_ref(), nonce_r.as_ref(), None)?;
+        let (keys, _) = chosen_proposal.generate_child_sa_keys(
+            prf,
+            d,
+            nonce_i.as_ref(),
+            nonce_r.as_ref(),
+            None,
+        )?;
         Ok(ChildSa {
             ts_i: self.ts_i,
             ts_r: self.ts_r,
@@ -647,14 +663,19 @@ impl ChildSa {
     /// Rekey this Child SA
     pub fn rekey(
         &mut self,
+        prf: &Prf,
         key: &Key,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
         peer_public_key: Option<&[u8]>,
     ) -> Result<Option<Vec<u8>>, CryptoError> {
-        let (keys, public_key) =
-            self.chosen_proposal
-                .generate_child_sa_keys(key, nonce_i, nonce_r, peer_public_key)?;
+        let (keys, public_key) = self.chosen_proposal.generate_child_sa_keys(
+            prf,
+            key,
+            nonce_i,
+            nonce_r,
+            peer_public_key,
+        )?;
         self.keys = keys;
         Ok(public_key)
     }

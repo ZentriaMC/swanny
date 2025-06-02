@@ -39,7 +39,11 @@ fn handle_informational_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let request = request.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
+    let request = request.unprotect(
+        data.chosen_proposal()?.cipher(),
+        data.decrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -97,7 +101,11 @@ fn generate_informational_response(
 
     debug!(response = ?&response, "sending protected response");
 
-    let response = response.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
+    let response = response.protect(
+        data.chosen_proposal()?.cipher(),
+        data.encrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
     Ok(response)
 }
 
@@ -114,8 +122,13 @@ fn handle_rekey_child_sa_request(
         .position(|child_sa| child_sa.chosen_proposal().spi() == spi);
     if let Some(index) = index {
         let mut child_sa = child_sas.swap_remove(index);
-        let public_key =
-            child_sa.rekey(&data.keys()?.deriving.d, nonce_i, nonce_r, peer_public_key)?;
+        let public_key = child_sa.rekey(
+            data.chosen_proposal()?.prf().expect("PRF must be set"),
+            &data.keys()?.deriving.d,
+            nonce_i,
+            nonce_r,
+            peer_public_key,
+        )?;
         *data.public_key.to_mut() = public_key;
         *data.rekeyed_child_sa.to_mut() = Some(child_sa);
     }
@@ -154,8 +167,13 @@ fn handle_create_new_child_sa_request(
     info!(proposal = ?&proposal, "negotiated proposal");
     let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-    let child_sa =
-        larval_child_sa.build(&chosen_proposal, &data.keys()?.deriving.d, nonce_i, nonce_r)?;
+    let child_sa = larval_child_sa.build(
+        &chosen_proposal,
+        data.chosen_proposal()?.prf().expect("PRF must be set"),
+        &data.keys()?.deriving.d,
+        nonce_i,
+        nonce_r,
+    )?;
     *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
 
     Ok(())
@@ -166,7 +184,11 @@ fn handle_create_child_sa_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let request = request.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
+    let request = request.unprotect(
+        data.chosen_proposal()?.cipher(),
+        data.decrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -272,7 +294,11 @@ fn generate_rekey_child_sa_response(
     debug!(response = ?&response, "sending protected response");
 
     response
-        .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)
+        .protect(
+            data.chosen_proposal()?.cipher(),
+            data.encrypting_key()?,
+            data.chosen_proposal()?.integ(),
+        )
         .map_err(Into::into)
 }
 
@@ -321,7 +347,11 @@ fn generate_create_new_child_sa_response(
     debug!(response = ?&response, "sending protected response");
 
     response
-        .protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)
+        .protect(
+            data.chosen_proposal()?.cipher(),
+            data.encrypting_key()?,
+            data.chosen_proposal()?.integ(),
+        )
         .map_err(Into::into)
 }
 
@@ -360,7 +390,11 @@ fn generate_delete_child_sa_request(
         false,
     )));
 
-    let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
+    let request = request.protect(
+        data.chosen_proposal()?.cipher(),
+        data.encrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     Ok(request)
 }
@@ -412,7 +446,11 @@ fn generate_create_child_sa_request(
 
     debug!(request = ?&request, "sending protected request");
 
-    let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
+    let request = request.protect(
+        data.chosen_proposal()?.cipher(),
+        data.encrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     *data.larval_child_sa.to_mut() = Some(larval_child_sa);
     *data.nonce_i.to_mut() = Some(nonce);

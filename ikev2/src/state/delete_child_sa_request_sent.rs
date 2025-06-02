@@ -35,7 +35,11 @@ fn handle_informational_response(
     data: &mut StateDataCache<'_>,
     response: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let response = response.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
+    let response = response.unprotect(
+        data.chosen_proposal()?.cipher(),
+        data.decrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     debug!(response = ?&response, "received protected response");
 

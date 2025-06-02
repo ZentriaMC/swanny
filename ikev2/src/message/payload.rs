@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{self, Cipher, Key, Prf},
+    crypto::{self, Cipher, Integ, Key, Prf},
     message::{
         EspSpi,
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
@@ -666,14 +666,20 @@ impl serialize::Deserialize for Ts {
 pub struct Sk {
     ciphertext: Vec<u8>,
     inner: Num<u8, PayloadType>,
+    integ: Option<Integ>,
 }
 
 impl Sk {
     /// Creates a new `Sk` content with given ciphertext and the type of the first inner payload
-    pub fn new(ciphertext: impl AsRef<[u8]>, inner: Num<u8, PayloadType>) -> Self {
+    pub fn new(
+        ciphertext: impl AsRef<[u8]>,
+        inner: Num<u8, PayloadType>,
+        integ: Option<Integ>,
+    ) -> Self {
         Self {
             ciphertext: ciphertext.as_ref().to_owned(),
             inner,
+            integ,
         }
     }
 
@@ -687,13 +693,18 @@ impl Sk {
         cipher: &Cipher,
         key: &Key,
         payloads: impl IntoIterator<Item = &'a Payload>,
+        integ: Option<&Integ>,
     ) -> Result<Self, serialize::SerializeError> {
         let payloads: Vec<_> = payloads.into_iter().collect();
         let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         serialize_payloads(payloads, &mut plaintext)?;
         let ciphertext = cipher.encrypt(key, &plaintext)?;
-        Ok(Self { ciphertext, inner })
+        Ok(Self {
+            ciphertext,
+            inner,
+            integ: integ.cloned(),
+        })
     }
 
     /// Decrypts payloads from the ciphertext of the `Sk` content
@@ -701,8 +712,13 @@ impl Sk {
         &self,
         cipher: &Cipher,
         key: &Key,
+        integ: Option<&Integ>,
     ) -> Result<Vec<Payload>, serialize::DeserializeError> {
-        let plaintext = cipher.decrypt(key, &self.ciphertext)?;
+        let plaintext = cipher.decrypt(
+            key,
+            &self.ciphertext
+                [..self.ciphertext.len() - integ.map(|integ| integ.output_size()).unwrap_or(0)],
+        )?;
         let mut payload_type: Num<u8, PayloadType> = self.inner;
         let mut plaintext = plaintext.as_slice();
         let mut payloads = Vec::new();
@@ -722,7 +738,7 @@ impl Sk {
     where
         Self: Sized,
     {
-        Ok(Self::new(buf.chunk(), payload_type))
+        Ok(Self::new(buf.chunk(), payload_type, None))
     }
 }
 
@@ -733,7 +749,15 @@ impl serialize::Serialize for Sk {
     }
 
     fn size(&self) -> Result<usize, serialize::SerializeError> {
-        Ok(self.ciphertext.len())
+        self.ciphertext
+            .len()
+            .checked_add(
+                self.integ
+                    .as_ref()
+                    .map(|integ| integ.output_size())
+                    .unwrap_or(0),
+            )
+            .ok_or(serialize::SerializeError::Overflow)
     }
 }
 

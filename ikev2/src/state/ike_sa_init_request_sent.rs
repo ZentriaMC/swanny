@@ -2,7 +2,7 @@ use crate::{
     config::{Config, ConfigError},
     message::{
         EspSpi, Message, ProtectedMessage, Spi,
-        num::{ExchangeType, MessageFlags, PayloadType},
+        num::{ExchangeType, MessageFlags, NotifyType, PayloadType, Protocol},
         payload::{self, Payload},
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
@@ -97,8 +97,9 @@ fn generate_ike_auth_request(
     }
 
     let auth = if let Some(psk) = config.psk() {
-        let prf = data.chosen_proposal()?.prf();
+        let prf = data.chosen_proposal()?.prf().expect("PRF must be set");
         let signed_data = data.auth_data_for_signing(config.id())?;
+        debug!(signed_data = ?signed_data, "signing auth data");
         Ok(payload::Auth::sign_with_psk(prf, psk, &signed_data)?)
     } else {
         Err(ConfigError::NoPSK)
@@ -127,11 +128,25 @@ fn generate_ike_auth_request(
             payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r.clone()))),
             true,
         ),
+        Payload::new(
+            PayloadType::NOTIFY.into(),
+            payload::Content::Notify(payload::Notify::new(
+                Protocol::ESP.into(),
+                Some(&larval_child_sa.spi[..]),
+                NotifyType::USE_TRANSPORT_MODE.into(),
+                b"",
+            )),
+            true,
+        ),
     ]);
 
     debug!(request = ?&request, "sending protected request");
 
-    let request = request.protect(data.chosen_proposal()?.cipher(), data.encrypting_key()?)?;
+    let request = request.protect(
+        data.chosen_proposal()?.cipher(),
+        data.encrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     Ok(request)
 }

@@ -36,7 +36,11 @@ fn handle_create_child_sa_response(
     data: &mut StateDataCache<'_>,
     response: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let response = response.unprotect(data.chosen_proposal()?.cipher(), data.decrypting_key()?)?;
+    let response = response.unprotect(
+        data.chosen_proposal()?.cipher(),
+        data.decrypting_key()?,
+        data.chosen_proposal()?.integ(),
+    )?;
 
     debug!(response = ?&response, "received protected response");
 
@@ -69,6 +73,7 @@ fn handle_create_child_sa_response(
 
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
+            data.chosen_proposal()?.prf().expect("PRF must be set"),
             &data.keys()?.deriving.d,
             (*data.nonce_i).as_ref().expect("nonce should be set"),
             nonce_r.nonce(),
