@@ -154,12 +154,14 @@ impl Prf {
         size: usize,
     ) -> Result<Vec<u8>, CryptoError> {
         let pkey = PKey::hmac(key.as_ref())?;
-        let mut signer = Signer::new(self.md, &pkey)?;
         let mut buf = BytesMut::with_capacity(size);
         let blocks = size.div_ceil(self.md.size());
         let mut block = vec![0; self.md.size()];
         for i in 0..blocks {
-            signer.update(&block)?;
+            let mut signer = Signer::new(self.md, &pkey)?;
+            if i > 0 {
+                signer.update(&block)?;
+            }
             signer.update(seed.as_ref())?;
             let counter: u8 = (i + 1).try_into()?;
             signer.update(&[counter])?;
