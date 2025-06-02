@@ -23,7 +23,7 @@ use swanny_ikev2::{
     crypto::{Cipher, Integ},
     message::{
         EspSpi,
-        num::{EncrId, IdType, IntegId, Protocol, TrafficSelectorType},
+        num::{EncrId, EsnId, IdType, IntegId, Protocol, TrafficSelectorType},
         payload::Id,
         traffic_selector::TrafficSelector,
     },
@@ -48,12 +48,17 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
                 .prf(PrfId::PRF_HMAC_SHA2_256)
                 .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
-                .dh(DhId::SECP256R1)
+                .dh(DhId::MODP2048)
         })
         .ipsec_protocol(Protocol::ESP)
         .ipsec_proposal(|pc| {
-            pc.encryption(EncrId::ENCR_AES_GCM_8, Some(128))
-                .prf(PrfId::PRF_HMAC_SHA2_256)
+            pc.encryption(EncrId::ENCR_AES_GCM_16, Some(256))
+                .esn(EsnId::NoEsn)
+        })
+        .ipsec_proposal(|pc| {
+            pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
+                .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
+                .esn(EsnId::NoEsn)
         })
         .inbound_traffic_selector(|tc| {
             tc.start_address(config.address)
@@ -63,7 +68,7 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
         .inbound_traffic_selector(|tc| {
             tc.start_address(config.peer_address)
                 .start_port(0)
-                .end_port(65535)
+                .end_port(0)
         })
         .outbound_traffic_selector(|tc| {
             tc.start_address(config.address)
@@ -73,7 +78,7 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
         .outbound_traffic_selector(|tc| {
             tc.start_address(config.peer_address)
                 .start_port(0)
-                .end_port(65535)
+                .end_port(0)
         })
         .psk(&config.psk)
         .build(id)
@@ -84,7 +89,7 @@ fn create_traffic_selector(
     family: u16,
     proto: u8,
     address: &Address,
-    port: u16,
+    _port: u16,
 ) -> Result<TrafficSelector> {
     match family as i32 {
         libc::AF_INET => Ok(TrafficSelector::new(
@@ -92,16 +97,16 @@ fn create_traffic_selector(
             proto,
             &IpAddr::V4(address.to_ipv4()),
             &IpAddr::V4(address.to_ipv4()),
-            port,
-            port,
+            0,
+            65535,
         )),
         libc::AF_INET6 => Ok(TrafficSelector::new(
             TrafficSelectorType::TS_IPV6_ADDR_RANGE.into(),
             proto,
             &IpAddr::V6(address.to_ipv6()),
             &IpAddr::V6(address.to_ipv6()),
-            port,
-            port,
+            0,
+            65535,
         )),
         _ => Err(anyhow::anyhow!("unsupported address family")),
     }
@@ -302,7 +307,7 @@ async fn create_child_sa(
         child_sa.ts_r().start_address(),
         child_sa.ts_i().ip_proto(),
         child_sa.chosen_proposal().protocol(),
-        child_sa.spi_i(),
+        child_sa.spi_r(),
         child_sa.chosen_proposal().integ(),
         child_sa.keys().ai.as_ref(),
         child_sa.chosen_proposal().cipher(),
@@ -317,7 +322,7 @@ async fn create_child_sa(
         child_sa.ts_i().start_address(),
         child_sa.ts_r().ip_proto(),
         child_sa.chosen_proposal().protocol(),
-        child_sa.spi_r(),
+        child_sa.spi_i(),
         child_sa.chosen_proposal().integ(),
         child_sa.keys().ar.as_ref(),
         child_sa.chosen_proposal().cipher(),
@@ -477,7 +482,17 @@ async fn main() -> Result<()> {
             result = incoming_framed.select_next_some() => {
                 match result {
                     Ok((message, _peer_address)) => {
-                        pending_operations.push(Either::Right(ike_sa.handle_message(message.to_vec())));
+                        pending_operations.push(Either::Right(Either::Left(ike_sa.handle_message(message.to_vec()))));
+                    },
+                    Err(e) => {
+                        debug!(error = %e, "error receiving IKEv2 message");
+                    },
+                }
+            }
+            result = outgoing_framed.select_next_some() => {
+                match result {
+                    Ok((message, _peer_address)) => {
+                        pending_operations.push(Either::Right(Either::Right(ike_sa.handle_message(message.to_vec()))));
                     },
                     Err(e) => {
                         debug!(error = %e, "error receiving IKEv2 message");
