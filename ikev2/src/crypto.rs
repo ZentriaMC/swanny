@@ -642,11 +642,13 @@ mod tests {
 
     #[test]
     fn test_cipher() {
-        let cipher = Cipher::new(EncrId::ENCR_AES_CBC, Some(128)).expect("");
+        let cipher = Cipher::new(EncrId::ENCR_AES_CBC, Some(128)).expect("cipher should be known");
 
         let key = Key::new(vec![1; 16]);
         let plaintext = b"hello world";
-        let ciphertext = cipher.encrypt(&key, &plaintext).expect("");
+        let ciphertext = cipher
+            .encrypt(&key, &plaintext)
+            .expect("encrypt should succeed");
         assert_eq!(
             ciphertext.len(),
             cipher.iv_size().unwrap()
