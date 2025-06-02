@@ -183,7 +183,7 @@ impl From<&Prf> for Transform {
 }
 
 /// Integrity checkign algorithm
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Integ {
     id: IntegId,
     md: MessageDigest,
