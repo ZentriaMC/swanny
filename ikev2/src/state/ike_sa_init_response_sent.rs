@@ -109,7 +109,7 @@ fn handle_ike_auth_request(
         .build(
             &chosen_proposal,
             data.chosen_proposal()?.prf().expect("PRF must be set"),
-            &data.keys()?.deriving.d,
+            &data.keys()?.derivation.d,
             (*data.nonce_i).as_ref().unwrap(),
             (*data.nonce_r).as_ref().unwrap(),
         )

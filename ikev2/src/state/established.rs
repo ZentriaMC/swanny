@@ -124,7 +124,7 @@ fn handle_rekey_child_sa_request(
         let mut child_sa = child_sas.swap_remove(index);
         let public_key = child_sa.rekey(
             data.chosen_proposal()?.prf().expect("PRF must be set"),
-            &data.keys()?.deriving.d,
+            &data.keys()?.derivation.d,
             nonce_i,
             nonce_r,
             peer_public_key,
@@ -170,7 +170,7 @@ fn handle_create_new_child_sa_request(
     let child_sa = larval_child_sa.build(
         &chosen_proposal,
         data.chosen_proposal()?.prf().expect("PRF must be set"),
-        &data.keys()?.deriving.d,
+        &data.keys()?.derivation.d,
         nonce_i,
         nonce_r,
     )?;

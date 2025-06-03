@@ -438,8 +438,8 @@ impl ChosenProposal {
         let pr = Key::new(pr);
 
         Ok(Keys {
-            deriving: DerivingKeys { d, pi, pr },
-            protecting: ProtectingKeys { ei, er, ai, ar },
+            derivation: DerivationKeys { d, pi, pr },
+            protection: ProtectionKeys { ei, er, ai, ar },
         })
     }
 
@@ -451,7 +451,7 @@ impl ChosenProposal {
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
         peer_public_key: Option<&[u8]>,
-    ) -> Result<(ProtectingKeys, Option<Vec<u8>>), CryptoError> {
+    ) -> Result<(ProtectionKeys, Option<Vec<u8>>), CryptoError> {
         let mut buf = Vec::new();
 
         let public_key = if let Some(peer_public_key) = peer_public_key {
@@ -493,7 +493,7 @@ impl ChosenProposal {
         buf.try_copy_to_slice(&mut er).expect("buffer too short");
         let er = Key::new(er);
 
-        Ok((ProtectingKeys { ei, er, ai, ar }, public_key))
+        Ok((ProtectionKeys { ei, er, ai, ar }, public_key))
     }
 
     /// Turns this into a `Proposal` data structure sent over the wire
@@ -523,13 +523,13 @@ impl ChosenProposal {
 /// Key materials generated and used by the current IKE SA
 #[derive(Clone, Debug)]
 pub struct Keys {
-    pub deriving: DerivingKeys,
-    pub protecting: ProtectingKeys,
+    pub derivation: DerivationKeys,
+    pub protection: ProtectionKeys,
 }
 
 /// Key materials used for key derivation
 #[derive(Clone, Debug)]
-pub struct DerivingKeys {
+pub struct DerivationKeys {
     pub d: Key,
     pub pi: Key,
     pub pr: Key,
@@ -537,7 +537,7 @@ pub struct DerivingKeys {
 
 /// Key materials used for encryption and authentication
 #[derive(Clone, Debug)]
-pub struct ProtectingKeys {
+pub struct ProtectionKeys {
     pub ei: Key,
     pub er: Key,
     pub ai: Option<Key>,
@@ -610,7 +610,7 @@ pub struct ChildSa {
     ts_r: TrafficSelector,
     spi: EspSpi,
     chosen_proposal: ChosenProposal,
-    keys: ProtectingKeys,
+    keys: ProtectionKeys,
     on_initiator: bool,
 }
 
@@ -656,7 +656,7 @@ impl ChildSa {
     }
 
     /// Returns the key materials
-    pub fn keys(&self) -> &ProtectingKeys {
+    pub fn keys(&self) -> &ProtectionKeys {
         &self.keys
     }
 

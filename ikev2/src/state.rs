@@ -235,8 +235,8 @@ impl StateDataCache<'_> {
 
     fn encrypting_key(&self) -> Result<&Key, StateError> {
         match *self.is_initiator {
-            Some(true) => Ok(&self.keys()?.protecting.ei),
-            Some(false) => Ok(&self.keys()?.protecting.er),
+            Some(true) => Ok(&self.keys()?.protection.ei),
+            Some(false) => Ok(&self.keys()?.protection.er),
             None => Err(StateError::InvalidState(
                 InvalidStateError::InitiatorNotDetermined,
             )),
@@ -245,8 +245,8 @@ impl StateDataCache<'_> {
 
     fn decrypting_key(&self) -> Result<&Key, StateError> {
         match *self.is_initiator {
-            Some(true) => Ok(&self.keys()?.protecting.er),
-            Some(false) => Ok(&self.keys()?.protecting.ei),
+            Some(true) => Ok(&self.keys()?.protection.er),
+            Some(false) => Ok(&self.keys()?.protection.ei),
             None => Err(StateError::InvalidState(
                 InvalidStateError::InitiatorNotDetermined,
             )),
@@ -283,7 +283,7 @@ impl StateDataCache<'_> {
         ))?;
 
         let prf = self.chosen_proposal()?.prf().expect("PRF must be set");
-        let mut mac = prf.prf(&self.keys()?.deriving.pi, &buf[..])?;
+        let mut mac = prf.prf(&self.keys()?.derivation.pi, &buf[..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_request.to_vec());
@@ -308,7 +308,7 @@ impl StateDataCache<'_> {
         ))?;
 
         let prf = self.chosen_proposal()?.prf().expect("PRF must be set");
-        let mut mac = prf.prf(&self.keys()?.deriving.pr, &buf[..])?;
+        let mut mac = prf.prf(&self.keys()?.derivation.pr, &buf[..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_response.to_vec());
@@ -343,8 +343,8 @@ impl StateDataCache<'_> {
         }
 
         let key = match *self.is_initiator {
-            Some(true) => &self.keys()?.protecting.ai,
-            Some(false) => &self.keys()?.protecting.ar,
+            Some(true) => &self.keys()?.protection.ai,
+            Some(false) => &self.keys()?.protection.ar,
             None => {
                 return Err(StateError::InvalidState(
                     InvalidStateError::InitiatorNotDetermined,
@@ -365,8 +365,8 @@ impl StateDataCache<'_> {
         }
 
         let key = match *self.is_initiator {
-            Some(true) => &self.keys()?.protecting.ar,
-            Some(false) => &self.keys()?.protecting.ai,
+            Some(true) => &self.keys()?.protection.ar,
+            Some(false) => &self.keys()?.protection.ai,
             None => {
                 return Err(StateError::InvalidState(
                     InvalidStateError::InitiatorNotDetermined,

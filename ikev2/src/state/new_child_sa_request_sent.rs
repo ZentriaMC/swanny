@@ -74,7 +74,7 @@ fn handle_create_child_sa_response(
         let child_sa = larval_child_sa.build(
             &chosen_proposal,
             data.chosen_proposal()?.prf().expect("PRF must be set"),
-            &data.keys()?.deriving.d,
+            &data.keys()?.derivation.d,
             (*data.nonce_i).as_ref().expect("nonce should be set"),
             nonce_r.nonce(),
         )?;
