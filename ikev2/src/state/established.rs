@@ -238,7 +238,7 @@ fn generate_rekey_child_sa_response(
         request.id(),
     );
 
-    let child_sa = (*data.created_child_sa).as_ref().unwrap();
+    let child_sa = (*data.rekeyed_child_sa).as_ref().unwrap();
     let proposal = child_sa.chosen_proposal().proposal(
         1,
         child_sa.chosen_proposal().protocol().into(),
