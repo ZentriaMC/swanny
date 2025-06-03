@@ -97,7 +97,7 @@ pub(crate) fn rand_bytes(buf: &mut [u8]) -> Result<(), CryptoError> {
 }
 
 /// PRF algorithm
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Prf {
     id: PrfId,
     md: MessageDigest,
@@ -169,6 +169,35 @@ impl Prf {
             buf.put_slice(&block[..buf.remaining_mut().min(block.len())]);
         }
         Ok(buf.to_vec())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DerivationKey {
+    prf: Prf,
+    key: Key,
+}
+
+impl DerivationKey {
+    pub fn new(prf: &Prf, blob: Vec<u8>) -> Self {
+        Self {
+            prf: prf.clone(),
+            key: Key::new(blob),
+        }
+    }
+
+    pub fn prf(&self) -> &Prf {
+        &self.prf
+    }
+
+    pub fn key(&self) -> &Key {
+        &self.key
+    }
+}
+
+impl AsRef<[u8]> for DerivationKey {
+    fn as_ref(&self) -> &[u8] {
+        self.key.as_ref()
     }
 }
 
@@ -245,6 +274,35 @@ impl Integ {
 
     pub fn output_size(&self) -> usize {
         self.output_size
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuthenticationKey {
+    integ: Integ,
+    key: Key,
+}
+
+impl AuthenticationKey {
+    pub fn new(integ: &Integ, blob: Vec<u8>) -> Self {
+        Self {
+            integ: integ.clone(),
+            key: Key::new(blob),
+        }
+    }
+
+    pub fn integ(&self) -> &Integ {
+        &self.integ
+    }
+
+    pub fn key(&self) -> &Key {
+        &self.key
+    }
+}
+
+impl AsRef<[u8]> for AuthenticationKey {
+    fn as_ref(&self) -> &[u8] {
+        self.key.as_ref()
     }
 }
 
@@ -448,7 +506,7 @@ impl From<&Group> for Transform {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Cipher {
     id: EncrId,
     cipher: symm::Cipher,
@@ -578,6 +636,35 @@ impl Cipher {
         plaintext.truncate(plaintext.len() - pad_len - 1);
 
         Ok(plaintext)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EncryptionKey {
+    cipher: Cipher,
+    key: Key,
+}
+
+impl EncryptionKey {
+    pub fn new(cipher: &Cipher, blob: Vec<u8>) -> Self {
+        Self {
+            cipher: cipher.clone(),
+            key: Key::new(blob),
+        }
+    }
+
+    pub fn cipher(&self) -> &Cipher {
+        &self.cipher
+    }
+
+    pub fn key(&self) -> &Key {
+        &self.key
+    }
+}
+
+impl AsRef<[u8]> for EncryptionKey {
+    fn as_ref(&self) -> &[u8] {
+        self.key.as_ref()
     }
 }
 
