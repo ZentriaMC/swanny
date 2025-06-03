@@ -735,11 +735,55 @@ mod tests {
                 .expect("unable to handle message");
         });
 
-        let _message = match messages_r.next().await {
+        let message = match messages_r.next().await {
             Some(ControlMessage::IkeMessage(message)) => message,
             _ => panic!("unexpected message"),
         };
 
         assert!(responder.in_state(&state::IkeSaInitResponseSent {}).await);
+
+        let initiator2 = initiator.clone();
+
+        tokio::spawn(async move {
+            initiator2
+                .handle_message(message)
+                .await
+                .expect("unable to handle message");
+        });
+
+        let message = match messages_i.next().await {
+            Some(ControlMessage::IkeMessage(message)) => message,
+            _ => panic!("unexpected message"),
+        };
+
+        assert!(initiator.in_state(&state::IkeAuthRequestSent {}).await);
+
+        let responder2 = responder.clone();
+
+        tokio::spawn(async move {
+            responder2
+                .handle_message(message)
+                .await
+                .expect("unable to handle message");
+        });
+
+        let message = match messages_r.next().await {
+            Some(ControlMessage::IkeMessage(message)) => message,
+            _ => panic!("unexpected message"),
+        };
+
+        assert!(responder.in_state(&state::Established {}).await);
+
+        let initiator2 = initiator.clone();
+
+        tokio::spawn(async move {
+            initiator2
+                .handle_message(message)
+                .await
+                .expect("unable to handle message");
+        });
+
+        assert!(matches!(messages_i.next().await, Some(ControlMessage::CreateChildSa(_))));
+        assert!(initiator.in_state(&state::Established {}).await);
     }
 }

@@ -398,12 +398,16 @@ pub(crate) mod tests {
                     .dh(DhId::MODP2048)
             })
             .inbound_traffic_selector(|tc| {
-                tc.start_address("192.168.1.1".parse().unwrap())
-                    .start_port(2000)
+                tc.start_address("192.168.1.2".parse().unwrap())
+            })
+            .inbound_traffic_selector(|tc| {
+                tc.start_address("192.168.1.3".parse().unwrap())
+            })
+            .outbound_traffic_selector(|tc| {
+                tc.start_address("192.168.1.3".parse().unwrap())
             })
             .outbound_traffic_selector(|tc| {
                 tc.start_address("192.168.1.2".parse().unwrap())
-                    .start_port(2000)
             })
             .psk(b"test test test")
             .build(Id::new(IdType::ID_KEY_ID.into(), id.as_ref()))
