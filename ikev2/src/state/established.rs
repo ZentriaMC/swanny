@@ -347,32 +347,6 @@ fn generate_create_child_sa_response(
     Ok(response)
 }
 
-fn generate_delete_child_sa_request(
-    data: &StateDataCache<'_>,
-    child_sa: &ChildSa,
-) -> Result<ProtectedMessage, StateError> {
-    let mut request = Message::new(
-        data.initiator_spi()?,
-        data.responder_spi()?,
-        ExchangeType::INFORMATIONAL.into(),
-        MessageFlags::I,
-        *data.message_id,
-    );
-
-    request.add_payloads(Some(Payload::new(
-        PayloadType::DELETE.into(),
-        payload::Content::Delete(payload::Delete::new(
-            child_sa.chosen_proposal().protocol().into(),
-            Some(*child_sa.spi()),
-        )),
-        false,
-    )));
-
-    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
-
-    Ok(request)
-}
-
 fn generate_create_child_sa_request(
     config: &Config,
     data: &mut StateDataCache<'_>,
@@ -424,6 +398,93 @@ fn generate_create_child_sa_request(
 
     *data.larval_child_sa.to_mut() = Some(larval_child_sa);
     *data.nonce_i.to_mut() = Some(nonce);
+
+    Ok(request)
+}
+
+fn generate_delete_child_sa_request(
+    data: &StateDataCache<'_>,
+    child_sa: &ChildSa,
+) -> Result<ProtectedMessage, StateError> {
+    let mut request = Message::new(
+        data.initiator_spi()?,
+        data.responder_spi()?,
+        ExchangeType::INFORMATIONAL.into(),
+        MessageFlags::I,
+        *data.message_id,
+    );
+
+    request.add_payloads(Some(Payload::new(
+        PayloadType::DELETE.into(),
+        payload::Content::Delete(payload::Delete::new(
+            child_sa.chosen_proposal().protocol().into(),
+            Some(*child_sa.spi()),
+        )),
+        false,
+    )));
+
+    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
+
+    Ok(request)
+}
+
+fn generate_rekey_child_sa_request(
+    data: &mut StateDataCache<'_>,
+    child_sa: &ChildSa,
+) -> Result<ProtectedMessage, StateError> {
+    let mut request = Message::new(
+        data.initiator_spi()?,
+        data.responder_spi()?,
+        ExchangeType::CREATE_CHILD_SA.into(),
+        MessageFlags::I,
+        *data.message_id,
+    );
+
+    let nonce = Nonce::new()?;
+
+    let proposal = child_sa.chosen_proposal().proposal(
+        1,
+        child_sa.chosen_proposal().protocol().into(),
+        child_sa.spi(),
+    );
+
+    request.add_payloads([
+        Payload::new(
+            PayloadType::NOTIFY.into(),
+            payload::Content::Notify(payload::Notify::new(
+                child_sa.chosen_proposal().protocol().into(),
+                Some(child_sa.spi()),
+                NotifyType::REKEY_SA.into(),
+                b"",
+            )),
+            true,
+        ),
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(Some(proposal))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::NONCE.into(),
+            payload::Content::Nonce(payload::Nonce::new(nonce.as_ref())),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSi.into(),
+            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_i().clone()))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSr.into(),
+            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_r().clone()))),
+            true,
+        ),
+    ]);
+
+    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
+
+    *data.nonce_i.to_mut() = Some(nonce);
+    *data.rekeyed_child_sa.to_mut() = Some(Box::new(child_sa.clone()));
 
     Ok(request)
 }
@@ -543,10 +604,8 @@ impl State for Established {
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         spi: &EspSpi,
-        _hard: bool,
+        hard: bool,
     ) -> Result<Box<dyn State>, StateError> {
-        let mut deleted_child_sas = Vec::new();
-
         let default = StateData::default();
         let default = StateDataCache::new_borrowed(&default);
 
@@ -558,14 +617,20 @@ impl State for Established {
             let index = child_sas.iter().position(|child_sa| child_sa.spi() == spi);
             if let Some(index) = index {
                 let child_sa = child_sas.swap_remove(index);
-                deleted_child_sas.push(child_sa);
+                if hard {
+                    debug!(spi = ?spi, "sending delete Child SA request");
+                    let request = generate_delete_child_sa_request(&data, &child_sa)?;
+                    Self::send_message(sender.clone(), &mut data, request)?;
+                } else {
+                    debug!(spi = ?spi, "sending rekey Child SA request");
+                    let request = generate_rekey_child_sa_request(&mut data, &child_sa)?;
+                    Self::send_message(sender.clone(), &mut data, request)?;
+                }
+            } else {
+                // No matching Child SA, no need to do anything
+                return Ok(self);
             }
 
-            for child_sa in deleted_child_sas.iter() {
-                debug!(spi = ?spi, "sending delete Child SA request");
-                let request = generate_delete_child_sa_request(&data, child_sa)?;
-                Self::send_message(sender.clone(), &mut data, request)?;
-            }
             data.swap(&default)
         };
 
@@ -574,10 +639,10 @@ impl State for Established {
             cache.write_into(&mut data);
         }
 
-        if deleted_child_sas.is_empty() {
-            Ok(self)
-        } else {
+        if hard {
             Ok(Box::new(state::DeleteChildSaRequestSent {}))
+        } else {
+            Ok(Box::new(state::RekeyChildSaRequestSent {}))
         }
     }
 }

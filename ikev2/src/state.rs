@@ -42,6 +42,9 @@ pub(crate) use delete_child_sa_request_sent::DeleteChildSaRequestSent;
 mod new_child_sa_request_sent;
 pub(crate) use new_child_sa_request_sent::NewChildSaRequestSent;
 
+mod rekey_child_sa_request_sent;
+pub(crate) use rekey_child_sa_request_sent::RekeyChildSaRequestSent;
+
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidStateError {
     #[error("no proposal chosen")]

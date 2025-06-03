@@ -8,9 +8,9 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage},
+    sa::ControlMessage,
     state::{
-        CreateChildSa, Established, ProtocolError, SendProtectedMessage, State, StateData,
+        Established, ProtocolError, RekeyChildSa, SendProtectedMessage, State, StateData,
         StateDataCache, StateError, VerifyMessage,
     },
 };
@@ -20,15 +20,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-pub struct NewChildSaRequestSent;
+pub struct RekeyChildSaRequestSent;
 
-impl SendProtectedMessage for NewChildSaRequestSent {}
-impl VerifyMessage for NewChildSaRequestSent {}
-impl CreateChildSa for NewChildSaRequestSent {}
+impl SendProtectedMessage for RekeyChildSaRequestSent {}
+impl VerifyMessage for RekeyChildSaRequestSent {}
+impl RekeyChildSa for RekeyChildSaRequestSent {}
 
-impl std::fmt::Display for NewChildSaRequestSent {
+impl std::fmt::Display for RekeyChildSaRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        f.debug_struct("NewChildSaRequestSent").finish()
+        f.debug_struct("RekeyChildSaRequestSent").finish()
     }
 }
 
@@ -48,10 +48,11 @@ fn handle_create_child_sa_response(
         .get(PayloadType::NONCE)
         .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
 
-    let larval_child_sa = data.larval_child_sa.to_mut().take();
+    // Need to take it out of `data` first, as `data` is still
+    // immutably referenced in the below if block
+    let rekeyed_child_sa = data.rekeyed_child_sa.to_mut().take();
 
-    if let Some(larval_child_sa) = larval_child_sa {
-        // Create a new Child SA, if larval_child_sa is set
+    let child_sa = if let Some(mut child_sa) = rekeyed_child_sa {
         let _ts_i: &payload::Ts = response
             .get(PayloadType::TSi)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
@@ -60,26 +61,35 @@ fn handle_create_child_sa_response(
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
 
-        let proposals = &larval_child_sa.proposals;
-
-        let proposal = Proposal::negotiate(proposals, sa.proposals())
+        // For rekeying, only check the peer proposal matches the current one
+        let proposal = child_sa.chosen_proposal().proposal(
+            1,
+            child_sa.chosen_proposal().protocol().into(),
+            child_sa.spi(),
+        );
+        let proposal = Proposal::negotiate(Some(&proposal), sa.proposals())
             .ok_or(ProtocolError::NoProposalChosen)?;
         info!(proposal = ?&proposal, "negotiated proposal");
-        let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-        let child_sa = larval_child_sa.build(
-            &chosen_proposal,
+        let ke: Option<&payload::Ke> = response.get(PayloadType::KE);
+
+        let _ = child_sa.rekey(
             &data.keys()?.derivation.d,
             (*data.nonce_i).as_ref().expect("nonce should be set"),
             nonce_r.nonce(),
+            ke.map(|ke| ke.ke_data()),
         )?;
-        *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
-    }
+        Some(child_sa)
+    } else {
+        None
+    };
+
+    *data.rekeyed_child_sa.to_mut() = child_sa;
 
     Ok(())
 }
 
-impl NewChildSaRequestSent {
+impl RekeyChildSaRequestSent {
     async fn handle_response(
         self: Box<Self>,
         sender: UnboundedSender<ControlMessage>,
@@ -100,8 +110,8 @@ impl NewChildSaRequestSent {
 
                     handle_create_child_sa_response(&mut data, &response)?;
 
-                    if let Some(child_sa) = data.created_child_sa.to_mut().take() {
-                        Self::create_child_sa(sender.clone(), &mut data, child_sa)?;
+                    if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
+                        Self::rekey_child_sa(sender.clone(), &mut data, child_sa.clone())?;
                     }
 
                     data.swap(&default)
@@ -120,7 +130,7 @@ impl NewChildSaRequestSent {
 }
 
 #[async_trait]
-impl State for NewChildSaRequestSent {
+impl State for RekeyChildSaRequestSent {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,
