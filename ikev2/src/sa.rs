@@ -885,7 +885,11 @@ mod tests {
 
         handle.await.expect("handle should be awaited");
 
-        assert!(initiator.in_state(&state::DeleteChildSaRequestSent {}).await);
+        assert!(
+            initiator
+                .in_state(&state::DeleteChildSaRequestSent {})
+                .await
+        );
 
         let responder2 = responder.clone();
 
