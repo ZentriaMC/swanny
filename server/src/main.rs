@@ -254,6 +254,72 @@ async fn delete_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
     Ok(())
 }
 
+async fn rekey_sa(
+    handle: Handle,
+    src_address: IpAddr,
+    dst_address: IpAddr,
+    spi: &EspSpi,
+    integ_key: Option<&AuthenticationKey>,
+    cipher_key: &EncryptionKey,
+) -> Result<()> {
+    let mut req = handle
+        .state()
+        .update(src_address, dst_address)
+        .spi(u32::from_be_bytes(*spi));
+
+    if let Some(integ_key) = integ_key {
+        let (alg_name, trunc_len) = integ_to_xfrm(integ_key.integ());
+        req = req.authentication_trunc(
+            alg_name,
+            &integ_key.key().as_ref().to_vec(),
+            trunc_len.try_into().expect("value out of range"),
+        )?;
+    }
+
+    let alg_name = cipher_to_xfrm(cipher_key.cipher());
+    if cipher_key.cipher().is_aead() {
+        req = req.encryption_aead(
+            alg_name,
+            &cipher_key.key().as_ref().to_vec(),
+            cipher_key
+                .cipher()
+                .tag_size()
+                .expect("tag size should be given")
+                .checked_mul(8)
+                .expect("overflow")
+                .try_into()?,
+        )?;
+    } else {
+        req = req.encryption(alg_name, &cipher_key.key().as_ref().to_vec())?;
+    }
+
+    Ok(req.execute().await?)
+}
+
+async fn rekey_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
+    rekey_sa(
+        handle.clone(),
+        *child_sa.ts_i().start_address(),
+        *child_sa.ts_r().start_address(),
+        child_sa.spi_r(),
+        child_sa.keys().ai.as_ref(),
+        &child_sa.keys().ei,
+    )
+    .await?;
+    debug!("rekeyed inbound state");
+    rekey_sa(
+        handle.clone(),
+        *child_sa.ts_r().start_address(),
+        *child_sa.ts_i().start_address(),
+        child_sa.spi_i(),
+        child_sa.keys().ar.as_ref(),
+        &child_sa.keys().er,
+    )
+    .await?;
+    debug!("rekeyed outbound state");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = config::Config::new()?;
@@ -344,7 +410,11 @@ async fn main() -> Result<()> {
                             &child_sa,
                         ).await?;
                     }
-                    ControlMessage::RekeyChildSa(_child_sa) => {
+                    ControlMessage::RekeyChildSa(child_sa) => {
+                        rekey_child_sa(
+                            handle.clone(),
+                            &child_sa,
+                        ).await?;
                     }
                 }
             },
