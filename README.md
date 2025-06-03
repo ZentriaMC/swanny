@@ -28,6 +28,8 @@ This will create a network topology like:
   192.168.1.1                                192.168.1.2
 ```
 
+You can monitor IKE traffic over "bridge" with wireshark.
+
 ### Installing XFRM policies
 
 ```console
