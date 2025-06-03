@@ -896,7 +896,7 @@ mod tests {
                 .expect("unable to handle message");
         });
 
-        let _message = match messages_r.next().await {
+        let message = match messages_r.next().await {
             Some(ControlMessage::IkeMessage(message)) => message,
             _ => panic!("unexpected message"),
         };
@@ -909,5 +909,18 @@ mod tests {
         handle.await.expect("handle should be awaited");
 
         assert!(responder.in_state(&state::Established {}).await);
+
+        let initiator2 = initiator.clone();
+
+        let handle = tokio::spawn(async move {
+            initiator2
+                .handle_message(message)
+                .await
+                .expect("unable to handle message");
+        });
+
+        handle.await.expect("handle should be awaited");
+
+        assert!(initiator.in_state(&state::Established {}).await);
     }
 }
