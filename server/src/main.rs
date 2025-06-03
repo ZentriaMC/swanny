@@ -25,7 +25,7 @@ use tokio::net::UdpSocket;
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, info};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-use xfrmnetlink::{Handle, StateModifyRequest};
+use xfrmnetlink::Handle;
 mod config;
 
 fn create_ike_sa_config(config: &config::Config) -> Config {
@@ -131,17 +131,19 @@ fn cipher_to_xfrm(cipher: &Cipher) -> &'static str {
     }
 }
 
-fn create_modify_message(
-    req: StateModifyRequest,
+async fn create_sa(
+    handle: Handle,
     src_address: IpAddr,
     dst_address: IpAddr,
     protocol: u8,
     ipsec_protocol: Protocol,
     spi: &EspSpi,
-    auth_key: Option<&AuthenticationKey>,
+    integ_key: Option<&AuthenticationKey>,
     cipher_key: &EncryptionKey,
     expires: Option<u64>,
-) -> Result<StateModifyRequest> {
+) -> Result<()> {
+    let req = handle.state().add(src_address, dst_address);
+
     let mut req = req
         .protocol(ipsec_to_xfrm(ipsec_protocol))
         .spi(u32::from_be_bytes(*spi))
@@ -154,11 +156,11 @@ fn create_modify_message(
         req = req.time_limit(expires, expires + 10);
     }
 
-    if let Some(auth_key) = auth_key {
-        let (alg_name, trunc_len) = integ_to_xfrm(auth_key.integ());
+    if let Some(integ_key) = integ_key {
+        let (alg_name, trunc_len) = integ_to_xfrm(integ_key.integ());
         req = req.authentication_trunc(
             alg_name,
-            &auth_key.key().as_ref().to_vec(),
+            &integ_key.key().as_ref().to_vec(),
             trunc_len.try_into().expect("value out of range"),
         )?;
     }
@@ -179,34 +181,6 @@ fn create_modify_message(
     } else {
         req = req.encryption(alg_name, &cipher_key.key().as_ref().to_vec())?;
     }
-
-    Ok(req)
-}
-
-async fn create_sa(
-    handle: Handle,
-    src_address: IpAddr,
-    dst_address: IpAddr,
-    protocol: u8,
-    ipsec_protocol: Protocol,
-    spi: &EspSpi,
-    integ_key: Option<&AuthenticationKey>,
-    cipher_key: &EncryptionKey,
-    expires: Option<u64>,
-) -> Result<()> {
-    let req = handle.state().add(src_address, dst_address);
-
-    let req = create_modify_message(
-        req,
-        src_address,
-        dst_address,
-        protocol,
-        ipsec_protocol,
-        spi,
-        integ_key,
-        cipher_key,
-        expires,
-    )?;
 
     Ok(req.execute().await?)
 }
