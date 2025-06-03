@@ -645,4 +645,8 @@ impl State for Established {
             Ok(Box::new(state::RekeyChildSaRequestSent {}))
         }
     }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send) {
+        self
+    }
 }

@@ -121,6 +121,8 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         spi: &EspSpi,
         hard: bool,
     ) -> Result<Box<dyn State>, StateError>;
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send);
 }
 
 macro_rules! cache_cow {

@@ -158,6 +158,18 @@ impl IkeSa {
         data.is_initiator()
     }
 
+    /// Returns true if this `IkeSa` is in the given state
+    pub async fn in_state<T: 'static>(&self, _expected: &T) -> bool {
+        let state = self.state.lock().await;
+        state
+            .as_ref()
+            .expect("state should be set")
+            .as_ref()
+            .as_any()
+            .downcast_ref::<T>()
+            .is_some()
+    }
+
     /// Processes IKE message
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
@@ -694,6 +706,8 @@ mod tests {
 
         let initiator2 = initiator.clone();
 
+        assert!(initiator.in_state(&state::Initial {}).await);
+
         tokio::spawn(async move {
             let initiator_addr: IpAddr = "192.168.1.2".parse().unwrap();
             let responder_addr: IpAddr = "192.168.1.3".parse().unwrap();
@@ -710,6 +724,8 @@ mod tests {
             _ => panic!("unexpected message"),
         };
 
+        assert!(initiator.in_state(&state::IkeSaInitRequestSent {}).await);
+
         let responder2 = responder.clone();
 
         tokio::spawn(async move {
@@ -723,5 +739,7 @@ mod tests {
             Some(ControlMessage::IkeMessage(message)) => message,
             _ => panic!("unexpected message"),
         };
+
+        assert!(responder.in_state(&state::IkeSaInitResponseSent {}).await);
     }
 }

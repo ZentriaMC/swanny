@@ -149,4 +149,8 @@ impl State for IkeAuthRequestSent {
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send) {
+        self
+    }
 }
