@@ -704,6 +704,7 @@ mod tests {
         let config = config::tests::create_config(b"responder");
         let (responder, mut messages_r) = IkeSa::new(&config).expect("unable to create IKE SA");
 
+        // Initial exchange
         assert!(initiator.in_state(&state::Initial {}).await);
 
         let initiator2 = initiator.clone();
@@ -795,11 +796,14 @@ mod tests {
 
         assert!(initiator.in_state(&state::Established {}).await);
 
+        // Rekeying
+        let spi = *child_sa.spi();
+
         let initiator2 = initiator.clone();
 
         tokio::spawn(async move {
             initiator2
-                .handle_expire(*child_sa.spi(), false)
+                .handle_expire(spi, false)
                 .await
                 .expect("unable to handle expire");
         });
@@ -841,11 +845,49 @@ mod tests {
                 .expect("unable to handle message");
         });
 
-        let child_sa = match messages_i.next().await {
+        let _child_sa = match messages_i.next().await {
             Some(ControlMessage::RekeyChildSa(child_sa)) => child_sa,
             _ => panic!("unexpected message"),
         };
 
         assert!(initiator.in_state(&state::Established {}).await);
+
+        // Deleting
+        let initiator2 = initiator.clone();
+
+        tokio::spawn(async move {
+            initiator2
+                .handle_expire(spi, true)
+                .await
+                .expect("unable to handle expire");
+        });
+
+        let message = match messages_i.next().await {
+            Some(ControlMessage::IkeMessage(message)) => message,
+            _ => panic!("unexpected message"),
+        };
+
+        assert!(initiator.in_state(&state::DeleteChildSaRequestSent {}).await);
+
+        let responder2 = responder.clone();
+
+        tokio::spawn(async move {
+            responder2
+                .handle_message(message)
+                .await
+                .expect("unable to handle message");
+        });
+
+        let _message = match messages_r.next().await {
+            Some(ControlMessage::IkeMessage(message)) => message,
+            _ => panic!("unexpected message"),
+        };
+
+        let _child_sa = match messages_r.next().await {
+            Some(ControlMessage::DeleteChildSa(child_sa)) => child_sa,
+            _ => panic!("unexpected message"),
+        };
+
+        assert!(responder.in_state(&state::Established {}).await);
     }
 }
