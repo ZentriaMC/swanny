@@ -142,11 +142,7 @@ fn generate_ike_auth_request(
 
     debug!(request = ?&request, "sending protected request");
 
-    let request = request.protect(
-        data.chosen_proposal()?.cipher(),
-        data.encrypting_key()?,
-        data.chosen_proposal()?.integ(),
-    )?;
+    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
 
     Ok(request)
 }

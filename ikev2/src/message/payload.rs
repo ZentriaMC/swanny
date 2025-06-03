@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{self, Cipher, Integ, Key, Prf},
+    crypto::{self, EncryptionKey, Integ, Key, Prf},
     message::{
         EspSpi,
         num::{AuthType, DhId, IdType, NotifyType, Num, PayloadType, Protocol},
@@ -690,8 +690,7 @@ impl Sk {
 
     /// Encrypts payloads with given cipher and key, creates a new `Sk` content
     pub fn encrypt<'a>(
-        cipher: &Cipher,
-        key: &Key,
+        key: &EncryptionKey,
         payloads: impl IntoIterator<Item = &'a Payload>,
         integ: Option<&Integ>,
     ) -> Result<Self, serialize::SerializeError> {
@@ -699,7 +698,7 @@ impl Sk {
         let inner = payloads.first().map(|p| p.ty()).unwrap_or(0.into());
         let mut plaintext = BytesMut::with_capacity(cumulative_size(payloads.clone())?);
         serialize_payloads(payloads, &mut plaintext)?;
-        let ciphertext = cipher.encrypt(key, &plaintext)?;
+        let ciphertext = key.cipher().encrypt(key.key(), &plaintext)?;
         Ok(Self {
             ciphertext,
             inner,
@@ -710,12 +709,11 @@ impl Sk {
     /// Decrypts payloads from the ciphertext of the `Sk` content
     pub fn decrypt(
         &self,
-        cipher: &Cipher,
-        key: &Key,
+        key: &EncryptionKey,
         integ: Option<&Integ>,
     ) -> Result<Vec<Payload>, serialize::DeserializeError> {
-        let plaintext = cipher.decrypt(
-            key,
+        let plaintext = key.cipher().decrypt(
+            key.key(),
             &self.ciphertext
                 [..self.ciphertext.len() - integ.map(|integ| integ.output_size()).unwrap_or(0)],
         )?;

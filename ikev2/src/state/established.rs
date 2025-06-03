@@ -39,11 +39,7 @@ fn handle_informational_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let request = request.unprotect(
-        data.chosen_proposal()?.cipher(),
-        data.decrypting_key()?,
-        data.chosen_proposal()?.integ(),
-    )?;
+    let request = request.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -101,11 +97,7 @@ fn generate_informational_response(
 
     debug!(response = ?&response, "sending protected response");
 
-    let response = response.protect(
-        data.chosen_proposal()?.cipher(),
-        data.encrypting_key()?,
-        data.chosen_proposal()?.integ(),
-    )?;
+    let response = response.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
     Ok(response)
 }
 
@@ -123,7 +115,6 @@ fn handle_rekey_child_sa_request(
     if let Some(index) = index {
         let mut child_sa = child_sas.swap_remove(index);
         let public_key = child_sa.rekey(
-            data.chosen_proposal()?.prf().expect("PRF must be set"),
             &data.keys()?.derivation.d,
             nonce_i,
             nonce_r,
@@ -169,7 +160,6 @@ fn handle_create_new_child_sa_request(
 
     let child_sa = larval_child_sa.build(
         &chosen_proposal,
-        data.chosen_proposal()?.prf().expect("PRF must be set"),
         &data.keys()?.derivation.d,
         nonce_i,
         nonce_r,
@@ -184,11 +174,7 @@ fn handle_create_child_sa_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let request = request.unprotect(
-        data.chosen_proposal()?.cipher(),
-        data.decrypting_key()?,
-        data.chosen_proposal()?.integ(),
-    )?;
+    let request = request.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -208,7 +194,7 @@ fn handle_create_child_sa_request(
     let notifications: Result<Vec<_>, _> = request
         .payloads()
         .filter(|p| matches!(p.ty().assigned(), Some(PayloadType::NOTIFY)))
-        .map(|p| TryInto::<&payload::Notify>::try_into(p))
+        .map(TryInto::<&payload::Notify>::try_into)
         .collect();
 
     let notifications = notifications.map_err(Into::<DeserializeError>::into)?;
@@ -294,11 +280,7 @@ fn generate_rekey_child_sa_response(
     debug!(response = ?&response, "sending protected response");
 
     response
-        .protect(
-            data.chosen_proposal()?.cipher(),
-            data.encrypting_key()?,
-            data.chosen_proposal()?.integ(),
-        )
+        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
         .map_err(Into::into)
 }
 
@@ -347,11 +329,7 @@ fn generate_create_new_child_sa_response(
     debug!(response = ?&response, "sending protected response");
 
     response
-        .protect(
-            data.chosen_proposal()?.cipher(),
-            data.encrypting_key()?,
-            data.chosen_proposal()?.integ(),
-        )
+        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
         .map_err(Into::into)
 }
 
@@ -390,11 +368,7 @@ fn generate_delete_child_sa_request(
         false,
     )));
 
-    let request = request.protect(
-        data.chosen_proposal()?.cipher(),
-        data.encrypting_key()?,
-        data.chosen_proposal()?.integ(),
-    )?;
+    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
 
     Ok(request)
 }
@@ -446,11 +420,7 @@ fn generate_create_child_sa_request(
 
     debug!(request = ?&request, "sending protected request");
 
-    let request = request.protect(
-        data.chosen_proposal()?.cipher(),
-        data.encrypting_key()?,
-        data.chosen_proposal()?.integ(),
-    )?;
+    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
 
     *data.larval_child_sa.to_mut() = Some(larval_child_sa);
     *data.nonce_i.to_mut() = Some(nonce);
@@ -593,7 +563,7 @@ impl State for Established {
 
             for child_sa in deleted_child_sas.iter() {
                 debug!(spi = ?spi, "sending delete Child SA request");
-                let request = generate_delete_child_sa_request(&data, &child_sa)?;
+                let request = generate_delete_child_sa_request(&data, child_sa)?;
                 Self::send_message(sender.clone(), &mut data, request)?;
             }
             data.swap(&default)

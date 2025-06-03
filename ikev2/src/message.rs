@@ -17,7 +17,7 @@ use num::{ExchangeType, MessageFlags, Num, PayloadType, TrafficSelectorType};
 pub mod payload;
 use payload::Payload;
 
-use crate::crypto::{Cipher, Integ, Key};
+use crate::crypto::{EncryptionKey, Integ};
 
 pub mod proposal;
 pub mod serialize;
@@ -183,15 +183,14 @@ impl Message {
     /// Turns this `Message` into a `ProtectedMessage`, encrypting the payloads
     pub fn protect(
         &self,
-        cipher: &Cipher,
-        key: &Key,
+        key: &EncryptionKey,
         integ: Option<&Integ>,
     ) -> Result<ProtectedMessage, serialize::SerializeError> {
         Ok(ProtectedMessage {
             header: self.header.clone(),
             payloads: vec![payload::Payload::new(
                 PayloadType::SK.into(),
-                payload::Content::Sk(payload::Sk::encrypt(cipher, key, &self.payloads, integ)?),
+                payload::Content::Sk(payload::Sk::encrypt(key, &self.payloads, integ)?),
                 true,
             )],
         })
@@ -262,8 +261,7 @@ impl ProtectedMessage {
     /// Turns this `ProtectedMessage` into a `Message`, decrypting the payloads
     pub fn unprotect(
         &self,
-        cipher: &Cipher,
-        key: &Key,
+        key: &EncryptionKey,
         integ: Option<&Integ>,
     ) -> Result<Message, serialize::DeserializeError> {
         let last = self
@@ -276,7 +274,7 @@ impl ProtectedMessage {
         let sk: &payload::Sk = last.try_into()?;
         Ok(Message {
             header: self.header.clone(),
-            payloads: sk.decrypt(cipher, key, integ)?,
+            payloads: sk.decrypt(key, integ)?,
         })
     }
 }

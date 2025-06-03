@@ -1,6 +1,6 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto::{CryptoError, GroupPrivateKey, Key, Nonce},
+    crypto::{CryptoError, EncryptionKey, GroupPrivateKey, Nonce},
     message::{
         EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags},
@@ -233,7 +233,7 @@ impl StateDataCache<'_> {
         }
     }
 
-    fn encrypting_key(&self) -> Result<&Key, StateError> {
+    fn encrypting_key(&self) -> Result<&EncryptionKey, StateError> {
         match *self.is_initiator {
             Some(true) => Ok(&self.keys()?.protection.ei),
             Some(false) => Ok(&self.keys()?.protection.er),
@@ -243,7 +243,7 @@ impl StateDataCache<'_> {
         }
     }
 
-    fn decrypting_key(&self) -> Result<&Key, StateError> {
+    fn decrypting_key(&self) -> Result<&EncryptionKey, StateError> {
         match *self.is_initiator {
             Some(true) => Ok(&self.keys()?.protection.er),
             Some(false) => Ok(&self.keys()?.protection.ei),
@@ -282,8 +282,8 @@ impl StateDataCache<'_> {
             InvalidStateError::NonceNotRecorded,
         ))?;
 
-        let prf = self.chosen_proposal()?.prf().expect("PRF must be set");
-        let mut mac = prf.prf(&self.keys()?.derivation.pi, &buf[..])?;
+        let pi = &self.keys()?.derivation.pi;
+        let mut mac = pi.prf().prf(pi.key(), &buf[..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_request.to_vec());
@@ -307,8 +307,8 @@ impl StateDataCache<'_> {
             InvalidStateError::NonceNotRecorded,
         ))?;
 
-        let prf = self.chosen_proposal()?.prf().expect("PRF must be set");
-        let mut mac = prf.prf(&self.keys()?.derivation.pr, &buf[..])?;
+        let pr = &self.keys()?.derivation.pr;
+        let mut mac = pr.prf().prf(pr.key(), &buf[..])?;
 
         let mut signed_data = Vec::new();
         signed_data.append(&mut ike_sa_init_response.to_vec());
@@ -343,8 +343,18 @@ impl StateDataCache<'_> {
         }
 
         let key = match *self.is_initiator {
-            Some(true) => &self.keys()?.protection.ai,
-            Some(false) => &self.keys()?.protection.ar,
+            Some(true) => self
+                .keys()?
+                .protection
+                .ai
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))?,
+            Some(false) => self
+                .keys()?
+                .protection
+                .ar
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))?,
             None => {
                 return Err(StateError::InvalidState(
                     InvalidStateError::InitiatorNotDetermined,
@@ -352,11 +362,9 @@ impl StateDataCache<'_> {
             }
         };
 
-        let integ = self.chosen_proposal()?.integ().unwrap();
+        debug!(key = ?&key, message = ?message.as_ref(), "signing message");
 
-        debug!(key = ?&key, message = ?message.as_ref(), integ =?&integ, "signing message");
-
-        Ok(Some(integ.sign(key.as_ref().unwrap(), message.as_ref())?))
+        Ok(Some(key.integ().sign(key.key(), message.as_ref())?))
     }
 
     fn message_verify(&self, message: impl AsRef<[u8]>) -> Result<bool, StateError> {
@@ -365,8 +373,18 @@ impl StateDataCache<'_> {
         }
 
         let key = match *self.is_initiator {
-            Some(true) => &self.keys()?.protection.ar,
-            Some(false) => &self.keys()?.protection.ai,
+            Some(true) => self
+                .keys()?
+                .protection
+                .ar
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))?,
+            Some(false) => self
+                .keys()?
+                .protection
+                .ai
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))?,
             None => {
                 return Err(StateError::InvalidState(
                     InvalidStateError::InitiatorNotDetermined,
@@ -374,15 +392,14 @@ impl StateDataCache<'_> {
             }
         };
 
-        let integ = self.chosen_proposal()?.integ().unwrap();
-        if message.as_ref().len() < integ.output_size() {
+        if message.as_ref().len() < key.integ().output_size() {
             return Err(DeserializeError::PrematureEof.into());
         }
 
         let (message, checksum) = message
             .as_ref()
-            .split_at(message.as_ref().len() - integ.output_size());
-        Ok(integ.verify(key.as_ref().unwrap(), message, checksum)?)
+            .split_at(message.as_ref().len() - key.integ().output_size());
+        Ok(key.integ().verify(key.key(), message, checksum)?)
     }
 }
 

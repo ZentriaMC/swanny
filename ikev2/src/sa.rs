@@ -41,7 +41,10 @@
 //!
 use crate::{
     config::Config,
-    crypto::{self, Cipher, CryptoError, Group, GroupPrivateKey, Integ, Key, Prf},
+    crypto::{
+        self, AuthenticationKey, Cipher, CryptoError, DerivationKey, EncryptionKey, Group,
+        GroupPrivateKey, Integ, Key, Prf,
+    },
     message::{
         EspSpi, Spi,
         num::{
@@ -369,21 +372,18 @@ impl ChosenProposal {
         nonce_r: impl AsRef<[u8]>,
         private_key: &GroupPrivateKey,
         peer_public_key: impl AsRef<[u8]>,
-    ) -> Result<Key, CryptoError> {
+    ) -> Result<DerivationKey, CryptoError> {
         let g_ir = private_key.compute_key(peer_public_key)?;
         let mut buf = nonce_i.as_ref().to_vec();
         buf.extend_from_slice(nonce_r.as_ref());
-        Ok(Key::new(
-            self.prf()
-                .expect("PRF must be set")
-                .prf(&Key::new(buf), g_ir)?,
-        ))
+        let prf = self.prf().expect("PRF must be set");
+        Ok(DerivationKey::new(prf, prf.prf(&Key::new(buf), g_ir)?))
     }
 
     /// Generates key materials for IKE SA
     pub(crate) fn generate_keys(
         &self,
-        skeyseed: &Key,
+        skeyseed: &DerivationKey,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
         spi_i: &Spi,
@@ -398,9 +398,9 @@ impl ChosenProposal {
             .as_ref()
             .map(|integ| integ.key_size())
             .unwrap_or(0);
-        let prf = self.prf().expect("PRF must be set");
+        let prf = skeyseed.prf();
         let buf = prf.prfplus(
-            skeyseed,
+            skeyseed.key(),
             &buf,
             prf.size() * 3 + self.cipher.key_size() * 2 + integ_key_size * 2,
         )?;
@@ -408,34 +408,37 @@ impl ChosenProposal {
 
         let mut d = vec![0; prf.size()];
         buf.try_copy_to_slice(&mut d).expect("buffer too short");
-        let d = Key::new(d);
+        let d = DerivationKey::new(prf, d);
 
-        let (ai, ar) = if self.integ.is_some() {
+        let (ai, ar) = if let Some(integ) = &self.integ {
             let mut ai = vec![0; integ_key_size];
             buf.try_copy_to_slice(&mut ai).expect("buffer too short");
 
             let mut ar = vec![0; integ_key_size];
             buf.try_copy_to_slice(&mut ar).expect("buffer too short");
-            (Some(Key::new(ai)), Some(Key::new(ar)))
+            (
+                Some(AuthenticationKey::new(integ, ai)),
+                Some(AuthenticationKey::new(integ, ar)),
+            )
         } else {
             (None, None)
         };
 
         let mut ei = vec![0; self.cipher.key_size()];
         buf.try_copy_to_slice(&mut ei).expect("buffer too short");
-        let ei = Key::new(ei);
+        let ei = EncryptionKey::new(&self.cipher, ei);
 
         let mut er = vec![0; self.cipher.key_size()];
         buf.try_copy_to_slice(&mut er).expect("buffer too short");
-        let er = Key::new(er);
+        let er = EncryptionKey::new(&self.cipher, er);
 
         let mut pi = vec![0; prf.size()];
         buf.try_copy_to_slice(&mut pi).expect("buffer too short");
-        let pi = Key::new(pi);
+        let pi = DerivationKey::new(prf, pi);
 
         let mut pr = vec![0; prf.size()];
         buf.try_copy_to_slice(&mut pr).expect("buffer too short");
-        let pr = Key::new(pr);
+        let pr = DerivationKey::new(prf, pr);
 
         Ok(Keys {
             derivation: DerivationKeys { d, pi, pr },
@@ -446,8 +449,7 @@ impl ChosenProposal {
     /// Generates key materials used by a Child SA
     fn generate_child_sa_keys(
         &self,
-        prf: &Prf,
-        d: &Key,
+        d: &DerivationKey,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
         peer_public_key: Option<&[u8]>,
@@ -471,27 +473,32 @@ impl ChosenProposal {
             .map(|integ| integ.key_size())
             .unwrap_or(0);
         let encryption_key_size = self.cipher().key_size() + self.cipher().salt_size().unwrap_or(0);
-        let buf = prf.prfplus(d, &buf, encryption_key_size * 2 + integ_key_size * 2)?;
+        let buf = d
+            .prf()
+            .prfplus(d.key(), &buf, encryption_key_size * 2 + integ_key_size * 2)?;
         let mut buf = buf.as_slice();
 
-        let (ai, ar) = if self.integ().is_some() {
+        let (ai, ar) = if let Some(integ) = &self.integ() {
             let mut ai = vec![0; integ_key_size];
             buf.try_copy_to_slice(&mut ai).expect("buffer too short");
 
             let mut ar = vec![0; integ_key_size];
             buf.try_copy_to_slice(&mut ar).expect("buffer too short");
-            (Some(Key::new(ai)), Some(Key::new(ar)))
+            (
+                Some(AuthenticationKey::new(integ, ai)),
+                Some(AuthenticationKey::new(integ, ar)),
+            )
         } else {
             (None, None)
         };
 
         let mut ei = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut ei).expect("buffer too short");
-        let ei = Key::new(ei);
+        let ei = EncryptionKey::new(&self.cipher, ei);
 
         let mut er = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut er).expect("buffer too short");
-        let er = Key::new(er);
+        let er = EncryptionKey::new(&self.cipher, er);
 
         Ok((ProtectionKeys { ei, er, ai, ar }, public_key))
     }
@@ -530,18 +537,18 @@ pub struct Keys {
 /// Key materials used for key derivation
 #[derive(Clone, Debug)]
 pub struct DerivationKeys {
-    pub d: Key,
-    pub pi: Key,
-    pub pr: Key,
+    pub d: DerivationKey,
+    pub pi: DerivationKey,
+    pub pr: DerivationKey,
 }
 
 /// Key materials used for encryption and authentication
 #[derive(Clone, Debug)]
 pub struct ProtectionKeys {
-    pub ei: Key,
-    pub er: Key,
-    pub ai: Option<Key>,
-    pub ar: Option<Key>,
+    pub ei: EncryptionKey,
+    pub er: EncryptionKey,
+    pub ai: Option<AuthenticationKey>,
+    pub ar: Option<AuthenticationKey>,
 }
 
 #[derive(Clone, Debug)]
@@ -577,18 +584,12 @@ impl LarvalChildSa {
     pub fn build(
         self,
         chosen_proposal: &ChosenProposal,
-        prf: &Prf,
-        d: &Key,
+        d: &DerivationKey,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
     ) -> Result<ChildSa, CryptoError> {
-        let (keys, _) = chosen_proposal.generate_child_sa_keys(
-            prf,
-            d,
-            nonce_i.as_ref(),
-            nonce_r.as_ref(),
-            None,
-        )?;
+        let (keys, _) =
+            chosen_proposal.generate_child_sa_keys(d, nonce_i.as_ref(), nonce_r.as_ref(), None)?;
         Ok(ChildSa {
             ts_i: self.ts_i,
             ts_r: self.ts_r,
@@ -663,19 +664,14 @@ impl ChildSa {
     /// Rekey this Child SA
     pub fn rekey(
         &mut self,
-        prf: &Prf,
-        key: &Key,
+        key: &DerivationKey,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
         peer_public_key: Option<&[u8]>,
     ) -> Result<Option<Vec<u8>>, CryptoError> {
-        let (keys, public_key) = self.chosen_proposal.generate_child_sa_keys(
-            prf,
-            key,
-            nonce_i,
-            nonce_r,
-            peer_public_key,
-        )?;
+        let (keys, public_key) =
+            self.chosen_proposal
+                .generate_child_sa_keys(key, nonce_i, nonce_r, peer_public_key)?;
         self.keys = keys;
         Ok(public_key)
     }

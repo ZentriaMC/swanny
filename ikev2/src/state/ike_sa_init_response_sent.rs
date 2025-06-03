@@ -37,11 +37,7 @@ fn handle_ike_auth_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<ChildSa, StateError> {
-    let request = request.unprotect(
-        data.chosen_proposal()?.cipher(),
-        data.decrypting_key()?,
-        data.chosen_proposal()?.integ(),
-    )?;
+    let request = request.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -108,7 +104,6 @@ fn handle_ike_auth_request(
     larval_child_sa
         .build(
             &chosen_proposal,
-            data.chosen_proposal()?.prf().expect("PRF must be set"),
             &data.keys()?.derivation.d,
             (*data.nonce_i).as_ref().unwrap(),
             (*data.nonce_r).as_ref().unwrap(),
@@ -162,11 +157,7 @@ fn generate_ike_auth_response(
     debug!(response = ?&response, "sending protected response");
 
     response
-        .protect(
-            data.chosen_proposal()?.cipher(),
-            data.encrypting_key()?,
-            data.chosen_proposal()?.integ(),
-        )
+        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
         .map_err(Into::into)
 }
 
