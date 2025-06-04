@@ -3,6 +3,7 @@ name = "swanny-server"
 description = "Experimental IKEv2 server"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 license = "GPL-2.0-or-later"
 
 [[bin]]

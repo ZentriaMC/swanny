@@ -3,6 +3,7 @@ name = "swanny-ikev2"
 description = "IKEv2 message handling"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 license = "LGPL-2.1-or-later"
 
 [dependencies]
