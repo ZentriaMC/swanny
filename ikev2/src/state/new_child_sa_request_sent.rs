@@ -50,15 +50,19 @@ fn handle_create_child_sa_response(
 
     let larval_child_sa = data.larval_child_sa.to_mut().take();
 
+    // Create a new Child SA, if larval_child_sa is set
     if let Some(larval_child_sa) = larval_child_sa {
-        // Create a new Child SA, if larval_child_sa is set
-        let _ts_i: &payload::Ts = response
+        let ts_i: &payload::Ts = response
             .get(PayloadType::TSi)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
+        TrafficSelector::negotiate(Some(&larval_child_sa.ts_i), ts_i.traffic_selectors())
+            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
-        let _ts_r: &payload::Ts = response
+        let ts_r: &payload::Ts = response
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
+        TrafficSelector::negotiate(Some(&larval_child_sa.ts_r), ts_r.traffic_selectors())
+            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
         let proposals = &larval_child_sa.proposals;
 

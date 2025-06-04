@@ -53,13 +53,18 @@ fn handle_create_child_sa_response(
     let rekeyed_child_sa = data.rekeyed_child_sa.to_mut().take();
 
     let child_sa = if let Some(mut child_sa) = rekeyed_child_sa {
-        let _ts_i: &payload::Ts = response
+        // For rekeying, only check the peer TSi/TSr match the current one
+        let ts_i: &payload::Ts = response
             .get(PayloadType::TSi)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
+        TrafficSelector::negotiate(Some(child_sa.ts_i()), ts_i.traffic_selectors())
+            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
-        let _ts_r: &payload::Ts = response
+        let ts_r: &payload::Ts = response
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
+        TrafficSelector::negotiate(Some(child_sa.ts_r()), ts_r.traffic_selectors())
+            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
         // For rekeying, only check the peer proposal matches the current one
         let proposal = child_sa.chosen_proposal().proposal(
