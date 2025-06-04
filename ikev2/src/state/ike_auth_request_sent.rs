@@ -9,7 +9,7 @@ use crate::{
         traffic_selector::TrafficSelector,
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, ProtocolError},
-    state::{self, CreateChildSa, State, StateData, StateDataCache, StateError},
+    state::{self, CreateChildSa, InvalidStateError, State, StateData, StateDataCache, StateError},
 };
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
@@ -57,28 +57,32 @@ fn handle_ike_auth_response(
     };
 
     if authenticated? {
-        info!(
-            spi = &data.peer_spi.as_ref().unwrap()[..],
-            "initiator authenticated responder"
-        );
+        info!(spi = &data.responder_spi()?[..], "authenticated responder");
     } else {
         return Err(ProtocolError::AuthenticationFailed.into());
     }
 
-    let proposals = &(*data.larval_child_sa).as_ref().unwrap().proposals;
+    let larval_child_sa = data
+        .larval_child_sa
+        .to_mut()
+        .take()
+        .ok_or(InvalidStateError::LarvalChildSaNotSet)?;
 
-    let proposal =
-        Proposal::negotiate(proposals, sa.proposals()).ok_or(ProtocolError::NoProposalChosen)?;
+    let proposal = Proposal::negotiate(&larval_child_sa.proposals, sa.proposals())
+        .ok_or(ProtocolError::NoProposalChosen)?;
     info!(proposal = ?&proposal, "negotiated proposal");
     let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-    let larval_child_sa = data.larval_child_sa.to_mut().take().unwrap();
     larval_child_sa
         .build(
             &chosen_proposal,
             &data.keys()?.derivation.d,
-            (*data.nonce_i).as_ref().unwrap(),
-            (*data.nonce_r).as_ref().unwrap(),
+            (*data.nonce_i)
+                .as_ref()
+                .ok_or(InvalidStateError::NonceNotRecorded)?,
+            (*data.nonce_r)
+                .as_ref()
+                .ok_or(InvalidStateError::NonceNotRecorded)?,
         )
         .map_err(Into::into)
 }

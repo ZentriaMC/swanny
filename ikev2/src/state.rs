@@ -65,8 +65,14 @@ pub enum InvalidStateError {
     #[error("initiator/responder not determined")]
     InitiatorNotDetermined,
 
-    #[error("unknown child SA")]
+    #[error("unknown Child SA")]
     UnknownChildSa(EspSpi),
+
+    #[error("larval Child SA not set")]
+    LarvalChildSaNotSet,
+
+    #[error("group private key not set")]
+    GroupPrivateKeyNotSet,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -11,8 +11,9 @@ use crate::{
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa},
     state::{
-        self, ChildSa, CreateChildSa, DeleteChildSa, ProtocolError, RekeyChildSa,
-        SendProtectedMessage, State, StateData, StateDataCache, StateError, VerifyMessage,
+        self, ChildSa, CreateChildSa, DeleteChildSa, InvalidStateError, ProtocolError,
+        RekeyChildSa, SendProtectedMessage, State, StateData, StateDataCache, StateError,
+        VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -253,7 +254,11 @@ fn generate_rekey_child_sa_response(
         ),
         Payload::new(
             PayloadType::NONCE.into(),
-            payload::Content::Nonce(payload::Nonce::new((*data.nonce_r).as_ref().unwrap())),
+            payload::Content::Nonce(payload::Nonce::new(
+                (*data.nonce_r)
+                    .as_ref()
+                    .ok_or(InvalidStateError::NonceNotRecorded)?,
+            )),
             true,
         ),
         Payload::new(
@@ -311,7 +316,11 @@ fn generate_new_child_sa_response(
         ),
         Payload::new(
             PayloadType::NONCE.into(),
-            payload::Content::Nonce(payload::Nonce::new((*data.nonce_r).as_ref().unwrap())),
+            payload::Content::Nonce(payload::Nonce::new(
+                (*data.nonce_r)
+                    .as_ref()
+                    .ok_or(InvalidStateError::NonceNotRecorded)?,
+            )),
             true,
         ),
         Payload::new(

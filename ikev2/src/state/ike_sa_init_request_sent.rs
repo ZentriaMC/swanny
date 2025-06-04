@@ -8,7 +8,9 @@ use crate::{
         traffic_selector::TrafficSelector,
     },
     sa::{ChosenProposal, ControlMessage, ProtocolError},
-    state::{self, SendProtectedMessage, State, StateData, StateDataCache, StateError},
+    state::{
+        self, InvalidStateError, SendProtectedMessage, State, StateData, StateDataCache, StateError,
+    },
 };
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
@@ -50,12 +52,20 @@ fn handle_ike_sa_init_response(
 
     let chosen_proposal = ChosenProposal::new(proposal)?;
 
-    let private_key = data.private_key.as_ref().as_ref().unwrap();
+    let private_key = data
+        .private_key
+        .as_ref()
+        .as_ref()
+        .ok_or(InvalidStateError::GroupPrivateKeyNotSet)?;
     if ke.dh_group().assigned() != Some(private_key.group().id()) {
         return Err(ProtocolError::InconsistentKeGroup(ke.dh_group()).into());
     }
 
-    let nonce_i = data.nonce_i.as_ref().as_ref().unwrap();
+    let nonce_i = data
+        .nonce_i
+        .as_ref()
+        .as_ref()
+        .ok_or(InvalidStateError::NonceNotRecorded)?;
     let skeyseed =
         chosen_proposal.generate_skeyseed(nonce_i, nonce_r.nonce(), private_key, ke.ke_data())?;
     debug!(skeyseed = ?&skeyseed, "generated SKEYSEED");
@@ -90,7 +100,11 @@ fn generate_ike_auth_request(
         *data.message_id,
     );
 
-    let larval_child_sa = data.larval_child_sa.as_ref().as_ref().unwrap();
+    let larval_child_sa = data
+        .larval_child_sa
+        .as_ref()
+        .as_ref()
+        .ok_or(InvalidStateError::LarvalChildSaNotSet)?;
     let proposals = &larval_child_sa.proposals;
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());

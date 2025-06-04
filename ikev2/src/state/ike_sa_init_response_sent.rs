@@ -10,8 +10,8 @@ use crate::{
     },
     sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
     state::{
-        self, CreateChildSa, SendProtectedMessage, State, StateData, StateDataCache, StateError,
-        VerifyMessage,
+        self, CreateChildSa, InvalidStateError, SendProtectedMessage, State, StateData,
+        StateDataCache, StateError, VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -70,10 +70,7 @@ fn handle_ike_auth_request(
     };
 
     if authenticated? {
-        info!(
-            spi = &data.peer_spi.as_ref().unwrap()[..],
-            "responder authenticated initiator"
-        );
+        info!(spi = &data.initiator_spi()?[..], "authenticated initiator");
     } else {
         return Err(ProtocolError::AuthenticationFailed.into());
     }
@@ -105,8 +102,12 @@ fn handle_ike_auth_request(
         .build(
             &chosen_proposal,
             &data.keys()?.derivation.d,
-            (*data.nonce_i).as_ref().unwrap(),
-            (*data.nonce_r).as_ref().unwrap(),
+            (*data.nonce_i)
+                .as_ref()
+                .ok_or(InvalidStateError::NonceNotRecorded)?,
+            (*data.nonce_r)
+                .as_ref()
+                .ok_or(InvalidStateError::NonceNotRecorded)?,
         )
         .map_err(Into::into)
 }
