@@ -174,8 +174,6 @@ impl IkeSa {
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
-            drop(state);
-
             let old_state_name = old_state.to_string();
 
             let new_state = old_state
@@ -189,7 +187,6 @@ impl IkeSa {
 
             let new_state_name = new_state.to_string();
 
-            let mut state = self.state.lock().await;
             *state = Some(new_state);
 
             info!("state transitioned from {old_state_name} to {new_state_name}");
@@ -207,8 +204,6 @@ impl IkeSa {
     ) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
-            drop(state);
-
             let old_state_name = old_state.to_string();
 
             let new_state = old_state
@@ -224,7 +219,6 @@ impl IkeSa {
 
             let new_state_name = new_state.to_string();
 
-            let mut state = self.state.lock().await;
             *state = Some(new_state);
 
             info!("state transitioned from {old_state_name} to {new_state_name}");
@@ -237,8 +231,6 @@ impl IkeSa {
     pub async fn handle_expire(&self, spi: EspSpi, hard: bool) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
-            drop(state);
-
             let old_state_name = old_state.to_string();
 
             let new_state = old_state
@@ -253,7 +245,6 @@ impl IkeSa {
 
             let new_state_name = new_state.to_string();
 
-            let mut state = self.state.lock().await;
             *state = Some(new_state);
 
             info!("state transitioned from {old_state_name} to {new_state_name}");
