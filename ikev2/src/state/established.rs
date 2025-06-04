@@ -126,7 +126,7 @@ fn handle_rekey_child_sa_request(
     Ok(())
 }
 
-fn handle_create_new_child_sa_request(
+fn handle_new_child_sa_request(
     config: &Config,
     data: &mut StateDataCache<'_>,
     sa: &payload::Sa,
@@ -216,7 +216,7 @@ fn handle_create_child_sa_request(
         )?;
     } else if let (Some(ts_i), Some(ts_r)) = (ts_i, ts_r) {
         // Create a new Child SA, if TSi and TSr are present
-        handle_create_new_child_sa_request(config, data, sa, ts_i, ts_r, nonce_i.nonce(), &nonce)?;
+        handle_new_child_sa_request(config, data, sa, ts_i, ts_r, nonce_i.nonce(), &nonce)?;
     } else {
         // Otherwise, rekey an IKE SA
     }
@@ -228,6 +228,7 @@ fn handle_create_child_sa_request(
 
 fn generate_rekey_child_sa_response(
     data: &mut StateDataCache<'_>,
+    child_sa: &ChildSa,
     request: &ProtectedMessage,
 ) -> Result<ProtectedMessage, StateError> {
     let mut response = Message::new(
@@ -238,7 +239,6 @@ fn generate_rekey_child_sa_response(
         request.id(),
     );
 
-    let child_sa = (*data.rekeyed_child_sa).as_ref().unwrap();
     let proposal = child_sa.chosen_proposal().proposal(
         1,
         child_sa.chosen_proposal().protocol().into(),
@@ -284,8 +284,9 @@ fn generate_rekey_child_sa_response(
         .map_err(Into::into)
 }
 
-fn generate_create_new_child_sa_response(
+fn generate_new_child_sa_response(
     data: &mut StateDataCache<'_>,
+    child_sa: &ChildSa,
     request: &ProtectedMessage,
 ) -> Result<ProtectedMessage, StateError> {
     let mut response = Message::new(
@@ -296,7 +297,6 @@ fn generate_create_new_child_sa_response(
         request.id(),
     );
 
-    let child_sa = (*data.created_child_sa).as_ref().unwrap();
     let proposal = child_sa.chosen_proposal().proposal(
         1,
         child_sa.chosen_proposal().protocol().into(),
@@ -331,20 +331,6 @@ fn generate_create_new_child_sa_response(
     response
         .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
         .map_err(Into::into)
-}
-
-fn generate_create_child_sa_response(
-    data: &mut StateDataCache<'_>,
-    request: &ProtectedMessage,
-) -> Result<ProtectedMessage, StateError> {
-    let response = if data.rekeyed_child_sa.is_some() {
-        generate_rekey_child_sa_response(data, request)?
-    } else if data.created_child_sa.is_some() {
-        generate_create_new_child_sa_response(data, request)?
-    } else {
-        todo!()
-    };
-    Ok(response)
 }
 
 fn generate_create_child_sa_request(
@@ -542,15 +528,19 @@ impl State for Established {
 
                     handle_create_child_sa_request(config, &mut data, &request)?;
 
-                    let response = generate_create_child_sa_response(&mut data, &request)?;
-
-                    Self::send_message(sender.clone(), &mut data, response)?;
-
                     if let Some(child_sa) = data.created_child_sa.to_mut().take() {
+                        let response =
+                            generate_new_child_sa_response(&mut data, &child_sa, &request)?;
+                        Self::send_message(sender.clone(), &mut data, response)?;
                         Self::create_child_sa(sender.clone(), &mut data, child_sa)?;
                     }
 
                     if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
+                        let response =
+                            generate_rekey_child_sa_response(&mut data, &child_sa, &request)?;
+
+                        Self::send_message(sender.clone(), &mut data, response)?;
+
                         Self::rekey_child_sa(sender.clone(), &mut data, child_sa)?;
                     }
 
