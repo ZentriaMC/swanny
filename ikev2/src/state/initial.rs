@@ -3,7 +3,7 @@ use crate::{
     crypto::Nonce,
     message::{
         EspSpi, Message, Spi,
-        num::{ExchangeType, MessageFlags, PayloadType, Protocol},
+        num::{ExchangeType, MessageFlags, NotifyType, PayloadType, Protocol},
         payload::{self, Payload},
         proposal::Proposal,
         serialize::Deserialize,
@@ -142,14 +142,12 @@ fn handle_ike_sa_init_request(
     *data.nonce_i.to_mut() = Some(nonce_i.nonce().clone());
     *data.nonce_r.to_mut() = Some(nonce);
     *data.peer_spi.to_mut() = Some(request.spi_i().to_owned());
+    *data.received_message_id.to_mut() = request.id();
 
     Ok(())
 }
 
-fn generate_ike_sa_init_response(
-    data: &StateDataCache<'_>,
-    message_id: u32,
-) -> Result<Message, StateError> {
+fn generate_ike_sa_init_response(data: &StateDataCache<'_>) -> Result<Message, StateError> {
     let group = data
         .chosen_proposal()?
         .group()
@@ -164,7 +162,7 @@ fn generate_ike_sa_init_response(
         &data.spi,
         ExchangeType::IKE_SA_INIT.into(),
         MessageFlags::R,
-        message_id,
+        *data.received_message_id,
     );
 
     response.add_payloads([
@@ -199,15 +197,39 @@ fn generate_ike_sa_init_response(
     Ok(response)
 }
 
-#[async_trait]
-impl State for Initial {
-    async fn handle_message(
-        self: Box<Self>,
+fn generate_error_response(data: &StateDataCache<'_>, _error: StateError) -> Message {
+    let spi = Spi::default();
+    let mut response = Message::new(
+        data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
+        &data.spi,
+        ExchangeType::IKE_SA_INIT.into(),
+        MessageFlags::R,
+        *data.received_message_id,
+    );
+
+    response.add_payloads([Payload::new(
+        PayloadType::NOTIFY.into(),
+        payload::Content::Notify(payload::Notify::new(
+            Protocol::IKE.into(),
+            Some(&spi[..]),
+            NotifyType::INVALID_SYNTAX.into(),
+            b"",
+        )),
+        true,
+    )]);
+
+    debug!(response = ?&response, "sending unprotected response");
+
+    response
+}
+
+impl Initial {
+    async fn handle_request(
         config: &Config,
         sender: UnboundedSender<ControlMessage>,
-        data: Arc<RwLock<StateData>>,
+        data: &mut StateDataCache<'_>,
         mut message: &[u8],
-    ) -> Result<Box<dyn State>, StateError> {
+    ) -> Result<(), StateError> {
         let serialized_request = message;
         let request = Message::deserialize(&mut message)?;
 
@@ -217,33 +239,53 @@ impl State for Initial {
 
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
-                let default = StateData::default();
-                let default = StateDataCache::new_borrowed(&default);
+                handle_ike_sa_init_request(config, data, &request)?;
 
-                let cache = {
-                    let data = data.read().await;
-                    let mut data = StateDataCache::new_borrowed(&data);
+                let response = generate_ike_sa_init_response(&data)?;
+                Self::send_message(sender.clone(), data, response)?;
 
-                    handle_ike_sa_init_request(config, &mut data, &request)?;
-
-                    let response = generate_ike_sa_init_response(&data, request.id())?;
-                    Self::send_message(sender.clone(), &mut data, response)?;
-
-                    *data.ike_sa_init_request.to_mut() = Some(serialized_request.to_vec());
-                    data.swap(&default)
-                };
-
-                {
-                    let mut data = data.write().await;
-                    cache.write_into(&mut data);
-                }
-
-                Ok(Box::new(state::IkeSaInitResponseSent {}))
+                *data.ike_sa_init_request.to_mut() = Some(serialized_request.to_vec());
             }
             _ => {
                 return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
             }
         }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl State for Initial {
+    async fn handle_message(
+        self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+        message: &[u8],
+    ) -> Result<Box<dyn State>, StateError> {
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
+
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
+                let response = generate_error_response(&mut data, e);
+                Self::send_message(sender.clone(), &mut data, response)?;
+                return Ok(self);
+            }
+
+            data.swap(&default)
+        };
+
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
+        }
+
+        Ok(Box::new(state::IkeSaInitResponseSent {}))
     }
 
     async fn handle_acquire(

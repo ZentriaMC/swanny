@@ -202,6 +202,7 @@ cache_cow! {
         spi: Spi,
         peer_spi: Option<Spi>,
         message_id: u32,
+        received_message_id: u32,
         chosen_proposal: Option<ChosenProposal>,
         public_key: Option<Vec<u8>>,
         private_key: Option<GroupPrivateKey>,
