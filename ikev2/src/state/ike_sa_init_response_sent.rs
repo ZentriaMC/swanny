@@ -1,17 +1,17 @@
 use crate::{
     config::{Config, ConfigError},
     message::{
-        EspSpi, Message, ProtectedMessage,
-        num::{ExchangeType, MessageFlags, PayloadType},
+        EspSpi, Message, ProtectedMessage, Spi,
+        num::{ExchangeType, MessageFlags, NotifyType, PayloadType, Protocol},
         payload::{self, Payload},
         proposal::Proposal,
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
+    sa::{ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
     state::{
-        self, CreateChildSa, InvalidStateError, SendProtectedMessage, State, StateData,
-        StateDataCache, StateError, VerifyMessage,
+        self, CreateChildSa, Established, InvalidStateError, SendMessage, SendProtectedMessage,
+        State, StateData, StateDataCache, StateError, VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -22,7 +22,7 @@ use tracing::{debug, info};
 
 pub struct IkeSaInitResponseSent;
 
-impl SendProtectedMessage for IkeSaInitResponseSent {}
+impl SendMessage for IkeSaInitResponseSent {}
 impl VerifyMessage for IkeSaInitResponseSent {}
 impl CreateChildSa for IkeSaInitResponseSent {}
 
@@ -36,7 +36,7 @@ fn handle_ike_auth_request(
     config: &Config,
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
-) -> Result<ChildSa, StateError> {
+) -> Result<(), StateError> {
     let request = request.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
 
     debug!(request = ?&request, "received protected request");
@@ -98,25 +98,27 @@ fn handle_ike_auth_request(
     info!(proposal = ?&proposal, "negotiated proposal");
     let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-    larval_child_sa
-        .build(
-            &chosen_proposal,
-            &data.keys()?.derivation.d,
-            (*data.nonce_i)
-                .as_ref()
-                .ok_or(InvalidStateError::NonceNotRecorded)?,
-            (*data.nonce_r)
-                .as_ref()
-                .ok_or(InvalidStateError::NonceNotRecorded)?,
-        )
-        .map_err(Into::into)
+    let child_sa = larval_child_sa.build(
+        &chosen_proposal,
+        &data.keys()?.derivation.d,
+        (*data.nonce_i)
+            .as_ref()
+            .ok_or(InvalidStateError::NonceNotRecorded)?,
+        (*data.nonce_r)
+            .as_ref()
+            .ok_or(InvalidStateError::NonceNotRecorded)?,
+    )?;
+
+    *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
+    *data.received_message_id.to_mut() = request.id();
+
+    Ok(())
 }
 
 fn generate_ike_auth_response(
     config: &Config,
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
-    child_sa: &ChildSa,
 ) -> Result<ProtectedMessage, StateError> {
     let mut response = Message::new(
         request.spi_i(),
@@ -125,6 +127,12 @@ fn generate_ike_auth_response(
         MessageFlags::R,
         request.id(),
     );
+
+    let child_sa = data
+        .created_child_sa
+        .as_ref()
+        .as_ref()
+        .ok_or(InvalidStateError::ChildSaNotSet)?;
 
     let proposal = child_sa.chosen_proposal().proposal(
         1,
@@ -162,15 +170,39 @@ fn generate_ike_auth_response(
         .map_err(Into::into)
 }
 
-#[async_trait]
-impl State for IkeSaInitResponseSent {
-    async fn handle_message(
-        self: Box<Self>,
+fn generate_error_response(data: &StateDataCache<'_>, _error: StateError) -> Message {
+    let spi = Spi::default();
+    let mut response = Message::new(
+        data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
+        &data.spi,
+        ExchangeType::IKE_AUTH.into(),
+        MessageFlags::R,
+        *data.received_message_id,
+    );
+
+    response.add_payloads([Payload::new(
+        PayloadType::NOTIFY.into(),
+        payload::Content::Notify(payload::Notify::new(
+            Protocol::IKE.into(),
+            Some(&spi[..]),
+            NotifyType::INVALID_SYNTAX.into(),
+            b"",
+        )),
+        true,
+    )]);
+
+    debug!(response = ?&response, "sending unprotected response");
+
+    response
+}
+
+impl IkeSaInitResponseSent {
+    async fn handle_request(
         config: &Config,
         sender: UnboundedSender<ControlMessage>,
-        data: Arc<RwLock<StateData>>,
+        data: &mut StateDataCache<'_>,
         mut message: &[u8],
-    ) -> Result<Box<dyn State>, StateError> {
+    ) -> Result<(), StateError> {
         let serialized_request = message;
         let request = ProtectedMessage::deserialize(&mut message)?;
 
@@ -180,37 +212,58 @@ impl State for IkeSaInitResponseSent {
 
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
-                let default = StateData::default();
-                let default = StateDataCache::new_borrowed(&default);
+                Self::verify_message(&data, serialized_request)?;
 
-                let cache = {
-                    let data = data.read().await;
-                    let mut data = StateDataCache::new_borrowed(&data);
+                handle_ike_auth_request(config, data, &request)?;
 
-                    Self::verify_message(&data, serialized_request)?;
+                let response = generate_ike_auth_response(config, data, &request)?;
 
-                    let child_sa = handle_ike_auth_request(config, &mut data, &request)?;
+                Established::send_message(sender.clone(), data, response)?;
 
-                    let response =
-                        generate_ike_auth_response(config, &mut data, &request, &child_sa)?;
-
-                    Self::send_message(sender.clone(), &mut data, response)?;
-
-                    Self::create_child_sa(sender.clone(), &mut data, Box::new(child_sa))?;
-                    data.swap(&default)
-                };
-
-                {
-                    let mut data = data.write().await;
-                    cache.write_into(&mut data);
+                if let Some(child_sa) = data.created_child_sa.to_mut().take() {
+                    Self::create_child_sa(sender.clone(), data, child_sa)?;
                 }
-
-                Ok(Box::new(state::Established {}))
             }
             _ => {
                 return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
             }
         }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl State for IkeSaInitResponseSent {
+    async fn handle_message(
+        self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+        message: &[u8],
+    ) -> Result<Box<dyn State>, StateError> {
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
+
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
+                let response = generate_error_response(&mut data, e);
+                Self::send_message(sender.clone(), &mut data, response)?;
+                return Ok(self);
+            }
+
+            data.swap(&default)
+        };
+
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
+        }
+
+        Ok(Box::new(state::Established {}))
     }
 
     async fn handle_acquire(

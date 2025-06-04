@@ -71,6 +71,9 @@ pub enum InvalidStateError {
     #[error("larval Child SA not set")]
     LarvalChildSaNotSet,
 
+    #[error("Child SA not set")]
+    ChildSaNotSet,
+
     #[error("group private key not set")]
     GroupPrivateKeyNotSet,
 }
