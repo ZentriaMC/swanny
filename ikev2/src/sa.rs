@@ -165,6 +165,12 @@ impl IkeSa {
         data.is_initiator()
     }
 
+    /// Returns the pending request to be retransmitted in a certain period
+    pub async fn pending_request(&self) -> Option<Vec<u8>> {
+        let data = self.data.read().await;
+        data.pending_request()
+    }
+
     /// Returns true if this `IkeSa` is in the given state
     pub async fn in_state<T: 'static>(&self, _expected: &T) -> bool {
         let state = self.state.lock().await;

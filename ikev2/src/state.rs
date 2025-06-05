@@ -435,6 +435,10 @@ impl StateData {
     pub fn is_initiator(&self) -> Option<bool> {
         self.is_initiator
     }
+
+    pub fn pending_request(&self) -> Option<Vec<u8>> {
+        self.last_request.clone()
+    }
 }
 
 trait SendMessage {
