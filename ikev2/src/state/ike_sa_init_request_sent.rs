@@ -161,15 +161,13 @@ fn generate_ike_auth_request(
     Ok(request)
 }
 
-#[async_trait]
-impl State for IkeSaInitRequestSent {
-    async fn handle_message(
-        self: Box<Self>,
+impl IkeSaInitRequestSent {
+    async fn handle_response(
         config: &Config,
         sender: UnboundedSender<ControlMessage>,
-        data: Arc<RwLock<StateData>>,
+        data: &mut StateDataCache<'_>,
         mut message: &[u8],
-    ) -> Result<Box<dyn State>, StateError> {
+    ) -> Result<(), StateError> {
         let serialized_response = message;
         let response =
             Message::deserialize(&mut message).map_err(|e| StateError::Protocol(e.into()))?;
@@ -178,34 +176,57 @@ impl State for IkeSaInitRequestSent {
             return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
         }
 
+        if response.id().wrapping_add(1) != *data.message_id {
+            return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+        }
+
         match response.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
-                let default = StateData::default();
-                let default = StateDataCache::new_borrowed(&default);
+                handle_ike_sa_init_response(data, &response)?;
+                *data.ike_sa_init_response.to_mut() = Some(serialized_response.to_vec());
 
-                let cache = {
-                    let data = data.read().await;
-                    let mut data = StateDataCache::new_borrowed(&data);
-
-                    handle_ike_sa_init_response(&mut data, &response)?;
-                    *data.ike_sa_init_response.to_mut() = Some(serialized_response.to_vec());
-
-                    let request = generate_ike_auth_request(config, &mut data, response.spi_r())?;
-                    Self::send_message(sender.clone(), &mut data, request)?;
-                    data.swap(&default)
-                };
-
-                {
-                    let mut data = data.write().await;
-                    cache.write_into(&mut data);
-                }
-
-                Ok(Box::new(state::IkeAuthRequestSent {}))
+                let request = generate_ike_auth_request(config, data, response.spi_r())?;
+                Self::send_message(sender.clone(), data, request)?;
             }
             _ => {
                 return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
             }
         }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl State for IkeSaInitRequestSent {
+    async fn handle_message(
+        self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+        message: &[u8],
+    ) -> Result<Box<dyn State>, StateError> {
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
+
+        let (next_state, cache): (Box<dyn State>, _) = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
+            {
+                debug!(error = %e, "error processing IKE_SA_INIT response");
+                (Box::new(state::Initial {}), default)
+            } else {
+                (Box::new(state::IkeAuthRequestSent {}), data.swap(&default))
+            }
+        };
+
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
+        }
+
+        Ok(next_state)
     }
 
     async fn handle_acquire(

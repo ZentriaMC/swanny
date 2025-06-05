@@ -241,7 +241,10 @@ impl Initial {
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
                 if request.id() != 0 {
-                    debug!("IKE_SA_INIT request must have message ID 0, {} found", request.id());
+                    debug!(
+                        "IKE_SA_INIT request must have message ID 0, {} found",
+                        request.id()
+                    );
                     return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
                 }
 

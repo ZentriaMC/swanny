@@ -292,4 +292,3 @@ async fn test_all_good() {
 
     assert!(initiator.in_state(&state::Established {}).await);
 }
-
