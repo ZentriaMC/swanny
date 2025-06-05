@@ -95,9 +95,6 @@ pub enum StateError {
     #[error("serialization error")]
     SerializeError(#[from] SerializeError),
 
-    #[error("deserialization error")]
-    DeserializeError(#[from] DeserializeError),
-
     #[error("try send error")]
     TrySend(#[from] TrySendError<ControlMessage>),
 }
@@ -408,7 +405,7 @@ impl StateDataCache<'_> {
         };
 
         if message.as_ref().len() < key.integ().output_size() {
-            return Err(DeserializeError::PrematureEof.into());
+            return Err(ProtocolError::DeserializeError(DeserializeError::PrematureEof).into());
         }
 
         let (message, checksum) = message

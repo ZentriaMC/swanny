@@ -6,7 +6,7 @@ use crate::{
         num::{ExchangeType, MessageFlags, NotifyType, PayloadType, Protocol},
         payload::{self, Payload},
         proposal::Proposal,
-        serialize::{Deserialize, DeserializeError},
+        serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa},
@@ -40,7 +40,9 @@ fn handle_informational_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let request = request.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
+    let request = request
+        .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(|e| StateError::Protocol(e.into()))?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -175,7 +177,9 @@ fn handle_create_child_sa_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let request = request.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
+    let request = request
+        .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(|e| StateError::Protocol(e.into()))?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -198,7 +202,8 @@ fn handle_create_child_sa_request(
         .map(TryInto::<&payload::Notify>::try_into)
         .collect();
 
-    let notifications = notifications.map_err(Into::<DeserializeError>::into)?;
+    let notifications = notifications
+        .map_err(|e| StateError::Protocol(ProtocolError::DeserializeError(e.into()).into()))?;
 
     let rekey_sa = notifications
         .into_iter()
@@ -210,7 +215,9 @@ fn handle_create_child_sa_request(
         let ke: Option<&payload::Ke> = request.get(PayloadType::KE);
         handle_rekey_child_sa_request(
             data,
-            spi.try_into().map_err(Into::<DeserializeError>::into)?,
+            spi.try_into().map_err(|e: std::array::TryFromSliceError| {
+                StateError::Protocol(ProtocolError::DeserializeError(e.into()).into())
+            })?,
             nonce_i.nonce(),
             &nonce,
             ke.map(|ke| ke.ke_data()),
@@ -494,7 +501,8 @@ impl State for Established {
         mut message: &[u8],
     ) -> Result<Box<dyn State>, StateError> {
         let serialized_request = message;
-        let request = ProtectedMessage::deserialize(&mut message)?;
+        let request = ProtectedMessage::deserialize(&mut message)
+            .map_err(|e| StateError::Protocol(e.into()))?;
         match request.exchange().assigned() {
             Some(ExchangeType::INFORMATIONAL) => {
                 let default = StateData::default();

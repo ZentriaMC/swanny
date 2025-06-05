@@ -35,7 +35,9 @@ fn handle_informational_response(
     data: &mut StateDataCache<'_>,
     response: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let response = response.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
+    let response = response
+        .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(|e| StateError::Protocol(e.into()))?;
 
     debug!(response = ?&response, "received protected response");
 
@@ -106,7 +108,8 @@ impl State for DeleteChildSaRequestSent {
         mut message: &[u8],
     ) -> Result<Box<dyn State>, StateError> {
         let serialized_message = message;
-        let message = ProtectedMessage::deserialize(&mut message)?;
+        let message = ProtectedMessage::deserialize(&mut message)
+            .map_err(|e| StateError::Protocol(e.into()))?;
         if message.flags().contains(MessageFlags::I) {
             // Divert to the Established state if a request is
             // received while a response is expected

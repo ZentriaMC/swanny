@@ -197,7 +197,7 @@ fn generate_ike_sa_init_response(data: &StateDataCache<'_>) -> Result<Message, S
     Ok(response)
 }
 
-fn generate_error_response(data: &StateDataCache<'_>, _error: StateError) -> Message {
+fn generate_error_response(data: &StateDataCache<'_>, _error: ProtocolError) -> Message {
     let spi = Spi::default();
     let mut response = Message::new(
         data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
@@ -231,7 +231,8 @@ impl Initial {
         mut message: &[u8],
     ) -> Result<(), StateError> {
         let serialized_request = message;
-        let request = Message::deserialize(&mut message)?;
+        let request =
+            Message::deserialize(&mut message).map_err(|e| StateError::Protocol(e.into()))?;
 
         if !request.flags().contains(MessageFlags::I) {
             return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
@@ -272,8 +273,10 @@ impl State for Initial {
             let mut data = StateDataCache::new_borrowed(&data);
 
             if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
-                let response = generate_error_response(&mut data, e);
-                Self::send_message(sender.clone(), &mut data, response)?;
+                if let StateError::Protocol(pe) = e {
+                    let response = generate_error_response(&mut data, pe);
+                    Self::send_message(sender.clone(), &mut data, response)?;
+                }
                 return Ok(self);
             }
 

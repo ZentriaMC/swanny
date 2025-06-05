@@ -171,7 +171,8 @@ impl State for IkeSaInitRequestSent {
         mut message: &[u8],
     ) -> Result<Box<dyn State>, StateError> {
         let serialized_response = message;
-        let response = Message::deserialize(&mut message)?;
+        let response =
+            Message::deserialize(&mut message).map_err(|e| StateError::Protocol(e.into()))?;
 
         if !response.flags().contains(MessageFlags::R) {
             return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());

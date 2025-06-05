@@ -52,6 +52,7 @@ use crate::{
             TransformType, TryFromTransformIdError,
         },
         proposal::Proposal,
+        serialize::DeserializeError,
         traffic_selector::TrafficSelector,
         transform::Transform,
     },
@@ -118,6 +119,9 @@ pub enum ProtocolError {
 
     #[error("unknown IPsec protocol")]
     UnknownProtocol(Num<u8, Protocol>),
+
+    #[error("deserialization error")]
+    DeserializeError(#[from] DeserializeError),
 }
 
 /// IKE SA abstraction

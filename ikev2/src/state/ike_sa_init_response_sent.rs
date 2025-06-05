@@ -37,7 +37,9 @@ fn handle_ike_auth_request(
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
 ) -> Result<(), StateError> {
-    let request = request.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
+    let request = request
+        .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(|e| StateError::Protocol(e.into()))?;
 
     debug!(request = ?&request, "received protected request");
 
@@ -170,7 +172,7 @@ fn generate_ike_auth_response(
         .map_err(Into::into)
 }
 
-fn generate_error_response(data: &StateDataCache<'_>, _error: StateError) -> Message {
+fn generate_error_response(data: &StateDataCache<'_>, _error: ProtocolError) -> Message {
     let spi = Spi::default();
     let mut response = Message::new(
         data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
@@ -204,7 +206,8 @@ impl IkeSaInitResponseSent {
         mut message: &[u8],
     ) -> Result<(), StateError> {
         let serialized_request = message;
-        let request = ProtectedMessage::deserialize(&mut message)?;
+        let request = ProtectedMessage::deserialize(&mut message)
+            .map_err(|e| StateError::Protocol(e.into()))?;
 
         if !request.flags().contains(MessageFlags::I) {
             return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
@@ -250,8 +253,10 @@ impl State for IkeSaInitResponseSent {
             let mut data = StateDataCache::new_borrowed(&data);
 
             if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
-                let response = generate_error_response(&mut data, e);
-                Self::send_message(sender.clone(), &mut data, response)?;
+                if let StateError::Protocol(pe) = e {
+                    let response = generate_error_response(&mut data, pe);
+                    Self::send_message(sender.clone(), &mut data, response)?;
+                }
                 return Ok(self);
             }
 

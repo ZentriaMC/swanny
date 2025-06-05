@@ -32,7 +32,9 @@ fn handle_ike_auth_response(
     data: &mut StateDataCache<'_>,
     response: &ProtectedMessage,
 ) -> Result<ChildSa, StateError> {
-    let response = response.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?;
+    let response = response
+        .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(|e| StateError::Protocol(e.into()))?;
 
     debug!(response = ?&response, "received protected response");
 
@@ -97,7 +99,8 @@ impl State for IkeAuthRequestSent {
         mut message: &[u8],
     ) -> Result<Box<dyn State>, StateError> {
         let serialized_response = message;
-        let response = ProtectedMessage::deserialize(&mut message)?;
+        let response = ProtectedMessage::deserialize(&mut message)
+            .map_err(|e| StateError::Protocol(e.into()))?;
         match response.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
                 let default = StateData::default();
