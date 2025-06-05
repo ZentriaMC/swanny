@@ -240,6 +240,11 @@ impl Initial {
 
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_SA_INIT) => {
+                if request.id() != 0 {
+                    debug!("IKE_SA_INIT request must have message ID 0, {} found", request.id());
+                    return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
+                }
+
                 handle_ike_sa_init_request(config, data, &request)?;
 
                 let response = generate_ike_sa_init_response(&data)?;
