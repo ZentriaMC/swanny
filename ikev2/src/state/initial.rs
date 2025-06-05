@@ -250,7 +250,7 @@ impl Initial {
 
                 handle_ike_sa_init_request(config, data, &request)?;
 
-                let response = generate_ike_sa_init_response(&data)?;
+                let response = generate_ike_sa_init_response(data)?;
                 Self::send_message(sender.clone(), data, response)?;
 
                 *data.ike_sa_init_request.to_mut() = Some(serialized_request.to_vec());
@@ -282,7 +282,7 @@ impl State for Initial {
 
             if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
                 if let StateError::Protocol(pe) = e {
-                    let response = generate_error_response(&mut data, pe);
+                    let response = generate_error_response(&data, pe);
                     Self::send_message(sender.clone(), &mut data, response)?;
                 }
                 return Ok(self);

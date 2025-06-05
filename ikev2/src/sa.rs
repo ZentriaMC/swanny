@@ -122,6 +122,9 @@ pub enum ProtocolError {
 
     #[error("deserialization error")]
     DeserializeError(#[from] DeserializeError),
+
+    #[error("temporary failure")]
+    TemporaryFailure,
 }
 
 /// IKE SA abstraction

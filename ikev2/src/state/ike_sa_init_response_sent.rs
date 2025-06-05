@@ -227,7 +227,7 @@ impl IkeSaInitResponseSent {
 
         match request.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
-                Self::verify_message(&data, serialized_request)?;
+                Self::verify_message(data, serialized_request)?;
 
                 handle_ike_auth_request(config, data, &request)?;
 
@@ -266,9 +266,11 @@ impl State for IkeSaInitResponseSent {
 
             if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
                 if let StateError::Protocol(pe) = e {
-                    let response = generate_error_response(&mut data, pe)?;
+                    let response = generate_error_response(&data, pe)?;
                     Self::send_message(sender.clone(), &mut data, response)?;
                 }
+
+                // Do not write partial state data upon error
                 return Ok(self);
             }
 

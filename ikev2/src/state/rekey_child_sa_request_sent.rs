@@ -11,7 +11,7 @@ use crate::{
     sa::ControlMessage,
     state::{
         Established, ProtocolError, RekeyChildSa, SendProtectedMessage, State, StateData,
-        StateDataCache, StateError, VerifyMessage,
+        StateDataCache, StateError, VerifyMessage, generate_informational_error,
     },
 };
 use async_trait::async_trait;
@@ -98,41 +98,37 @@ fn handle_create_child_sa_response(
 
 impl RekeyChildSaRequestSent {
     async fn handle_response(
-        self: Box<Self>,
+        _config: &Config,
         sender: UnboundedSender<ControlMessage>,
-        data: Arc<RwLock<StateData>>,
-        response: ProtectedMessage,
-        serialized_response: &[u8],
-    ) -> Result<Box<dyn State>, StateError> {
+        data: &mut StateDataCache<'_>,
+        mut message: &[u8],
+    ) -> Result<(), StateError> {
+        let serialized_response = message;
+        let response = ProtectedMessage::deserialize(&mut message)
+            .map_err(|e| StateError::Protocol(e.into()))?;
+
+        Self::verify_message(data, serialized_response)?;
+
+        if response.flags().contains(MessageFlags::I) {
+            debug!(exchange = ?response.exchange(), "crossing exchange detected, responding with an error");
+            let response = generate_informational_error(data, ProtocolError::TemporaryFailure)?;
+            Self::send_message(sender.clone(), data, response)?;
+            return Ok(());
+        }
+
         match response.exchange().assigned() {
             Some(ExchangeType::CREATE_CHILD_SA) => {
-                let default = StateData::default();
-                let default = StateDataCache::new_borrowed(&default);
+                handle_create_child_sa_response(data, &response)?;
 
-                let cache = {
-                    let data = data.read().await;
-                    let mut data = StateDataCache::new_borrowed(&data);
-
-                    Self::verify_message(&data, serialized_response)?;
-
-                    handle_create_child_sa_response(&mut data, &response)?;
-
-                    if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
-                        Self::rekey_child_sa(sender.clone(), &mut data, child_sa.clone())?;
-                    }
-
-                    data.swap(&default)
-                };
-
-                {
-                    let mut data = data.write().await;
-                    cache.write_into(&mut data);
+                if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
+                    Self::rekey_child_sa(sender.clone(), data, child_sa)?;
                 }
-
-                Ok(Box::new(Established {}))
             }
-            _ => Err(ProtocolError::UnexpectedExchange(response.exchange()).into()),
+            _ => {
+                return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+            }
         }
+        Ok(())
     }
 }
 
@@ -143,21 +139,30 @@ impl State for RekeyChildSaRequestSent {
         config: &Config,
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
-        mut message: &[u8],
+        message: &[u8],
     ) -> Result<Box<dyn State>, StateError> {
-        let serialized_message = message;
-        let message = ProtectedMessage::deserialize(&mut message)
-            .map_err(|e| StateError::Protocol(e.into()))?;
-        if message.flags().contains(MessageFlags::I) {
-            // Divert to the Established state if a request is
-            // received while a response is expected
-            Box::new(Established {})
-                .handle_message(config, sender, data, serialized_message)
-                .await
-        } else {
-            self.handle_response(sender, data, message, serialized_message)
-                .await
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
+
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
+            {
+                debug!(error = %e, "error processing CREATE_CHILD_SA response for rekeying Child SA");
+                return Ok(Box::new(Established {}));
+            }
+
+            data.swap(&default)
+        };
+
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
         }
+
+        Ok(Box::new(Established {}))
     }
 
     async fn handle_acquire(

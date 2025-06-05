@@ -2,7 +2,7 @@ use crate::{
     config::{Config, ConfigError},
     crypto::Nonce,
     message::{
-        EspSpi, Message, ProtectedMessage,
+        EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags, NotifyType, PayloadType, Protocol},
         payload::{self, Payload},
         proposal::Proposal,
@@ -203,7 +203,7 @@ fn handle_create_child_sa_request(
         .collect();
 
     let notifications = notifications
-        .map_err(|e| StateError::Protocol(ProtocolError::DeserializeError(e.into()).into()))?;
+        .map_err(|e| StateError::Protocol(ProtocolError::DeserializeError(e.into())))?;
 
     let rekey_sa = notifications
         .into_iter()
@@ -216,7 +216,7 @@ fn handle_create_child_sa_request(
         handle_rekey_child_sa_request(
             data,
             spi.try_into().map_err(|e: std::array::TryFromSliceError| {
-                StateError::Protocol(ProtocolError::DeserializeError(e.into()).into())
+                StateError::Protocol(ProtocolError::DeserializeError(e.into()))
             })?,
             nonce_i.nonce(),
             &nonce,
@@ -491,6 +491,89 @@ fn generate_rekey_child_sa_request(
     Ok(request)
 }
 
+impl Established {
+    async fn handle_request(
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: &mut StateDataCache<'_>,
+        mut message: &[u8],
+    ) -> Result<(), StateError> {
+        let serialized_request = message;
+        let request = ProtectedMessage::deserialize(&mut message)
+            .map_err(|e| StateError::Protocol(e.into()))?;
+
+        Self::verify_message(data, serialized_request)?;
+
+        match request.exchange().assigned() {
+            Some(ExchangeType::INFORMATIONAL) => {
+                handle_informational_request(data, &request)?;
+
+                let response = generate_informational_response(data, &request)?;
+
+                Self::send_message(sender.clone(), data, response)?;
+
+                for child_sa in data.deleted_child_sas.to_mut().iter_mut() {
+                    Self::delete_child_sa(sender.clone(), child_sa.clone())?;
+                }
+                data.deleted_child_sas.to_mut().clear();
+            }
+            Some(ExchangeType::CREATE_CHILD_SA) => {
+                handle_create_child_sa_request(config, data, &request)?;
+
+                if let Some(child_sa) = data.created_child_sa.to_mut().take() {
+                    let response = generate_new_child_sa_response(data, &child_sa, &request)?;
+                    Self::send_message(sender.clone(), data, response)?;
+                    Self::create_child_sa(sender.clone(), data, child_sa)?;
+                }
+
+                if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
+                    let response = generate_rekey_child_sa_response(data, &child_sa, &request)?;
+
+                    Self::send_message(sender.clone(), data, response)?;
+
+                    Self::rekey_child_sa(sender.clone(), data, child_sa)?;
+                }
+            }
+            _ => {
+                return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn generate_error_response(
+    data: &StateDataCache<'_>,
+    _error: ProtocolError,
+) -> Result<ProtectedMessage, StateError> {
+    let spi = Spi::default();
+    let mut response = Message::new(
+        data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
+        &data.spi,
+        ExchangeType::INFORMATIONAL.into(),
+        MessageFlags::R,
+        *data.received_message_id,
+    );
+
+    response.add_payloads([Payload::new(
+        PayloadType::NOTIFY.into(),
+        payload::Content::Notify(payload::Notify::new(
+            Protocol::IKE.into(),
+            Some(&spi[..]),
+            NotifyType::INVALID_SYNTAX.into(),
+            b"",
+        )),
+        true,
+    )]);
+
+    debug!(response = ?&response, "sending protected response");
+
+    response
+        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(Into::into)
+}
+
 #[async_trait]
 impl State for Established {
     async fn handle_message(
@@ -498,80 +581,31 @@ impl State for Established {
         config: &Config,
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
-        mut message: &[u8],
+        message: &[u8],
     ) -> Result<Box<dyn State>, StateError> {
-        let serialized_request = message;
-        let request = ProtectedMessage::deserialize(&mut message)
-            .map_err(|e| StateError::Protocol(e.into()))?;
-        match request.exchange().assigned() {
-            Some(ExchangeType::INFORMATIONAL) => {
-                let default = StateData::default();
-                let default = StateDataCache::new_borrowed(&default);
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
 
-                let cache = {
-                    let data = data.read().await;
-                    let mut data = StateDataCache::new_borrowed(&data);
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
 
-                    Self::verify_message(&data, serialized_request)?;
-
-                    handle_informational_request(&mut data, &request)?;
-
-                    let response = generate_informational_response(&mut data, &request)?;
-
+            if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
+                if let StateError::Protocol(pe) = e {
+                    let response = generate_error_response(&data, pe)?;
                     Self::send_message(sender.clone(), &mut data, response)?;
-
-                    for child_sa in data.deleted_child_sas.to_mut().iter_mut() {
-                        Self::delete_child_sa(sender.clone(), child_sa.clone())?;
-                    }
-                    data.deleted_child_sas.to_mut().clear();
-
-                    data.swap(&default)
-                };
-
-                {
-                    let mut data = data.write().await;
-                    cache.write_into(&mut data);
                 }
+
+                // Do not write partial state data upon error
+                return Ok(self);
             }
-            Some(ExchangeType::CREATE_CHILD_SA) => {
-                let default = StateData::default();
-                let default = StateDataCache::new_borrowed(&default);
 
-                let cache = {
-                    let data = data.read().await;
-                    let mut data = StateDataCache::new_borrowed(&data);
+            data.swap(&default)
+        };
 
-                    Self::verify_message(&data, serialized_request)?;
-
-                    handle_create_child_sa_request(config, &mut data, &request)?;
-
-                    if let Some(child_sa) = data.created_child_sa.to_mut().take() {
-                        let response =
-                            generate_new_child_sa_response(&mut data, &child_sa, &request)?;
-                        Self::send_message(sender.clone(), &mut data, response)?;
-                        Self::create_child_sa(sender.clone(), &mut data, child_sa)?;
-                    }
-
-                    if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
-                        let response =
-                            generate_rekey_child_sa_response(&mut data, &child_sa, &request)?;
-
-                        Self::send_message(sender.clone(), &mut data, response)?;
-
-                        Self::rekey_child_sa(sender.clone(), &mut data, child_sa)?;
-                    }
-
-                    data.swap(&default)
-                };
-
-                {
-                    let mut data = data.write().await;
-                    cache.write_into(&mut data);
-                }
-            }
-            _ => {
-                return Err(ProtocolError::UnexpectedExchange(request.exchange()).into());
-            }
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
         }
         Ok(self)
     }

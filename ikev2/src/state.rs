@@ -3,8 +3,8 @@ use crate::{
     crypto::{CryptoError, EncryptionKey, GroupPrivateKey, Nonce},
     message::{
         EspSpi, Message, ProtectedMessage, Spi,
-        num::{ExchangeType, MessageFlags},
-        payload::Id,
+        num::{ExchangeType, MessageFlags, NotifyType, PayloadType, Protocol},
+        payload::{self, Id, Payload},
         serialize::{DeserializeError, Serialize, SerializeError},
         traffic_selector::TrafficSelector,
     },
@@ -536,4 +536,40 @@ trait VerifyMessage {
             Err(ProtocolError::IntegrityCheckFailed.into())
         }
     }
+}
+
+fn generate_informational_error(
+    data: &StateDataCache<'_>,
+    error: ProtocolError,
+) -> Result<ProtectedMessage, StateError> {
+    let spi = Spi::default();
+    let mut response = Message::new(
+        data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
+        &data.spi,
+        ExchangeType::INFORMATIONAL.into(),
+        MessageFlags::R,
+        *data.received_message_id,
+    );
+
+    let notification = match error {
+        ProtocolError::TemporaryFailure => NotifyType::TEMPORARY_FAILURE,
+        _ => NotifyType::INVALID_SYNTAX,
+    };
+
+    response.add_payloads([Payload::new(
+        PayloadType::NOTIFY.into(),
+        payload::Content::Notify(payload::Notify::new(
+            Protocol::IKE.into(),
+            Some(&spi[..]),
+            notification.into(),
+            b"",
+        )),
+        true,
+    )]);
+
+    debug!(response = ?&response, "sending protected response");
+
+    response
+        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(Into::into)
 }
