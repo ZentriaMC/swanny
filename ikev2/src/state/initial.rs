@@ -197,7 +197,7 @@ fn generate_ike_sa_init_response(data: &StateDataCache<'_>) -> Result<Message, S
     Ok(response)
 }
 
-fn generate_error_response(data: &StateDataCache<'_>, _error: ProtocolError) -> Message {
+fn generate_error_response(data: &StateDataCache<'_>, error: ProtocolError) -> Message {
     let spi = Spi::default();
     let mut response = Message::new(
         data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
@@ -207,12 +207,17 @@ fn generate_error_response(data: &StateDataCache<'_>, _error: ProtocolError) -> 
         *data.received_message_id,
     );
 
+    let notification = match error {
+        ProtocolError::NoProposalChosen => NotifyType::NO_PROPOSAL_CHOSEN,
+        _ => NotifyType::INVALID_SYNTAX,
+    };
+
     response.add_payloads([Payload::new(
         PayloadType::NOTIFY.into(),
         payload::Content::Notify(payload::Notify::new(
             Protocol::IKE.into(),
             Some(&spi[..]),
-            NotifyType::INVALID_SYNTAX.into(),
+            notification.into(),
             b"",
         )),
         true,
