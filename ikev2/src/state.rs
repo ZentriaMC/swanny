@@ -191,6 +191,15 @@ macro_rules! cache_cow {
                     }
                 )*
             }
+
+            // Converts all values in this $StructCache as owned
+            fn into_owned(self) -> Self {
+                Self {
+                    $(
+                        $field: Cow::Owned(self.$field.into_owned()),
+                    )*
+                }
+            }
         }
     }
 }

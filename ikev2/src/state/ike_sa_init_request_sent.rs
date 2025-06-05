@@ -215,7 +215,7 @@ impl State for IkeSaInitRequestSent {
             if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
             {
                 debug!(error = %e, "error processing IKE_SA_INIT response");
-                (Box::new(state::Initial {}), default)
+                (Box::new(state::Initial {}), default.into_owned())
             } else {
                 (Box::new(state::IkeAuthRequestSent {}), data.swap(&default))
             }
