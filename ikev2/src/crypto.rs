@@ -1,3 +1,4 @@
+//! Low-level cryptographic operations
 use crate::message::{
     num::{AttributeFormat, AttributeType, DhId, EncrId, IntegId, PrfId, TransformType},
     transform::{Attribute, Transform},
@@ -21,6 +22,7 @@ use std::sync::Arc;
 
 use zeroize::Zeroizing;
 
+/// Error codes related to cryptographic operations
 #[derive(Debug, thiserror::Error)]
 pub enum CryptoError {
     #[error("OpenSSL error")]
@@ -54,6 +56,7 @@ pub enum CryptoError {
     TryFromInt(#[from] std::num::TryFromIntError),
 }
 
+/// Opaque key structure
 #[derive(Clone, Debug, PartialEq)]
 pub struct Key(Zeroizing<Vec<u8>>);
 
@@ -69,6 +72,7 @@ impl AsRef<[u8]> for Key {
     }
 }
 
+/// Opaque nonce structure
 #[derive(Clone, Debug, PartialEq)]
 pub struct Nonce(Vec<u8>);
 
@@ -172,6 +176,7 @@ impl Prf {
     }
 }
 
+/// Private key used for key derivation
 #[derive(Clone, Debug, PartialEq)]
 pub struct DerivationKey {
     prf: Prf,
@@ -277,6 +282,7 @@ impl Integ {
     }
 }
 
+/// Private key used for integrity checking
 #[derive(Clone, Debug, PartialEq)]
 pub struct AuthenticationKey {
     integ: Integ,
@@ -506,6 +512,7 @@ impl From<&Group> for Transform {
     }
 }
 
+/// Cipher algorithm
 #[derive(Clone, PartialEq)]
 pub struct Cipher {
     id: EncrId,
@@ -639,6 +646,7 @@ impl Cipher {
     }
 }
 
+/// Private key used for encryption
 #[derive(Clone, Debug, PartialEq)]
 pub struct EncryptionKey {
     cipher: Cipher,
