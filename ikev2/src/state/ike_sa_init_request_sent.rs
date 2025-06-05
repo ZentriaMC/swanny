@@ -83,6 +83,7 @@ fn handle_ike_sa_init_response(
     *data.keys.to_mut() = Some(keys);
     *data.nonce_r.to_mut() = Some(nonce_r.nonce().clone());
     *data.peer_spi.to_mut() = Some(response.spi_r().to_owned());
+    *data.last_request.to_mut() = None;
 
     Ok(())
 }

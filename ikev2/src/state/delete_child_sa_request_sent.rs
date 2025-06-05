@@ -54,6 +54,7 @@ fn handle_informational_response(
             }
         }
     }
+    *data.last_request.to_mut() = None;
     Ok(())
 }
 
@@ -75,6 +76,10 @@ impl DeleteChildSaRequestSent {
             let response = generate_informational_error(data, ProtocolError::TemporaryFailure)?;
             Self::send_message(sender.clone(), data, response)?;
             return Ok(());
+        }
+
+        if response.id().wrapping_add(1) != *data.message_id {
+            return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
         }
 
         match response.exchange().assigned() {

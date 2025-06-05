@@ -92,6 +92,7 @@ fn handle_create_child_sa_response(
     };
 
     *data.rekeyed_child_sa.to_mut() = child_sa;
+    *data.last_request.to_mut() = None;
 
     Ok(())
 }
@@ -108,6 +109,14 @@ impl RekeyChildSaRequestSent {
             .map_err(|e| StateError::Protocol(e.into()))?;
 
         Self::verify_message(data, serialized_response)?;
+
+        if !response.flags().contains(MessageFlags::R) {
+            return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+        }
+
+        if response.id().wrapping_add(1) != *data.message_id {
+            return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+        }
 
         if response.flags().contains(MessageFlags::I) {
             debug!(exchange = ?response.exchange(), "crossing exchange detected, responding with an error");

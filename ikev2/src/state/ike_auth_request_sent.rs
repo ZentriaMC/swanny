@@ -2,7 +2,7 @@ use crate::{
     config::{Config, ConfigError},
     message::{
         EspSpi, ProtectedMessage,
-        num::{ExchangeType, PayloadType},
+        num::{ExchangeType, MessageFlags, PayloadType},
         payload,
         proposal::Proposal,
         serialize::Deserialize,
@@ -107,6 +107,14 @@ impl IkeAuthRequestSent {
             .map_err(|e| StateError::Protocol(e.into()))?;
 
         Self::verify_message(data, serialized_response)?;
+
+        if !response.flags().contains(MessageFlags::R) {
+            return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+        }
+
+        if response.id().wrapping_add(1) != *data.message_id {
+            return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
+        }
 
         match response.exchange().assigned() {
             Some(ExchangeType::IKE_AUTH) => {
