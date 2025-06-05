@@ -258,6 +258,8 @@ async fn rekey_sa(
     handle: Handle,
     src_address: IpAddr,
     dst_address: IpAddr,
+    protocol: u8,
+    ipsec_protocol: Protocol,
     spi: &EspSpi,
     integ_key: Option<&AuthenticationKey>,
     cipher_key: &EncryptionKey,
@@ -265,7 +267,10 @@ async fn rekey_sa(
     let mut req = handle
         .state()
         .update(src_address, dst_address)
-        .spi(u32::from_be_bytes(*spi));
+        .protocol(ipsec_to_xfrm(ipsec_protocol))
+        .spi(u32::from_be_bytes(*spi))
+        .selector_protocol(protocol)
+        .selector_addresses(src_address, 32, dst_address, 32);
 
     if let Some(integ_key) = integ_key {
         let (alg_name, trunc_len) = integ_to_xfrm(integ_key.integ());
@@ -301,6 +306,8 @@ async fn rekey_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
         handle.clone(),
         *child_sa.ts_i().start_address(),
         *child_sa.ts_r().start_address(),
+        child_sa.ts_i().ip_proto(),
+        child_sa.chosen_proposal().protocol(),
         child_sa.spi_r(),
         child_sa.keys().ai.as_ref(),
         &child_sa.keys().ei,
@@ -311,6 +318,8 @@ async fn rekey_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
         handle.clone(),
         *child_sa.ts_r().start_address(),
         *child_sa.ts_i().start_address(),
+        child_sa.ts_r().ip_proto(),
+        child_sa.chosen_proposal().protocol(),
         child_sa.spi_i(),
         child_sa.keys().ar.as_ref(),
         &child_sa.keys().er,
