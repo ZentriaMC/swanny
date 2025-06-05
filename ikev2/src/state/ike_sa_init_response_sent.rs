@@ -10,8 +10,8 @@ use crate::{
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
     state::{
-        self, CreateChildSa, Established, InvalidStateError, SendMessage, SendProtectedMessage,
-        State, StateData, StateDataCache, StateError, VerifyMessage,
+        self, CreateChildSa, InvalidStateError, SendProtectedMessage, State, StateData,
+        StateDataCache, StateError, VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -22,7 +22,7 @@ use tracing::{debug, info};
 
 pub struct IkeSaInitResponseSent;
 
-impl SendMessage for IkeSaInitResponseSent {}
+impl SendProtectedMessage for IkeSaInitResponseSent {}
 impl VerifyMessage for IkeSaInitResponseSent {}
 impl CreateChildSa for IkeSaInitResponseSent {}
 
@@ -172,7 +172,10 @@ fn generate_ike_auth_response(
         .map_err(Into::into)
 }
 
-fn generate_error_response(data: &StateDataCache<'_>, error: ProtocolError) -> Message {
+fn generate_error_response(
+    data: &StateDataCache<'_>,
+    error: ProtocolError,
+) -> Result<ProtectedMessage, StateError> {
     let spi = Spi::default();
     let mut response = Message::new(
         data.peer_spi.as_ref().as_ref().unwrap_or(&spi),
@@ -200,9 +203,11 @@ fn generate_error_response(data: &StateDataCache<'_>, error: ProtocolError) -> M
         true,
     )]);
 
-    debug!(response = ?&response, "sending unprotected response");
+    debug!(response = ?&response, "sending protected response");
 
     response
+        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(Into::into)
 }
 
 impl IkeSaInitResponseSent {
@@ -228,7 +233,7 @@ impl IkeSaInitResponseSent {
 
                 let response = generate_ike_auth_response(config, data, &request)?;
 
-                Established::send_message(sender.clone(), data, response)?;
+                Self::send_message(sender.clone(), data, response)?;
 
                 if let Some(child_sa) = data.created_child_sa.to_mut().take() {
                     Self::create_child_sa(sender.clone(), data, child_sa)?;
@@ -261,7 +266,7 @@ impl State for IkeSaInitResponseSent {
 
             if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
                 if let StateError::Protocol(pe) = e {
-                    let response = generate_error_response(&mut data, pe);
+                    let response = generate_error_response(&mut data, pe)?;
                     Self::send_message(sender.clone(), &mut data, response)?;
                 }
                 return Ok(self);
