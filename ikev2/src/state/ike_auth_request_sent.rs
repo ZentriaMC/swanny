@@ -167,7 +167,7 @@ impl State for IkeAuthRequestSent {
 
             if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
             {
-                debug!(error = %e, "error processing IKE_AUTH response");
+                debug!(error = ?e, "error processing IKE_AUTH response");
                 (Box::new(state::Initial {}), default.into_owned())
             } else {
                 (Box::new(state::Established {}), data.swap(&default))

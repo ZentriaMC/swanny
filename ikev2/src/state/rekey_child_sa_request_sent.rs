@@ -159,7 +159,7 @@ impl State for RekeyChildSaRequestSent {
 
             if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
             {
-                debug!(error = %e, "error processing CREATE_CHILD_SA response for rekeying Child SA");
+                debug!(error = ?e, "error processing CREATE_CHILD_SA response for rekeying Child SA");
                 return Ok(Box::new(Established {}));
             }
 

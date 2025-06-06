@@ -118,7 +118,7 @@ impl State for DeleteChildSaRequestSent {
 
             if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
             {
-                debug!(error = %e, "error processing INFORMATIONAL response for deleting Child SA");
+                debug!(error = ?e, "error processing INFORMATIONAL response for deleting Child SA");
                 return Ok(Box::new(Established {}));
             }
 
