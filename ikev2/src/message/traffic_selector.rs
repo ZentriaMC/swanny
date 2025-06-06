@@ -4,6 +4,7 @@ use crate::message::{
 };
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
+use tracing::debug;
 
 /// Traffic Selector
 #[derive(Clone, Debug, PartialEq)]
@@ -71,14 +72,35 @@ impl TrafficSelector {
         this: impl IntoIterator<Item = &'a TrafficSelector>,
         other: impl IntoIterator<Item = &'a TrafficSelector>,
     ) -> Option<Self> {
-        let mut this = this.into_iter();
-        // Need a copy as it is iterated over multiple times in the
-        // nested find_map.
+        let this: Vec<_> = this.into_iter().collect();
         let other: Vec<_> = other.into_iter().collect();
-        this.find_map(|tx| other.iter().find_map(|ty| tx.intersection(ty)))
+        debug!(this = ?this, other = ?other, "TrafficSelector::negotiate");
+        this.iter()
+            .find_map(|tx| other.iter().find_map(|ty| tx.intersection(ty)))
+            .or_else(|| {
+                other
+                    .iter()
+                    .find_map(|tx| this.iter().find_map(|ty| tx.intersection(ty)))
+            })
     }
 
-    fn intersection(&self, other: &Self) -> Option<Self> {
+    fn is_subset_of(&self, other: &Self) -> bool {
+        if self.ty != other.ty {
+            return false;
+        }
+        if other.ip_proto != 0 && self.ip_proto != other.ip_proto {
+            return false;
+        }
+        if self.start_port < other.start_port || self.end_port > other.end_port {
+            return false;
+        }
+        if self.start_address < other.start_address || self.end_address > other.end_address {
+            return false;
+        }
+        return true;
+    }
+
+    fn narrow_to(&self, other: &Self) -> Option<Self> {
         if self.ty != other.ty {
             return None;
         }
@@ -88,21 +110,27 @@ impl TrafficSelector {
         if self.end_address < other.start_address || other.end_address < self.start_address {
             return None;
         }
-        if self.start_port != 0
-            && self.end_port != 0
-            && (self.end_port < other.start_port || other.end_port < self.start_port)
-        {
+        if self.end_port < other.start_port || other.end_port < self.start_port {
             return None;
         }
-
         Some(Self::new(
             self.ty,
-            self.ip_proto,
+            self.ip_proto.max(other.ip_proto),
             &self.start_address.max(other.start_address),
             &self.end_address.min(other.end_address),
             self.start_port.max(other.start_port),
             self.end_port.min(other.end_port),
         ))
+    }
+
+    fn intersection(&self, other: &Self) -> Option<Self> {
+        if self.is_subset_of(other) {
+            Some(self.clone())
+        } else if other.is_subset_of(self) {
+            Some(other.clone())
+        } else {
+            self.narrow_to(other).or_else(|| other.narrow_to(self))
+        }
     }
 }
 

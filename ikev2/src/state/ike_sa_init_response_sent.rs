@@ -163,6 +163,16 @@ fn generate_ike_auth_response(
             payload::Content::Id(config.id().clone()),
             true,
         ),
+        Payload::new(
+            PayloadType::TSi.into(),
+            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_i().clone()))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::TSr.into(),
+            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_r().clone()))),
+            true,
+        ),
     ]);
 
     debug!(response = ?&response, "sending protected response");

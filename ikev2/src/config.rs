@@ -193,7 +193,7 @@ impl TrafficSelectorBuilder {
         let (start_port, end_port) = match (self.start_port, self.end_port) {
             (Some(start_port), Some(end_port)) => (start_port, end_port),
             (Some(start_port), None) => (start_port, start_port),
-            (None, None) => (0, 0),
+            (None, None) => (u16::MIN, u16::MAX),
             (None, Some(_)) => return Err(ConfigError::InconsistentTrafficSelector),
         };
 

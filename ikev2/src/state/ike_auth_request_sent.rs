@@ -54,6 +54,14 @@ fn handle_ike_auth_response(
         .get(PayloadType::SA)
         .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
+    let ts_i: &payload::Ts = response
+        .get(PayloadType::TSi)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
+
+    let ts_r: &payload::Ts = response
+        .get(PayloadType::TSr)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
+
     let authenticated = if let Some(psk) = config.psk() {
         let prf = data.chosen_proposal()?.prf().expect("PRF must be set");
         let signed_data = data.auth_data_for_verification(id_r)?;
@@ -73,6 +81,14 @@ fn handle_ike_auth_response(
         .to_mut()
         .take()
         .ok_or(InvalidStateError::LarvalChildSaNotSet)?;
+
+    let ts_i = TrafficSelector::negotiate(Some(&larval_child_sa.ts_i), ts_i.traffic_selectors())
+        .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+    info!(ts_i = ?&ts_i, "negotiated TSi");
+
+    let ts_r = TrafficSelector::negotiate(Some(&larval_child_sa.ts_r), ts_r.traffic_selectors())
+        .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+    info!(ts_r = ?&ts_r, "negotiated TSr");
 
     let proposal = Proposal::negotiate(&larval_child_sa.proposals, sa.proposals())
         .ok_or(ProtocolError::NoProposalChosen)?;
