@@ -172,7 +172,8 @@ impl IkeSa {
     }
 
     /// Returns true if this `IkeSa` is in the given state
-    pub async fn in_state<T: 'static>(&self, _expected: &T) -> bool {
+    #[cfg(test)]
+    pub(crate) async fn in_state<T: 'static>(&self, _expected: &T) -> bool {
         let state = self.state.lock().await;
         state
             .as_ref()

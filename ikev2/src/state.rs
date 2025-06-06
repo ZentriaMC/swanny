@@ -128,6 +128,7 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         hard: bool,
     ) -> Result<Box<dyn State>, StateError>;
 
+    #[cfg(test)]
     fn as_any(&self) -> &(dyn std::any::Any + Send);
 }
 

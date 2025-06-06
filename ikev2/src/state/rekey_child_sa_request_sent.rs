@@ -197,6 +197,7 @@ impl State for RekeyChildSaRequestSent {
         Ok(self)
     }
 
+    #[cfg(test)]
     fn as_any(&self) -> &(dyn std::any::Any + Send) {
         self
     }
