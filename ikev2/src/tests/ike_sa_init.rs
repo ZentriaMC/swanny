@@ -241,8 +241,8 @@ async fn test_mismatched_message_id() {
     let handle = tokio::spawn(async move {
         let initiator_addr: IpAddr = "192.168.1.2".parse().unwrap();
         let responder_addr: IpAddr = "192.168.1.3".parse().unwrap();
-        let ts_i = traffic_selector::tests::create_traffic_selector(&initiator_addr);
-        let ts_r = traffic_selector::tests::create_traffic_selector(&responder_addr);
+        let ts_i = traffic_selector::tests::create_traffic_selector(initiator_addr);
+        let ts_r = traffic_selector::tests::create_traffic_selector(responder_addr);
         initiator2
             .handle_acquire(ts_i, ts_r, 1)
             .await
@@ -309,8 +309,8 @@ async fn test_response_is_request() {
     let handle = tokio::spawn(async move {
         let initiator_addr: IpAddr = "192.168.1.2".parse().unwrap();
         let responder_addr: IpAddr = "192.168.1.3".parse().unwrap();
-        let ts_i = traffic_selector::tests::create_traffic_selector(&initiator_addr);
-        let ts_r = traffic_selector::tests::create_traffic_selector(&responder_addr);
+        let ts_i = traffic_selector::tests::create_traffic_selector(initiator_addr);
+        let ts_r = traffic_selector::tests::create_traffic_selector(responder_addr);
         initiator2
             .handle_acquire(ts_i, ts_r, 1)
             .await

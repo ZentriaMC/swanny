@@ -85,16 +85,16 @@ fn create_traffic_selector(
         libc::AF_INET => Ok(TrafficSelector::new(
             TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
             proto,
-            &IpAddr::V4(address.to_ipv4()),
-            &IpAddr::V4(address.to_ipv4()),
+            IpAddr::V4(address.to_ipv4()),
+            IpAddr::V4(address.to_ipv4()),
             0,
             65535,
         )),
         libc::AF_INET6 => Ok(TrafficSelector::new(
             TrafficSelectorType::TS_IPV6_ADDR_RANGE.into(),
             proto,
-            &IpAddr::V6(address.to_ipv6()),
-            &IpAddr::V6(address.to_ipv6()),
+            IpAddr::V6(address.to_ipv6()),
+            IpAddr::V6(address.to_ipv6()),
             0,
             65535,
         )),
@@ -188,8 +188,8 @@ async fn create_sa(
 async fn create_child_sa(handle: Handle, child_sa: &ChildSa, expires: Option<u64>) -> Result<()> {
     create_sa(
         handle.clone(),
-        *child_sa.ts_i().start_address(),
-        *child_sa.ts_r().start_address(),
+        child_sa.ts_i().start_address(),
+        child_sa.ts_r().start_address(),
         child_sa.ts_i().ip_proto(),
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_r(),
@@ -201,8 +201,8 @@ async fn create_child_sa(handle: Handle, child_sa: &ChildSa, expires: Option<u64
     debug!("created inbound state");
     create_sa(
         handle.clone(),
-        *child_sa.ts_r().start_address(),
-        *child_sa.ts_i().start_address(),
+        child_sa.ts_r().start_address(),
+        child_sa.ts_i().start_address(),
         child_sa.ts_r().ip_proto(),
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_i(),
@@ -234,8 +234,8 @@ async fn delete_sa(
 async fn delete_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
     delete_sa(
         handle.clone(),
-        *child_sa.ts_i().start_address(),
-        *child_sa.ts_r().start_address(),
+        child_sa.ts_i().start_address(),
+        child_sa.ts_r().start_address(),
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_r(),
     )
@@ -243,8 +243,8 @@ async fn delete_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
     debug!("deleted inbound state");
     delete_sa(
         handle.clone(),
-        *child_sa.ts_r().start_address(),
-        *child_sa.ts_i().start_address(),
+        child_sa.ts_r().start_address(),
+        child_sa.ts_i().start_address(),
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_i(),
     )

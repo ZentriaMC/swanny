@@ -22,8 +22,8 @@ impl TrafficSelector {
     pub fn new(
         ty: Num<u8, TrafficSelectorType>,
         ip_proto: u8,
-        start_address: &IpAddr,
-        end_address: &IpAddr,
+        start_address: IpAddr,
+        end_address: IpAddr,
         start_port: u16,
         end_port: u16,
     ) -> Self {
@@ -32,8 +32,8 @@ impl TrafficSelector {
             ip_proto,
             start_port,
             end_port,
-            start_address: start_address.to_owned(),
-            end_address: end_address.to_owned(),
+            start_address,
+            end_address,
         }
     }
 
@@ -48,13 +48,13 @@ impl TrafficSelector {
     }
 
     /// Returns the starting address of the `TrafficSelector`
-    pub fn start_address(&self) -> &IpAddr {
-        &self.start_address
+    pub fn start_address(&self) -> IpAddr {
+        self.start_address
     }
 
     /// Returns the ending address of the `TrafficSelector`
-    pub fn end_address(&self) -> &IpAddr {
-        &self.end_address
+    pub fn end_address(&self) -> IpAddr {
+        self.end_address
     }
 
     /// Returns the starting port of the `TrafficSelector`
@@ -116,8 +116,8 @@ impl TrafficSelector {
         Some(Self::new(
             self.ty,
             self.ip_proto.max(other.ip_proto),
-            &self.start_address.max(other.start_address),
-            &self.end_address.min(other.end_address),
+            self.start_address.max(other.start_address),
+            self.end_address.min(other.end_address),
             self.start_port.max(other.start_port),
             self.end_port.min(other.end_port),
         ))
@@ -232,12 +232,12 @@ pub(crate) mod tests {
     use bytes::BytesMut;
     use std::net::IpAddr;
 
-    pub(crate) fn create_traffic_selector(address: &IpAddr) -> TrafficSelector {
+    pub(crate) fn create_traffic_selector(address: IpAddr) -> TrafficSelector {
         TrafficSelector::new(
             TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
             0,
-            &address,
-            &address,
+            address,
+            address,
             0,
             0,
         )
@@ -245,7 +245,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_traffic_selector() {
-        let traffic_selector = create_traffic_selector(&"192.168.1.2".parse().unwrap());
+        let traffic_selector = create_traffic_selector("192.168.1.2".parse().unwrap());
 
         let len = traffic_selector
             .size()
@@ -266,16 +266,16 @@ pub(crate) mod tests {
         let this = TrafficSelector::new(
             TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
             0,
-            &"192.168.1.1".parse().unwrap(),
-            &"192.168.1.255".parse().unwrap(),
+            "192.168.1.1".parse().unwrap(),
+            "192.168.1.255".parse().unwrap(),
             1000,
             2000,
         );
         let other = TrafficSelector::new(
             TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
             0,
-            &"192.168.1.1".parse().unwrap(),
-            &"192.168.255.255".parse().unwrap(),
+            "192.168.1.1".parse().unwrap(),
+            "192.168.255.255".parse().unwrap(),
             500,
             1500,
         );

@@ -36,12 +36,12 @@ fn create_config(id: impl AsRef<[u8]>) -> Config {
         .expect("building config should succeed")
 }
 
-fn create_traffic_selector(address: &IpAddr) -> TrafficSelector {
+fn create_traffic_selector(address: IpAddr) -> TrafficSelector {
     TrafficSelector::new(
         TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
         0,
-        &address,
-        &address,
+        address,
+        address,
         0,
         0,
     )
@@ -113,8 +113,8 @@ async fn main() -> Result<()> {
 
     let initiator_addr: IpAddr = "192.168.1.2".parse().unwrap();
     let responder_addr: IpAddr = "192.168.1.3".parse().unwrap();
-    let ts_i = create_traffic_selector(&initiator_addr);
-    let ts_r = create_traffic_selector(&responder_addr);
+    let ts_i = create_traffic_selector(initiator_addr);
+    let ts_r = create_traffic_selector(responder_addr);
     initiator
         .handle_acquire(ts_i, ts_r, 1)
         .await

@@ -209,8 +209,8 @@ impl TrafficSelectorBuilder {
         Ok(TrafficSelector::new(
             ty.into(),
             self.ip_proto.unwrap_or(0),
-            &start_address,
-            &end_address,
+            start_address,
+            end_address,
             start_port,
             end_port,
         ))
