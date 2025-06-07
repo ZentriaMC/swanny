@@ -72,6 +72,10 @@ pub enum ControlMessage {
     DeleteChildSa(Box<ChildSa>),
 }
 
+/// Errors at the protocol level
+///
+/// Error codes defined here will trigger sending a Notify payload
+/// when it happens on the responder side.
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
     #[error("missing payload")]
@@ -181,6 +185,28 @@ impl IkeSa {
             .as_any()
             .downcast_ref::<T>()
             .is_some()
+    }
+
+    /// Unprotect a `ProtectedMessage` with the currently installed IKE SA keys
+    #[cfg(test)]
+    pub(crate) async fn unprotect_message(
+        &self,
+        message: ProtectedMessage,
+    ) -> Result<Message, StateError> {
+        let data = self.data.read().await;
+        let data = StateDataCache::new_borrowed(&data);
+        Ok(message.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?)
+    }
+
+    /// Protect a `Message` with the currently installed IKE SA keys
+    #[cfg(test)]
+    pub(crate) async fn protect_message(
+        &self,
+        message: Message,
+    ) -> Result<ProtectedMessage, StateError> {
+        let data = self.data.read().await;
+        let data = StateDataCache::new_borrowed(&data);
+        Ok(message.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?)
     }
 
     /// Processes IKE message
