@@ -11,27 +11,11 @@ use crate::{
     },
     sa::*,
     state,
+    tests::check_notify,
 };
 use bytes::BytesMut;
 use futures::stream::StreamExt;
 use std::net::IpAddr;
-
-fn check_notify(message: &[u8], exchange: ExchangeType, ty: NotifyType) {
-    let message = Message::deserialize(&mut &message[..]).expect("message should be deserialized");
-    match message.exchange().assigned() {
-        Some(exchange_) if exchange_ == exchange => {}
-        _ => unreachable!("exchange type doesn't match"),
-    }
-    assert_eq!(message.payloads().collect::<Vec<_>>().len(), 1);
-
-    let notify: &payload::Notify = message
-        .get(PayloadType::NOTIFY)
-        .expect("notify payload should be included");
-    match notify.ty().assigned() {
-        Some(ty_) if ty_ == ty => {}
-        _ => unreachable!("notify type doesn't match"),
-    }
-}
 
 #[tokio::test]
 async fn test_empty() {
@@ -57,6 +41,8 @@ async fn test_empty() {
     handle.await.expect("handle should be awaited");
 
     assert!(responder.in_state(&state::Initial {}).await);
+
+    let message = Message::deserialize(&mut &message[..]).expect("message should be deserialized");
     check_notify(
         &message,
         ExchangeType::IKE_SA_INIT,
@@ -101,6 +87,8 @@ async fn test_request_is_response() {
     handle.await.expect("handle should be awaited");
 
     assert!(responder.in_state(&state::Initial {}).await);
+
+    let message = Message::deserialize(&mut &message[..]).expect("message should be deserialized");
     check_notify(
         &message,
         ExchangeType::IKE_SA_INIT,
@@ -146,6 +134,8 @@ async fn test_non_zero_message_id() {
     handle.await.expect("handle should be awaited");
 
     assert!(responder.in_state(&state::Initial {}).await);
+
+    let message = Message::deserialize(&mut &message[..]).expect("message should be deserialized");
     check_notify(
         &message,
         ExchangeType::IKE_SA_INIT,
@@ -218,6 +208,8 @@ async fn test_no_proposal_chosen() {
     handle.await.expect("handle should be awaited");
 
     assert!(responder.in_state(&state::Initial {}).await);
+
+    let message = Message::deserialize(&mut &message[..]).expect("message should be deserialized");
     check_notify(
         &message,
         ExchangeType::IKE_SA_INIT,

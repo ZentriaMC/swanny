@@ -1,33 +1,17 @@
 use crate::{
     config,
     message::{
-        Message, ProtectedMessage,
-        num::{ExchangeType, NotifyType, PayloadType},
-        payload,
+        ProtectedMessage,
+        num::{ExchangeType, NotifyType},
         serialize::Deserialize,
         traffic_selector,
     },
     sa::*,
     state,
+    tests::check_notify,
 };
 use futures::stream::StreamExt;
 use std::net::IpAddr;
-
-fn check_notify(message: &Message, exchange: ExchangeType, ty: NotifyType) {
-    match message.exchange().assigned() {
-        Some(exchange_) if exchange_ == exchange => {}
-        _ => unreachable!("exchange type doesn't match"),
-    }
-    assert_eq!(message.payloads().collect::<Vec<_>>().len(), 1);
-
-    let notify: &payload::Notify = message
-        .get(PayloadType::NOTIFY)
-        .expect("notify payload should be included");
-    match notify.ty().assigned() {
-        Some(ty_) if ty_ == ty => {}
-        _ => unreachable!("notify type doesn't match"),
-    }
-}
 
 #[tokio::test]
 async fn test_ts_unacceptable() {
@@ -116,7 +100,7 @@ async fn test_ts_unacceptable() {
 
     assert!(responder.in_state(&state::IkeSaInitResponseSent {}).await);
 
-    let message = ProtectedMessage::deserialize(&mut message.as_slice())
+    let message = ProtectedMessage::deserialize(&mut &message[..])
         .expect("message should be deserialized");
     let message = initiator
         .unprotect_message(message)
