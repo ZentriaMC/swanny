@@ -222,10 +222,11 @@ cache_cow! {
         ike_sa_init_request: Option<Vec<u8>>,
         ike_sa_init_response: Option<Vec<u8>>,
         last_request: Option<Vec<u8>>,
-        larval_child_sa: Option<LarvalChildSa>,
+        child_sas: Vec<Box<ChildSa>>,
+        creating_child_sa: Option<LarvalChildSa>,
+        rekeying_child_sa: Option<Box<ChildSa>>,
         created_child_sa: Option<Box<ChildSa>>,
         rekeyed_child_sa: Option<Box<ChildSa>>,
-        child_sas: Vec<Box<ChildSa>>,
         deleted_child_sas: Vec<Box<ChildSa>>,
     }
 }
@@ -515,19 +516,6 @@ trait DeleteChildSa {
     ) -> Result<(), StateError> {
         debug!(child_sa = ?&child_sa, "Child SA deleted");
         sender.unbounded_send(ControlMessage::DeleteChildSa(child_sa))?;
-        Ok(())
-    }
-}
-
-trait RekeyChildSa {
-    fn rekey_child_sa(
-        sender: UnboundedSender<ControlMessage>,
-        data: &mut StateDataCache<'_>,
-        child_sa: Box<ChildSa>,
-    ) -> Result<(), StateError> {
-        debug!(child_sa = ?&child_sa, "Child SA rekeyed");
-        data.child_sas.to_mut().push(child_sa.clone());
-        sender.unbounded_send(ControlMessage::RekeyChildSa(child_sa))?;
         Ok(())
     }
 }

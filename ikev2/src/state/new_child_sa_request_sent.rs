@@ -50,34 +50,35 @@ fn handle_create_child_sa_response(
         .get(PayloadType::NONCE)
         .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
 
-    let larval_child_sa = data.larval_child_sa.to_mut().take();
+    let creating_child_sa = data.creating_child_sa.to_mut().take();
 
-    // Create a new Child SA, if larval_child_sa is set
-    if let Some(larval_child_sa) = larval_child_sa {
+    // Create a new Child SA, if creating_child_sa is set
+    if let Some(creating_child_sa) = creating_child_sa {
         let ts_i: &payload::Ts = response
             .get(PayloadType::TSi)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
-        TrafficSelector::negotiate(Some(&larval_child_sa.ts_i), ts_i.traffic_selectors())
+        TrafficSelector::negotiate(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
             .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
         let ts_r: &payload::Ts = response
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
-        TrafficSelector::negotiate(Some(&larval_child_sa.ts_r), ts_r.traffic_selectors())
+        TrafficSelector::negotiate(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
             .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
-        let proposals = &larval_child_sa.proposals;
+        let proposals = &creating_child_sa.proposals;
 
         let proposal = Proposal::negotiate(proposals, sa.proposals())
             .ok_or(ProtocolError::NoProposalChosen)?;
         info!(proposal = ?&proposal, "negotiated proposal");
         let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-        let child_sa = larval_child_sa.build(
+        let child_sa = creating_child_sa.build(
             &chosen_proposal,
             &data.keys()?.derivation.d,
             (*data.nonce_i).as_ref().expect("nonce should be set"),
             nonce_r.nonce(),
+            None,
         )?;
         *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
     }

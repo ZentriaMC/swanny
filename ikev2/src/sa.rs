@@ -70,7 +70,6 @@ pub enum ControlMessage {
     IkeMessage(Vec<u8>),
     CreateChildSa(Box<ChildSa>),
     DeleteChildSa(Box<ChildSa>),
-    RekeyChildSa(Box<ChildSa>),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -598,21 +597,47 @@ impl LarvalChildSa {
         })
     }
 
+    pub fn from_existing(child_sa: &ChildSa, on_initiator: bool) -> Result<Self, CryptoError> {
+        let mut spi = EspSpi::default();
+        crypto::rand_bytes(&mut spi)?;
+
+        let proposal = child_sa.chosen_proposal().proposal(
+            1,
+            child_sa.chosen_proposal().protocol().into(),
+            spi,
+        );
+        let proposals = vec![proposal];
+
+        Ok(Self {
+            ts_i: child_sa.ts_i().to_owned(),
+            ts_r: child_sa.ts_r().to_owned(),
+            spi,
+            proposals,
+            on_initiator,
+        })
+    }
+
     pub fn build(
         self,
         chosen_proposal: &ChosenProposal,
         d: &DerivationKey,
         nonce_i: impl AsRef<[u8]>,
         nonce_r: impl AsRef<[u8]>,
+        peer_public_key: Option<&[u8]>,
     ) -> Result<ChildSa, CryptoError> {
-        let (keys, _) =
-            chosen_proposal.generate_child_sa_keys(d, nonce_i.as_ref(), nonce_r.as_ref(), None)?;
+        let (keys, public_key) = chosen_proposal.generate_child_sa_keys(
+            d,
+            nonce_i.as_ref(),
+            nonce_r.as_ref(),
+            peer_public_key,
+        )?;
         Ok(ChildSa {
             ts_i: self.ts_i,
             ts_r: self.ts_r,
             spi: self.spi,
             chosen_proposal: chosen_proposal.to_owned(),
             keys,
+            public_key,
             on_initiator: self.on_initiator,
         })
     }
@@ -629,6 +654,7 @@ pub struct ChildSa {
     spi: EspSpi,
     chosen_proposal: ChosenProposal,
     keys: ProtectionKeys,
+    public_key: Option<Vec<u8>>,
     on_initiator: bool,
 }
 
@@ -678,18 +704,8 @@ impl ChildSa {
         &self.keys
     }
 
-    /// Rekey this Child SA
-    pub fn rekey(
-        &mut self,
-        key: &DerivationKey,
-        nonce_i: impl AsRef<[u8]>,
-        nonce_r: impl AsRef<[u8]>,
-        peer_public_key: Option<&[u8]>,
-    ) -> Result<Option<Vec<u8>>, CryptoError> {
-        let (keys, public_key) =
-            self.chosen_proposal
-                .generate_child_sa_keys(key, nonce_i, nonce_r, peer_public_key)?;
-        self.keys = keys;
-        Ok(public_key)
+    /// Returns the group public key used to derive keys
+    pub fn public_key(&self) -> Option<&[u8]> {
+        self.public_key.as_deref()
     }
 }

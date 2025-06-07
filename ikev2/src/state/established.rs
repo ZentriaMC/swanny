@@ -12,8 +12,7 @@ use crate::{
     sa::{ChosenProposal, ControlMessage, LarvalChildSa},
     state::{
         self, ChildSa, CreateChildSa, DeleteChildSa, InvalidStateError, ProtocolError,
-        RekeyChildSa, SendProtectedMessage, State, StateData, StateDataCache, StateError,
-        VerifyMessage,
+        SendProtectedMessage, State, StateData, StateDataCache, StateError, VerifyMessage,
     },
 };
 use async_trait::async_trait;
@@ -28,7 +27,6 @@ impl SendProtectedMessage for Established {}
 impl VerifyMessage for Established {}
 impl CreateChildSa for Established {}
 impl DeleteChildSa for Established {}
-impl RekeyChildSa for Established {}
 
 impl std::fmt::Display for Established {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -107,6 +105,7 @@ fn generate_informational_response(
 fn handle_rekey_child_sa_request(
     data: &mut StateDataCache<'_>,
     spi: &EspSpi,
+    sa: &payload::Sa,
     nonce_i: &Nonce,
     nonce_r: &Nonce,
     peer_public_key: Option<&[u8]>,
@@ -116,15 +115,28 @@ fn handle_rekey_child_sa_request(
         .iter()
         .position(|child_sa| child_sa.chosen_proposal().spi() == spi);
     if let Some(index) = index {
-        let mut child_sa = child_sas.swap_remove(index);
-        let public_key = child_sa.rekey(
+        let rekeying_child_sa = child_sas.swap_remove(index);
+        let creating_child_sa = LarvalChildSa::from_existing(&rekeying_child_sa, false)?;
+
+        let proposals = &creating_child_sa.proposals;
+        if proposals.is_empty() {
+            return Err(ConfigError::NoProposalsSet.into());
+        }
+
+        let proposal = Proposal::negotiate(proposals, sa.proposals())
+            .ok_or(ProtocolError::NoProposalChosen)?;
+        info!(proposal = ?&proposal, "negotiated proposal");
+        let chosen_proposal = ChosenProposal::new(&proposal)?;
+
+        let child_sa = creating_child_sa.build(
+            &chosen_proposal,
             &data.keys()?.derivation.d,
             nonce_i,
             nonce_r,
             peer_public_key,
         )?;
-        *data.public_key.to_mut() = public_key;
-        *data.rekeyed_child_sa.to_mut() = Some(child_sa);
+        *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
+        *data.rekeyed_child_sa.to_mut() = Some(rekeying_child_sa);
     }
     Ok(())
 }
@@ -150,8 +162,8 @@ fn handle_new_child_sa_request(
     .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_r = ?&ts_r, "negotiated TSr");
 
-    let larval_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
-    let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
+    let creating_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
+    let proposals: Vec<_> = config.ipsec_proposals(&creating_child_sa.spi).collect();
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
     }
@@ -161,11 +173,12 @@ fn handle_new_child_sa_request(
     info!(proposal = ?&proposal, "negotiated proposal");
     let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-    let child_sa = larval_child_sa.build(
+    let child_sa = creating_child_sa.build(
         &chosen_proposal,
         &data.keys()?.derivation.d,
         nonce_i,
         nonce_r,
+        None,
     )?;
     *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
 
@@ -218,6 +231,7 @@ fn handle_create_child_sa_request(
             spi.try_into().map_err(|e: std::array::TryFromSliceError| {
                 StateError::Protocol(ProtocolError::DeserializeError(e.into()))
             })?,
+            sa,
             nonce_i.nonce(),
             &nonce,
             ke.map(|ke| ke.ke_data()),
@@ -232,68 +246,6 @@ fn handle_create_child_sa_request(
     *data.nonce_r.to_mut() = Some(nonce);
 
     Ok(())
-}
-
-fn generate_rekey_child_sa_response(
-    data: &mut StateDataCache<'_>,
-    child_sa: &ChildSa,
-    request: &ProtectedMessage,
-) -> Result<ProtectedMessage, StateError> {
-    let mut response = Message::new(
-        data.initiator_spi()?,
-        data.responder_spi()?,
-        ExchangeType::CREATE_CHILD_SA.into(),
-        MessageFlags::R,
-        request.id(),
-    );
-
-    let proposal = child_sa.chosen_proposal().proposal(
-        1,
-        child_sa.chosen_proposal().protocol().into(),
-        child_sa.spi(),
-    );
-
-    response.add_payloads([
-        Payload::new(
-            PayloadType::SA.into(),
-            payload::Content::Sa(payload::Sa::new(Some(proposal))),
-            true,
-        ),
-        Payload::new(
-            PayloadType::NONCE.into(),
-            payload::Content::Nonce(payload::Nonce::new(
-                (*data.nonce_r)
-                    .as_ref()
-                    .ok_or(InvalidStateError::NonceNotRecorded)?,
-            )),
-            true,
-        ),
-        Payload::new(
-            PayloadType::TSi.into(),
-            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_i().clone()))),
-            true,
-        ),
-        Payload::new(
-            PayloadType::TSr.into(),
-            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_r().clone()))),
-            true,
-        ),
-    ]);
-
-    if let Some(public_key) = data.public_key.to_mut().take() {
-        let group = data.chosen_proposal()?.group().expect("group must be set");
-        response.add_payloads(Some(Payload::new(
-            PayloadType::KE.into(),
-            payload::Content::Ke(payload::Ke::new(group.id().into(), public_key)),
-            true,
-        )));
-    }
-
-    debug!(response = ?&response, "sending protected response");
-
-    response
-        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
-        .map_err(Into::into)
 }
 
 fn generate_new_child_sa_response(
@@ -342,6 +294,15 @@ fn generate_new_child_sa_response(
         ),
     ]);
 
+    if let Some(public_key) = child_sa.public_key().as_ref() {
+        let group = data.chosen_proposal()?.group().expect("group must be set");
+        response.add_payloads(Some(Payload::new(
+            PayloadType::KE.into(),
+            payload::Content::Ke(payload::Ke::new(group.id().into(), public_key)),
+            true,
+        )));
+    }
+
     debug!(response = ?&response, "sending protected response");
 
     response
@@ -349,7 +310,7 @@ fn generate_new_child_sa_response(
         .map_err(Into::into)
 }
 
-fn generate_create_child_sa_request(
+fn generate_new_child_sa_request(
     config: &Config,
     data: &mut StateDataCache<'_>,
     ts_i: &TrafficSelector,
@@ -365,8 +326,8 @@ fn generate_create_child_sa_request(
 
     let nonce = Nonce::new()?;
 
-    let larval_child_sa = LarvalChildSa::new(config, ts_i, ts_r, true)?;
-    let proposals = &larval_child_sa.proposals;
+    let creating_child_sa = LarvalChildSa::new(config, ts_i, ts_r, true)?;
+    let proposals = &creating_child_sa.proposals;
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
     }
@@ -384,12 +345,12 @@ fn generate_create_child_sa_request(
         ),
         Payload::new(
             PayloadType::TSi.into(),
-            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_i.clone()))),
+            payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_i.clone()))),
             true,
         ),
         Payload::new(
             PayloadType::TSr.into(),
-            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r.clone()))),
+            payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_r.clone()))),
             true,
         ),
     ]);
@@ -398,7 +359,7 @@ fn generate_create_child_sa_request(
 
     let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
 
-    *data.larval_child_sa.to_mut() = Some(larval_child_sa);
+    *data.creating_child_sa.to_mut() = Some(creating_child_sa);
     *data.nonce_i.to_mut() = Some(nonce);
 
     Ok(request)
@@ -425,6 +386,8 @@ fn generate_delete_child_sa_request(
         false,
     )));
 
+    debug!(request = ?&request, "sending protected request");
+
     let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
 
     Ok(request)
@@ -432,7 +395,7 @@ fn generate_delete_child_sa_request(
 
 fn generate_rekey_child_sa_request(
     data: &mut StateDataCache<'_>,
-    child_sa: &ChildSa,
+    child_sa: Box<ChildSa>,
 ) -> Result<ProtectedMessage, StateError> {
     let mut request = Message::new(
         data.initiator_spi()?,
@@ -444,11 +407,11 @@ fn generate_rekey_child_sa_request(
 
     let nonce = Nonce::new()?;
 
-    let proposal = child_sa.chosen_proposal().proposal(
-        1,
-        child_sa.chosen_proposal().protocol().into(),
-        child_sa.spi(),
-    );
+    let creating_child_sa = LarvalChildSa::from_existing(&child_sa, true)?;
+    let proposals = &creating_child_sa.proposals;
+    if proposals.is_empty() {
+        return Err(ConfigError::NoProposalsSet.into());
+    }
 
     request.add_payloads([
         Payload::new(
@@ -463,7 +426,7 @@ fn generate_rekey_child_sa_request(
         ),
         Payload::new(
             PayloadType::SA.into(),
-            payload::Content::Sa(payload::Sa::new(Some(proposal))),
+            payload::Content::Sa(payload::Sa::new(proposals.clone())),
             true,
         ),
         Payload::new(
@@ -473,20 +436,23 @@ fn generate_rekey_child_sa_request(
         ),
         Payload::new(
             PayloadType::TSi.into(),
-            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_i().clone()))),
+            payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_i.clone()))),
             true,
         ),
         Payload::new(
             PayloadType::TSr.into(),
-            payload::Content::Ts(payload::Ts::new(Some(child_sa.ts_r().clone()))),
+            payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_r.clone()))),
             true,
         ),
     ]);
 
+    debug!(request = ?&request, "sending protected request");
+
     let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
 
+    *data.creating_child_sa.to_mut() = Some(creating_child_sa);
+    *data.rekeying_child_sa.to_mut() = Some(child_sa);
     *data.nonce_i.to_mut() = Some(nonce);
-    *data.rekeyed_child_sa.to_mut() = Some(Box::new(child_sa.clone()));
 
     Ok(request)
 }
@@ -527,11 +493,7 @@ impl Established {
                 }
 
                 if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
-                    let response = generate_rekey_child_sa_response(data, &child_sa, &request)?;
-
-                    Self::send_message(sender.clone(), data, response)?;
-
-                    Self::rekey_child_sa(sender.clone(), data, child_sa)?;
+                    Self::delete_child_sa(sender.clone(), child_sa)?;
                 }
             }
             _ => {
@@ -626,7 +588,7 @@ impl State for Established {
             let data = data.read().await;
             let mut data = StateDataCache::new_borrowed(&data);
 
-            let request = generate_create_child_sa_request(config, &mut data, ts_i, ts_r)?;
+            let request = generate_new_child_sa_request(config, &mut data, ts_i, ts_r)?;
             Self::send_message(sender.clone(), &mut data, request)?;
             data.swap(&default)
         };
@@ -664,7 +626,7 @@ impl State for Established {
                     Self::send_message(sender.clone(), &mut data, request)?;
                 } else {
                     debug!(spi = ?spi, "sending rekey Child SA request");
-                    let request = generate_rekey_child_sa_request(&mut data, &child_sa)?;
+                    let request = generate_rekey_child_sa_request(&mut data, child_sa)?;
                     Self::send_message(sender.clone(), &mut data, request)?;
                 }
             } else {

@@ -101,12 +101,12 @@ fn generate_ike_auth_request(
         *data.message_id,
     );
 
-    let larval_child_sa = data
-        .larval_child_sa
+    let creating_child_sa = data
+        .creating_child_sa
         .as_ref()
         .as_ref()
         .ok_or(InvalidStateError::LarvalChildSaNotSet)?;
-    let proposals = &larval_child_sa.proposals;
+    let proposals = &creating_child_sa.proposals;
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
     }
@@ -135,19 +135,19 @@ fn generate_ike_auth_request(
         Payload::new(PayloadType::AUTH.into(), payload::Content::Auth(auth), true),
         Payload::new(
             PayloadType::TSi.into(),
-            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_i.clone()))),
+            payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_i.clone()))),
             true,
         ),
         Payload::new(
             PayloadType::TSr.into(),
-            payload::Content::Ts(payload::Ts::new(Some(larval_child_sa.ts_r.clone()))),
+            payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_r.clone()))),
             true,
         ),
         Payload::new(
             PayloadType::NOTIFY.into(),
             payload::Content::Notify(payload::Notify::new(
                 Protocol::ESP.into(),
-                Some(&larval_child_sa.spi[..]),
+                Some(&creating_child_sa.spi[..]),
                 NotifyType::USE_TRANSPORT_MODE.into(),
                 b"",
             )),

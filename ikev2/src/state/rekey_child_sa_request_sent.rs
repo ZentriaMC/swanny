@@ -8,10 +8,10 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::ControlMessage,
+    sa::{ChosenProposal, ControlMessage},
     state::{
-        Established, ProtocolError, RekeyChildSa, SendProtectedMessage, State, StateData,
-        StateDataCache, StateError, VerifyMessage, generate_informational_error,
+        CreateChildSa, DeleteChildSa, Established, ProtocolError, SendProtectedMessage, State,
+        StateData, StateDataCache, StateError, VerifyMessage, generate_informational_error,
     },
 };
 use async_trait::async_trait;
@@ -24,7 +24,8 @@ pub struct RekeyChildSaRequestSent;
 
 impl SendProtectedMessage for RekeyChildSaRequestSent {}
 impl VerifyMessage for RekeyChildSaRequestSent {}
-impl RekeyChildSa for RekeyChildSaRequestSent {}
+impl CreateChildSa for RekeyChildSaRequestSent {}
+impl DeleteChildSa for RekeyChildSaRequestSent {}
 
 impl std::fmt::Display for RekeyChildSaRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
@@ -52,46 +53,46 @@ fn handle_create_child_sa_response(
 
     // Need to take it out of `data` first, as `data` is still
     // immutably referenced in the below if block
-    let rekeyed_child_sa = data.rekeyed_child_sa.to_mut().take();
+    let creating_child_sa = data.creating_child_sa.to_mut().take();
 
-    let child_sa = if let Some(mut child_sa) = rekeyed_child_sa {
+    if let Some(creating_child_sa) = creating_child_sa {
         // For rekeying, only check the peer TSi/TSr match the current one
         let ts_i: &payload::Ts = response
             .get(PayloadType::TSi)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
-        TrafficSelector::negotiate(Some(child_sa.ts_i()), ts_i.traffic_selectors())
+        TrafficSelector::negotiate(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
             .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
         let ts_r: &payload::Ts = response
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
-        TrafficSelector::negotiate(Some(child_sa.ts_r()), ts_r.traffic_selectors())
+        TrafficSelector::negotiate(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
             .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
         // For rekeying, only check the peer proposal matches the current one
-        let proposal = child_sa.chosen_proposal().proposal(
-            1,
-            child_sa.chosen_proposal().protocol().into(),
-            child_sa.spi(),
-        );
-        let proposal = Proposal::negotiate(Some(&proposal), sa.proposals())
+        let proposals = &creating_child_sa.proposals;
+
+        let proposal = Proposal::negotiate(proposals, sa.proposals())
             .ok_or(ProtocolError::NoProposalChosen)?;
         info!(proposal = ?&proposal, "negotiated proposal");
+        let chosen_proposal = ChosenProposal::new(&proposal)?;
 
         let ke: Option<&payload::Ke> = response.get(PayloadType::KE);
 
-        let _ = child_sa.rekey(
+        let child_sa = creating_child_sa.build(
+            &chosen_proposal,
             &data.keys()?.derivation.d,
             (*data.nonce_i).as_ref().expect("nonce should be set"),
             nonce_r.nonce(),
             ke.map(|ke| ke.ke_data()),
         )?;
-        Some(child_sa)
-    } else {
-        None
-    };
+        *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
 
-    *data.rekeyed_child_sa.to_mut() = child_sa;
+        if let Some(rekeyed_child_sa) = data.rekeying_child_sa.to_mut().take() {
+            *data.rekeyed_child_sa.to_mut() = Some(rekeyed_child_sa);
+        }
+    }
+
     *data.last_request.to_mut() = None;
 
     Ok(())
@@ -129,8 +130,11 @@ impl RekeyChildSaRequestSent {
             Some(ExchangeType::CREATE_CHILD_SA) => {
                 handle_create_child_sa_response(data, &response)?;
 
+                if let Some(child_sa) = data.created_child_sa.to_mut().take() {
+                    Self::create_child_sa(sender.clone(), data, child_sa)?;
+                }
                 if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
-                    Self::rekey_child_sa(sender.clone(), data, child_sa)?;
+                    Self::delete_child_sa(sender.clone(), child_sa)?;
                 }
             }
             _ => {

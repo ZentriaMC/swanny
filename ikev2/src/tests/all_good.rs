@@ -147,8 +147,13 @@ async fn test_all_good() {
         _ => panic!("unexpected message"),
     };
 
-    let _child_sa = match messages_r.next().await {
-        Some(ControlMessage::RekeyChildSa(child_sa)) => child_sa,
+    let _created_child_sa = match messages_r.next().await {
+        Some(ControlMessage::CreateChildSa(child_sa)) => child_sa,
+        _ => panic!("unexpected message"),
+    };
+
+    let _rekeyed_child_sa = match messages_r.next().await {
+        Some(ControlMessage::DeleteChildSa(child_sa)) => child_sa,
         _ => panic!("unexpected message"),
     };
 
@@ -165,8 +170,13 @@ async fn test_all_good() {
             .expect("unable to handle message");
     });
 
-    let _child_sa = match messages_i.next().await {
-        Some(ControlMessage::RekeyChildSa(child_sa)) => child_sa,
+    let created_child_sa = match messages_i.next().await {
+        Some(ControlMessage::CreateChildSa(child_sa)) => child_sa,
+        _ => panic!("unexpected message"),
+    };
+
+    let _rekeyed_child_sa = match messages_i.next().await {
+        Some(ControlMessage::DeleteChildSa(child_sa)) => child_sa,
         _ => panic!("unexpected message"),
     };
 
@@ -175,6 +185,8 @@ async fn test_all_good() {
     assert!(initiator.in_state(&state::Established {}).await);
 
     // Deleting
+    let spi = *created_child_sa.spi();
+
     let initiator2 = initiator.clone();
 
     let handle = tokio::spawn(async move {

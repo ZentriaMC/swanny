@@ -76,26 +76,26 @@ fn handle_ike_auth_response(
         return Err(ProtocolError::AuthenticationFailed.into());
     }
 
-    let larval_child_sa = data
-        .larval_child_sa
+    let creating_child_sa = data
+        .creating_child_sa
         .to_mut()
         .take()
         .ok_or(InvalidStateError::LarvalChildSaNotSet)?;
 
-    let ts_i = TrafficSelector::negotiate(Some(&larval_child_sa.ts_i), ts_i.traffic_selectors())
+    let ts_i = TrafficSelector::negotiate(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
         .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_i = ?&ts_i, "negotiated TSi");
 
-    let ts_r = TrafficSelector::negotiate(Some(&larval_child_sa.ts_r), ts_r.traffic_selectors())
+    let ts_r = TrafficSelector::negotiate(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
         .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_r = ?&ts_r, "negotiated TSr");
 
-    let proposal = Proposal::negotiate(&larval_child_sa.proposals, sa.proposals())
+    let proposal = Proposal::negotiate(&creating_child_sa.proposals, sa.proposals())
         .ok_or(ProtocolError::NoProposalChosen)?;
     info!(proposal = ?&proposal, "negotiated proposal");
     let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-    let child_sa = larval_child_sa.build(
+    let child_sa = creating_child_sa.build(
         &chosen_proposal,
         &data.keys()?.derivation.d,
         (*data.nonce_i)
@@ -104,6 +104,7 @@ fn handle_ike_auth_response(
         (*data.nonce_r)
             .as_ref()
             .ok_or(InvalidStateError::NonceNotRecorded)?,
+        None,
     )?;
 
     *data.created_child_sa.to_mut() = Some(Box::new(child_sa));

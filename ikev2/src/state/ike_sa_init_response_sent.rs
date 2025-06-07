@@ -89,8 +89,8 @@ fn handle_ike_auth_request(
     .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_r = ?&ts_r, "negotiated TSr");
 
-    let larval_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
-    let proposals: Vec<_> = config.ipsec_proposals(&larval_child_sa.spi).collect();
+    let creating_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
+    let proposals: Vec<_> = config.ipsec_proposals(&creating_child_sa.spi).collect();
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
     }
@@ -100,7 +100,7 @@ fn handle_ike_auth_request(
     info!(proposal = ?&proposal, "negotiated proposal");
     let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-    let child_sa = larval_child_sa.build(
+    let child_sa = creating_child_sa.build(
         &chosen_proposal,
         &data.keys()?.derivation.d,
         (*data.nonce_i)
@@ -109,6 +109,7 @@ fn handle_ike_auth_request(
         (*data.nonce_r)
             .as_ref()
             .ok_or(InvalidStateError::NonceNotRecorded)?,
+        None,
     )?;
 
     *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
