@@ -160,7 +160,7 @@ macro_rules! cache_cow {
         impl<'a, 'b: 'c, 'c> $StructCache<'a> {
             // Creates a new $StructCache borrowing from a given
             // $Struct reference
-            fn new_borrowed(data: &'a $Struct) -> Self {
+            pub(crate) fn new_borrowed(data: &'a $Struct) -> Self {
                 Self {
                     $(
                         $field: Cow::Borrowed(&data.$field),
@@ -256,7 +256,7 @@ impl StateDataCache<'_> {
         }
     }
 
-    fn encrypting_key(&self) -> Result<&EncryptionKey, StateError> {
+    pub(crate) fn encrypting_key(&self) -> Result<&EncryptionKey, StateError> {
         match *self.is_initiator {
             Some(true) => Ok(&self.keys()?.protection.ei),
             Some(false) => Ok(&self.keys()?.protection.er),
@@ -266,7 +266,7 @@ impl StateDataCache<'_> {
         }
     }
 
-    fn decrypting_key(&self) -> Result<&EncryptionKey, StateError> {
+    pub(crate) fn decrypting_key(&self) -> Result<&EncryptionKey, StateError> {
         match *self.is_initiator {
             Some(true) => Ok(&self.keys()?.protection.er),
             Some(false) => Ok(&self.keys()?.protection.ei),
@@ -276,7 +276,7 @@ impl StateDataCache<'_> {
         }
     }
 
-    fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {
+    pub(crate) fn chosen_proposal(&self) -> Result<&ChosenProposal, StateError> {
         (*self.chosen_proposal)
             .as_ref()
             .ok_or(StateError::InvalidState(

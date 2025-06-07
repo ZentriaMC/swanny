@@ -58,6 +58,11 @@ use crate::{
     },
     state::{self, State, StateData, StateError},
 };
+#[cfg(test)]
+use crate::{
+    message::{Message, ProtectedMessage},
+    state::StateDataCache,
+};
 use bytes::Buf;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::sync::Arc;
@@ -195,7 +200,9 @@ impl IkeSa {
     ) -> Result<Message, StateError> {
         let data = self.data.read().await;
         let data = StateDataCache::new_borrowed(&data);
-        Ok(message.unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())?)
+        Ok(message
+            .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
+            .map_err(|e| StateError::Protocol(e.into()))?)
     }
 
     /// Protect a `Message` with the currently installed IKE SA keys
