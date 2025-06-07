@@ -97,7 +97,7 @@ impl TrafficSelector {
         if self.start_address < other.start_address || self.end_address > other.end_address {
             return false;
         }
-        return true;
+        true
     }
 
     fn narrow_to(&self, other: &Self) -> Option<Self> {
