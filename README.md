@@ -100,4 +100,4 @@ $ sudo ip netns exec ns2 /usr/libexec/ipsec/whack --name mytunnel --ipv4 \
 ## License
 
 - ikev2: LGPL-2.1-or-later
-- server: GPL-2.0-or-later
+- server: GPL-3.0-or-later
