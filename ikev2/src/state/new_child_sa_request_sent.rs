@@ -172,7 +172,6 @@ impl State for NewChildSaRequestSent {
         _data: Arc<RwLock<StateData>>,
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
-        _index: u32,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }

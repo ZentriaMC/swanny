@@ -311,7 +311,6 @@ impl State for Initial {
         data: Arc<RwLock<StateData>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        _index: u32,
     ) -> Result<Box<dyn State>, StateError> {
         let default = StateData::default();
         let default = StateDataCache::new_borrowed(&default);
@@ -323,7 +322,8 @@ impl State for Initial {
             let request = generate_ike_sa_init_request(config, &mut data)?;
 
             Self::send_message(sender.clone(), &mut data, request)?;
-            *data.creating_child_sa.to_mut() = Some(LarvalChildSa::new(config, ts_i, ts_r, true)?);
+            *data.creating_child_sa.to_mut() =
+                Some(LarvalChildSa::new(config, ts_i, ts_r, config.mode(), true)?);
             data.swap(&default)
         };
 

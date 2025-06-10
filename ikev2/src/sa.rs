@@ -246,7 +246,6 @@ impl IkeSa {
         &self,
         ts_i: TrafficSelector,
         ts_r: TrafficSelector,
-        index: u32,
     ) -> Result<(), StateError> {
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
@@ -259,7 +258,6 @@ impl IkeSa {
                     self.data.clone(),
                     &ts_i,
                     &ts_r,
-                    index,
                 )
                 .await?;
 
@@ -600,11 +598,19 @@ pub struct ProtectionKeys {
     pub ar: Option<AuthenticationKey>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ChildSaMode {
+    #[default]
+    Transport,
+    Tunnel,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct LarvalChildSa {
     pub ts_i: TrafficSelector,
     pub ts_r: TrafficSelector,
     pub spi: EspSpi,
+    pub mode: ChildSaMode,
     pub proposals: Vec<Proposal>,
     pub on_initiator: bool,
 }
@@ -614,6 +620,7 @@ impl LarvalChildSa {
         config: &Config,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
+        mode: ChildSaMode,
         on_initiator: bool,
     ) -> Result<Self, CryptoError> {
         let mut spi = EspSpi::default();
@@ -625,6 +632,7 @@ impl LarvalChildSa {
             ts_i: ts_i.to_owned(),
             ts_r: ts_r.to_owned(),
             spi,
+            mode,
             proposals,
             on_initiator,
         })
@@ -645,6 +653,7 @@ impl LarvalChildSa {
             ts_i: child_sa.ts_i().to_owned(),
             ts_r: child_sa.ts_r().to_owned(),
             spi,
+            mode: child_sa.mode(),
             proposals,
             on_initiator,
         })
@@ -668,6 +677,7 @@ impl LarvalChildSa {
             ts_i: self.ts_i,
             ts_r: self.ts_r,
             spi: self.spi,
+            mode: self.mode,
             chosen_proposal: chosen_proposal.to_owned(),
             keys,
             public_key,
@@ -685,6 +695,7 @@ pub struct ChildSa {
     ts_i: TrafficSelector,
     ts_r: TrafficSelector,
     spi: EspSpi,
+    mode: ChildSaMode,
     chosen_proposal: ChosenProposal,
     keys: ProtectionKeys,
     public_key: Option<Vec<u8>>,
@@ -725,6 +736,11 @@ impl ChildSa {
         } else {
             &self.spi
         }
+    }
+
+    /// Returns the Child SA mode
+    pub fn mode(&self) -> ChildSaMode {
+        self.mode
     }
 
     /// Returns the cryptographic proposal chosen

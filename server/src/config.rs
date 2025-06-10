@@ -1,10 +1,27 @@
 use anyhow::{Context as _, Result, anyhow};
-use clap::{ArgMatches, arg, command, value_parser};
+use clap::{ArgMatches, ValueEnum, arg, command, value_parser};
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use swanny_ikev2::sa::ChildSaMode;
 use toml::{Table, Value};
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Mode {
+    #[default]
+    Transport,
+    Tunnel,
+}
+
+impl From<Mode> for ChildSaMode {
+    fn from(value: Mode) -> Self {
+        match value {
+            Mode::Transport => ChildSaMode::Transport,
+            Mode::Tunnel => ChildSaMode::Tunnel,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Config {
@@ -12,6 +29,7 @@ pub struct Config {
     pub peer_address: IpAddr,
     pub psk: Vec<u8>,
     pub expires: Option<u64>,
+    pub mode: Mode,
 }
 
 impl Config {
@@ -50,6 +68,13 @@ impl Config {
                 )
                 .required(false)
                 .value_parser(value_parser!(u64)),
+            )
+            .arg(
+                arg!(
+                    --mode <MODE> "Child SA mode"
+                )
+                .required(false)
+                .value_parser(value_parser!(Mode)),
             )
             .get_matches();
 
@@ -96,11 +121,22 @@ impl Config {
             .map(|expires| expires.try_into())
             .transpose()?;
 
+        let mode = match config
+            .get("mode")
+            .map(|mode| mode.as_str().ok_or_else(|| anyhow!("value must be string")))
+            .transpose()?
+        {
+            Some("transport") | None => Mode::Transport,
+            Some("tunnel") => Mode::Tunnel,
+            Some(mode) => return Err(anyhow!("unknown Child SA mode: {}", mode)),
+        };
+
         Ok(Self {
             address,
             peer_address,
             psk,
             expires,
+            mode,
         })
     }
 
@@ -109,11 +145,16 @@ impl Config {
         let peer_address = *matches.try_get_one::<IpAddr>("peer-address")?.unwrap();
         let psk = matches.try_get_one::<String>("psk")?.unwrap().clone();
         let expires = matches.try_get_one::<u64>("expires")?.copied();
+        let mode = matches
+            .try_get_one::<Mode>("mode")?
+            .unwrap_or(&Mode::default())
+            .clone();
         Ok(Self {
             address,
             peer_address,
             psk: psk.as_bytes().to_vec(),
             expires,
+            mode,
         })
     }
 }

@@ -8,7 +8,7 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
+    sa::{ChildSaMode, ChosenProposal, ControlMessage, LarvalChildSa, ProtocolError},
     state::{
         self, CreateChildSa, InvalidStateError, SendProtectedMessage, State, StateData,
         StateDataCache, StateError, VerifyMessage,
@@ -89,7 +89,26 @@ fn handle_ike_auth_request(
     .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_r = ?&ts_r, "negotiated TSr");
 
-    let creating_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
+    let notifications: Result<Vec<_>, _> = request
+        .payloads()
+        .filter(|p| matches!(p.ty().assigned(), Some(PayloadType::NOTIFY)))
+        .map(TryInto::<&payload::Notify>::try_into)
+        .collect();
+
+    let notifications = notifications
+        .map_err(|e| StateError::Protocol(ProtocolError::DeserializeError(e.into())))?;
+
+    let use_transport_mode = notifications
+        .into_iter()
+        .find(|n| matches!(n.ty().assigned(), Some(NotifyType::USE_TRANSPORT_MODE)));
+
+    let mode = if use_transport_mode.is_some() {
+        ChildSaMode::Transport
+    } else {
+        ChildSaMode::Tunnel
+    };
+
+    let creating_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, mode, false)?;
     let proposals: Vec<_> = config.ipsec_proposals(&creating_child_sa.spi).collect();
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
@@ -303,7 +322,6 @@ impl State for IkeSaInitResponseSent {
         _data: Arc<RwLock<StateData>>,
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
-        _index: u32,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }

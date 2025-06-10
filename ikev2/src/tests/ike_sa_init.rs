@@ -236,7 +236,7 @@ async fn test_mismatched_message_id() {
         let ts_i = traffic_selector::tests::create_traffic_selector(initiator_addr);
         let ts_r = traffic_selector::tests::create_traffic_selector(responder_addr);
         initiator2
-            .handle_acquire(ts_i, ts_r, 1)
+            .handle_acquire(ts_i, ts_r)
             .await
             .expect("unable to handle acquire");
     });
@@ -304,7 +304,7 @@ async fn test_response_is_request() {
         let ts_i = traffic_selector::tests::create_traffic_selector(initiator_addr);
         let ts_r = traffic_selector::tests::create_traffic_selector(responder_addr);
         initiator2
-            .handle_acquire(ts_i, ts_r, 1)
+            .handle_acquire(ts_i, ts_r)
             .await
             .expect("unable to handle acquire");
     });

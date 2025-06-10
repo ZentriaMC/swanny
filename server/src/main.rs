@@ -6,7 +6,10 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
 };
 use netlink_packet_core::NetlinkPayload;
-use netlink_packet_xfrm::{XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage, address::Address};
+use netlink_packet_xfrm::{
+    XFRM_MODE_TRANSPORT, XFRM_MODE_TUNNEL, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage,
+    address::Address,
+};
 use netlink_proto::sys::{AsyncSocket, SocketAddr};
 use std::net::IpAddr;
 use std::net::UdpSocket as StdUdpSocket;
@@ -19,7 +22,7 @@ use swanny_ikev2::{
         payload::Id,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ControlMessage, IkeSa},
+    sa::{ChildSa, ChildSaMode, ControlMessage, IkeSa},
 };
 use tokio::net::UdpSocket;
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
@@ -71,6 +74,7 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
                 .end_port(0)
         })
         .psk(&config.psk)
+        .mode(config.mode.into())
         .build(id)
         .expect("building config should succeed")
 }
@@ -141,8 +145,14 @@ async fn create_sa(
     integ_key: Option<&AuthenticationKey>,
     cipher_key: &EncryptionKey,
     expires: Option<u64>,
+    mode: ChildSaMode,
 ) -> Result<()> {
     let req = handle.state().add(src_address, dst_address);
+
+    let mode = match mode {
+        ChildSaMode::Transport => XFRM_MODE_TRANSPORT,
+        ChildSaMode::Tunnel => XFRM_MODE_TUNNEL,
+    };
 
     let mut req = req
         .protocol(ipsec_to_xfrm(ipsec_protocol))
@@ -150,7 +160,8 @@ async fn create_sa(
         .byte_limit(u64::MAX, u64::MAX)
         .packet_limit(u64::MAX, u64::MAX)
         .selector_protocol(protocol)
-        .selector_addresses(src_address, 32, dst_address, 32);
+        .selector_addresses(src_address, 32, dst_address, 32)
+        .mode(mode);
 
     if let Some(expires) = expires {
         req = req.time_limit(expires, expires + 10);
@@ -185,7 +196,12 @@ async fn create_sa(
     Ok(req.execute().await?)
 }
 
-async fn create_child_sa(handle: Handle, child_sa: &ChildSa, expires: Option<u64>) -> Result<()> {
+async fn create_child_sa(
+    handle: Handle,
+    child_sa: &ChildSa,
+    expires: Option<u64>,
+    mode: ChildSaMode,
+) -> Result<()> {
     create_sa(
         handle.clone(),
         child_sa.ts_i().start_address(),
@@ -196,6 +212,7 @@ async fn create_child_sa(handle: Handle, child_sa: &ChildSa, expires: Option<u64
         child_sa.keys().ai.as_ref(),
         &child_sa.keys().ei,
         expires,
+        mode,
     )
     .await?;
     debug!("created inbound state");
@@ -209,6 +226,7 @@ async fn create_child_sa(handle: Handle, child_sa: &ChildSa, expires: Option<u64
         child_sa.keys().ar.as_ref(),
         &child_sa.keys().er,
         expires,
+        mode,
     )
     .await?;
     debug!("created outbound state");
@@ -311,7 +329,7 @@ async fn main() -> Result<()> {
                                 &acquire.acquire.selector.daddr,
                                 acquire.acquire.selector.dport,
                             )?;
-                            pending_operations.push(Either::Left(Either::Right(ike_sa.handle_acquire(ts_i, ts_r, acquire.acquire.policy.index))));
+                            pending_operations.push(Either::Left(Either::Right(ike_sa.handle_acquire(ts_i, ts_r))));
                         },
                         XfrmMessage::Expire(expire) => {
                             let spi = expire.expire.state.id.spi.to_be_bytes();
@@ -336,6 +354,7 @@ async fn main() -> Result<()> {
                             handle.clone(),
                             &child_sa,
                             config.expires,
+                            config.mode.into(),
                         ).await?;
                     }
                     ControlMessage::DeleteChildSa(child_sa) => {

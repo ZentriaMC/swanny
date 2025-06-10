@@ -19,6 +19,7 @@ use crate::{
         traffic_selector::TrafficSelector,
         transform::{Attribute, Transform},
     },
+    sa::ChildSaMode,
 };
 
 use std::net::IpAddr;
@@ -226,6 +227,7 @@ pub struct ConfigBuilder {
     inbound_traffic_selectors: Vec<TrafficSelectorBuilder>,
     outbound_traffic_selectors: Vec<TrafficSelectorBuilder>,
     psk: Option<Key>,
+    mode: ChildSaMode,
 }
 
 impl ConfigBuilder {
@@ -256,6 +258,12 @@ impl ConfigBuilder {
     /// Sets the PSK for authentication
     pub fn psk(mut self, psk: impl AsRef<[u8]>) -> Self {
         self.psk = Some(Key::new(psk.as_ref().to_vec()));
+        self
+    }
+
+    /// Sets the Child SA mode
+    pub fn mode(mut self, mode: ChildSaMode) -> Self {
+        self.mode = mode;
         self
     }
 
@@ -298,6 +306,7 @@ impl ConfigBuilder {
             inbound_traffic_selectors: inbound_traffic_selectors?,
             outbound_traffic_selectors: outbound_traffic_selectors?,
             psk: self.psk.take(),
+            mode: self.mode,
             id,
         })
     }
@@ -312,6 +321,7 @@ pub struct Config {
     inbound_traffic_selectors: Vec<TrafficSelector>,
     outbound_traffic_selectors: Vec<TrafficSelector>,
     psk: Option<Key>,
+    mode: ChildSaMode,
     id: Id,
 }
 
@@ -357,6 +367,11 @@ impl Config {
     /// Returns the PSK for authentication if set
     pub fn psk(&self) -> Option<&Key> {
         self.psk.as_ref()
+    }
+
+    /// Returns the mode for Child SA
+    pub fn mode(&self) -> ChildSaMode {
+        self.mode
     }
 
     /// Returns the identity of IKE SA

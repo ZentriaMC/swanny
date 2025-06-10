@@ -8,7 +8,9 @@ use crate::{
         serialize::{DeserializeError, Serialize, SerializeError},
         traffic_selector::TrafficSelector,
     },
-    sa::{ChildSa, ChosenProposal, ControlMessage, Keys, LarvalChildSa, ProtocolError},
+    sa::{
+        ChildSa, ChildSaMode, ChosenProposal, ControlMessage, Keys, LarvalChildSa, ProtocolError,
+    },
 };
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -116,7 +118,6 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         data: Arc<RwLock<StateData>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        index: u32,
     ) -> Result<Box<dyn State>, StateError>;
 
     async fn handle_expire(

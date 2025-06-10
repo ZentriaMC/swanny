@@ -116,7 +116,7 @@ async fn main() -> Result<()> {
     let ts_i = create_traffic_selector(initiator_addr);
     let ts_r = create_traffic_selector(responder_addr);
     initiator
-        .handle_acquire(ts_i, ts_r, 1)
+        .handle_acquire(ts_i, ts_r)
         .await
         .expect("unable to handle acquire");
 

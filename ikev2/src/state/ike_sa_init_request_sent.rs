@@ -7,7 +7,7 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, ProtocolError},
+    sa::{ChildSaMode, ChosenProposal, ControlMessage, ProtocolError},
     state::{
         self, InvalidStateError, SendProtectedMessage, State, StateData, StateDataCache, StateError,
     },
@@ -143,7 +143,10 @@ fn generate_ike_auth_request(
             payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_r.clone()))),
             true,
         ),
-        Payload::new(
+    ]);
+
+    if creating_child_sa.mode == ChildSaMode::Transport {
+        request.add_payloads(Some(Payload::new(
             PayloadType::NOTIFY.into(),
             payload::Content::Notify(payload::Notify::new(
                 Protocol::ESP.into(),
@@ -152,8 +155,8 @@ fn generate_ike_auth_request(
                 b"",
             )),
             true,
-        ),
-    ]);
+        )));
+    }
 
     debug!(request = ?&request, "sending protected request");
 
@@ -237,7 +240,6 @@ impl State for IkeSaInitRequestSent {
         _data: Arc<RwLock<StateData>>,
         _ts_i: &TrafficSelector,
         _ts_r: &TrafficSelector,
-        _index: u32,
     ) -> Result<Box<dyn State>, StateError> {
         Ok(self)
     }

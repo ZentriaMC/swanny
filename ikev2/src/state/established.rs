@@ -11,7 +11,7 @@ use crate::{
     },
     sa::{ChosenProposal, ControlMessage, LarvalChildSa},
     state::{
-        self, ChildSa, CreateChildSa, DeleteChildSa, InvalidStateError, ProtocolError,
+        self, ChildSa, ChildSaMode, CreateChildSa, DeleteChildSa, InvalidStateError, ProtocolError,
         SendProtectedMessage, State, StateData, StateDataCache, StateError, VerifyMessage,
     },
 };
@@ -149,6 +149,7 @@ fn handle_new_child_sa_request(
     ts_r: &payload::Ts,
     nonce_i: &Nonce,
     nonce_r: &Nonce,
+    use_transport_mode: bool,
 ) -> Result<(), StateError> {
     let ts_i =
         TrafficSelector::negotiate(config.inbound_traffic_selectors(), ts_i.traffic_selectors())
@@ -162,7 +163,13 @@ fn handle_new_child_sa_request(
     .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_r = ?&ts_r, "negotiated TSr");
 
-    let creating_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, false)?;
+    let mode = if use_transport_mode {
+        ChildSaMode::Transport
+    } else {
+        ChildSaMode::Tunnel
+    };
+
+    let creating_child_sa = LarvalChildSa::new(config, &ts_i, &ts_r, mode, false)?;
     let proposals: Vec<_> = config.ipsec_proposals(&creating_child_sa.spi).collect();
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
@@ -219,8 +226,12 @@ fn handle_create_child_sa_request(
         .map_err(|e| StateError::Protocol(ProtocolError::DeserializeError(e.into())))?;
 
     let rekey_sa = notifications
-        .into_iter()
+        .iter()
         .find(|n| matches!(n.ty().assigned(), Some(NotifyType::REKEY_SA)));
+
+    let use_transport_mode = notifications
+        .iter()
+        .find(|n| matches!(n.ty().assigned(), Some(NotifyType::USE_TRANSPORT_MODE)));
 
     if let Some(rekey_sa) = rekey_sa {
         // Rekey a Child SA, if a REKEY_SA notification payload present
@@ -238,7 +249,16 @@ fn handle_create_child_sa_request(
         )?;
     } else if let (Some(ts_i), Some(ts_r)) = (ts_i, ts_r) {
         // Create a new Child SA, if TSi and TSr are present
-        handle_new_child_sa_request(config, data, sa, ts_i, ts_r, nonce_i.nonce(), &nonce)?;
+        handle_new_child_sa_request(
+            config,
+            data,
+            sa,
+            ts_i,
+            ts_r,
+            nonce_i.nonce(),
+            &nonce,
+            use_transport_mode.is_some(),
+        )?;
     } else {
         // Otherwise, rekey an IKE SA
     }
@@ -326,7 +346,7 @@ fn generate_new_child_sa_request(
 
     let nonce = Nonce::new()?;
 
-    let creating_child_sa = LarvalChildSa::new(config, ts_i, ts_r, true)?;
+    let creating_child_sa = LarvalChildSa::new(config, ts_i, ts_r, config.mode(), true)?;
     let proposals = &creating_child_sa.proposals;
     if proposals.is_empty() {
         return Err(ConfigError::NoProposalsSet.into());
@@ -354,6 +374,19 @@ fn generate_new_child_sa_request(
             true,
         ),
     ]);
+
+    if creating_child_sa.mode == ChildSaMode::Transport {
+        request.add_payloads(Some(Payload::new(
+            PayloadType::NOTIFY.into(),
+            payload::Content::Notify(payload::Notify::new(
+                Protocol::ESP.into(),
+                Some(&creating_child_sa.spi[..]),
+                NotifyType::USE_TRANSPORT_MODE.into(),
+                b"",
+            )),
+            true,
+        )));
+    }
 
     debug!(request = ?&request, "sending protected request");
 
@@ -579,7 +612,6 @@ impl State for Established {
         data: Arc<RwLock<StateData>>,
         ts_i: &TrafficSelector,
         ts_r: &TrafficSelector,
-        _index: u32,
     ) -> Result<Box<dyn State>, StateError> {
         let default = StateData::default();
         let default = StateDataCache::new_borrowed(&default);
