@@ -85,13 +85,14 @@ async fn test_all_good() {
         _ => panic!("unexpected message"),
     };
 
-    let _child_sa = match messages_r.next().await {
+    let child_sa = match messages_r.next().await {
         Some(ControlMessage::CreateChildSa(child_sa)) => child_sa,
         _ => panic!("unexpected message"),
     };
 
     handle.await.expect("handle should be awaited");
 
+    assert_eq!(child_sa.mode(), ChildSaMode::Transport);
     assert!(responder.in_state(&state::Established {}).await);
 
     let initiator2 = initiator.clone();
@@ -110,6 +111,7 @@ async fn test_all_good() {
 
     handle.await.expect("handle should be awaited");
 
+    assert_eq!(child_sa.mode(), ChildSaMode::Transport);
     assert!(initiator.in_state(&state::Established {}).await);
 
     // Rekeying

@@ -1,10 +1,10 @@
 use crate::{
-    config,
+    config::{self, Config, ConfigBuilder},
     crypto::{Group, Nonce},
     message::{
         Message, Spi,
-        num::{DhId, ExchangeType, MessageFlags, NotifyType, PayloadType},
-        payload::{self, Payload},
+        num::{DhId, EncrId, EsnId, ExchangeType, IdType, IntegId, MessageFlags, NotifyType, PayloadType, Protocol, PrfId},
+        payload::{self, Payload, Id},
         proposal::Proposal,
         serialize::{Deserialize, Serialize},
         traffic_selector,
@@ -351,4 +351,154 @@ async fn test_response_is_request() {
     handle.await.expect("handle should be awaited");
 
     assert!(initiator.in_state(&state::Initial {}).await);
+}
+
+fn create_config_with_mode(mode: ChildSaMode, id: impl AsRef<[u8]>) -> Config {
+    let builder = ConfigBuilder::default();
+    builder
+        .ike_proposal(|pc| {
+            pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
+                .encryption(EncrId::ENCR_AES_CBC, Some(256))
+                .prf(PrfId::PRF_HMAC_SHA1)
+                .integrity(IntegId::AUTH_HMAC_SHA1_96)
+                .dh(DhId::MODP2048)
+                .esn(EsnId::NoEsn)
+                .esn(EsnId::Esn)
+        })
+        .ike_proposal(|pc| {
+            pc.encryption(EncrId::ENCR_AES_CTR, Some(128))
+                .encryption(EncrId::ENCR_AES_CTR, Some(256))
+                .prf(PrfId::PRF_HMAC_SHA1)
+                .integrity(IntegId::AUTH_HMAC_SHA1_96)
+                .dh(DhId::MODP2048)
+        })
+        .ipsec_protocol(Protocol::ESP)
+        .ipsec_proposal(|pc| {
+            pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
+                .encryption(EncrId::ENCR_AES_CBC, Some(256))
+                .prf(PrfId::PRF_HMAC_SHA1)
+                .integrity(IntegId::AUTH_HMAC_SHA1_96)
+                .dh(DhId::MODP2048)
+        })
+        .inbound_traffic_selector(|tc| tc.start_address("192.168.1.2".parse().unwrap()))
+        .inbound_traffic_selector(|tc| tc.start_address("192.168.1.3".parse().unwrap()))
+        .outbound_traffic_selector(|tc| tc.start_address("192.168.1.3".parse().unwrap()))
+        .outbound_traffic_selector(|tc| tc.start_address("192.168.1.2".parse().unwrap()))
+        .psk(b"test test test")
+        .mode(mode)
+        .build(Id::new(IdType::ID_KEY_ID.into(), id.as_ref()))
+        .expect("building config should succeed")
+}
+
+#[tokio::test]
+async fn test_use_transport_mode() {
+    let config = create_config_with_mode(ChildSaMode::Tunnel, b"initiator");
+    let (initiator, mut messages_i) = IkeSa::new(&config).expect("unable to create IKE SA");
+
+    let config = create_config_with_mode(ChildSaMode::Tunnel, b"responder");
+    let (responder, mut messages_r) = IkeSa::new(&config).expect("unable to create IKE SA");
+
+    // Initial exchange
+    assert!(initiator.in_state(&state::Initial {}).await);
+
+    let initiator2 = initiator.clone();
+
+    let handle = tokio::spawn(async move {
+        let initiator_addr: IpAddr = "192.168.1.2".parse().unwrap();
+        let responder_addr: IpAddr = "192.168.1.3".parse().unwrap();
+        let ts_i = traffic_selector::tests::create_traffic_selector(initiator_addr);
+        let ts_r = traffic_selector::tests::create_traffic_selector(responder_addr);
+        initiator2
+            .handle_acquire(ts_i, ts_r)
+            .await
+            .expect("unable to handle acquire");
+    });
+
+    let message = match messages_i.next().await {
+        Some(ControlMessage::IkeMessage(message)) => message,
+        _ => panic!("unexpected message"),
+    };
+
+    handle.await.expect("handle should be awaited");
+
+    assert!(initiator.in_state(&state::IkeSaInitRequestSent {}).await);
+
+    let responder2 = responder.clone();
+
+    let handle = tokio::spawn(async move {
+        responder2
+            .handle_message(message)
+            .await
+            .expect("unable to handle message");
+    });
+
+    let message = match messages_r.next().await {
+        Some(ControlMessage::IkeMessage(message)) => message,
+        _ => panic!("unexpected message"),
+    };
+
+    handle.await.expect("handle should be awaited");
+
+    assert!(responder.in_state(&state::IkeSaInitResponseSent {}).await);
+
+    let initiator2 = initiator.clone();
+
+    let handle = tokio::spawn(async move {
+        initiator2
+            .handle_message(message)
+            .await
+            .expect("unable to handle message");
+    });
+
+    let message = match messages_i.next().await {
+        Some(ControlMessage::IkeMessage(message)) => message,
+        _ => panic!("unexpected message"),
+    };
+
+    handle.await.expect("handle should be awaited");
+
+    assert!(initiator.in_state(&state::IkeAuthRequestSent {}).await);
+
+    let responder2 = responder.clone();
+
+    let handle = tokio::spawn(async move {
+        responder2
+            .handle_message(message)
+            .await
+            .expect("unable to handle message");
+    });
+
+    let message = match messages_r.next().await {
+        Some(ControlMessage::IkeMessage(message)) => message,
+        _ => panic!("unexpected message"),
+    };
+
+    let child_sa = match messages_r.next().await {
+        Some(ControlMessage::CreateChildSa(child_sa)) => child_sa,
+        _ => panic!("unexpected message"),
+    };
+
+    handle.await.expect("handle should be awaited");
+
+    assert_eq!(child_sa.mode(), ChildSaMode::Tunnel);
+    assert!(responder.in_state(&state::Established {}).await);
+
+    let initiator2 = initiator.clone();
+
+    let handle = tokio::spawn(async move {
+        initiator2
+            .handle_message(message)
+            .await
+            .expect("unable to handle message");
+    });
+
+    let child_sa = match messages_i.next().await {
+        Some(ControlMessage::CreateChildSa(child_sa)) => child_sa,
+        _ => panic!("unexpected message"),
+    };
+
+    handle.await.expect("handle should be awaited");
+
+    assert!(initiator.in_state(&state::Established {}).await);
+    assert_eq!(child_sa.mode(), ChildSaMode::Tunnel);
 }
