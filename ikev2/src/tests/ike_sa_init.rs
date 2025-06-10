@@ -358,25 +358,15 @@ fn create_config_with_mode(mode: ChildSaMode, id: impl AsRef<[u8]>) -> Config {
     builder
         .ike_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
-                .encryption(EncrId::ENCR_AES_CBC, Some(256))
                 .prf(PrfId::PRF_HMAC_SHA1)
                 .integrity(IntegId::AUTH_HMAC_SHA1_96)
                 .dh(DhId::MODP2048)
                 .esn(EsnId::NoEsn)
                 .esn(EsnId::Esn)
         })
-        .ike_proposal(|pc| {
-            pc.encryption(EncrId::ENCR_AES_CTR, Some(128))
-                .encryption(EncrId::ENCR_AES_CTR, Some(256))
-                .prf(PrfId::PRF_HMAC_SHA1)
-                .integrity(IntegId::AUTH_HMAC_SHA1_96)
-                .dh(DhId::MODP2048)
-        })
         .ipsec_protocol(Protocol::ESP)
         .ipsec_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
-                .encryption(EncrId::ENCR_AES_CBC, Some(256))
-                .prf(PrfId::PRF_HMAC_SHA1)
                 .integrity(IntegId::AUTH_HMAC_SHA1_96)
                 .dh(DhId::MODP2048)
         })
