@@ -55,23 +55,15 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
         })
         .inbound_traffic_selector(|tc| {
             tc.start_address(config.address)
-                .start_port(0)
-                .end_port(65535)
         })
         .inbound_traffic_selector(|tc| {
             tc.start_address(config.peer_address)
-                .start_port(0)
-                .end_port(0)
         })
         .outbound_traffic_selector(|tc| {
             tc.start_address(config.address)
-                .start_port(0)
-                .end_port(65535)
         })
         .outbound_traffic_selector(|tc| {
             tc.start_address(config.peer_address)
-                .start_port(0)
-                .end_port(0)
         })
         .psk(&config.psk)
         .mode(config.mode.into())
