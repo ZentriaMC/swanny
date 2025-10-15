@@ -27,7 +27,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install dependencies
-      run: dnf install -y cargo clang clippy llvm-devel rustfmt
+      run: dnf install -y cargo clang clippy llvm-devel openssl-devel rustfmt
     - name: Build
       run: cargo build --verbose
     - name: Run tests
