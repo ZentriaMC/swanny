@@ -3,8 +3,11 @@ use crate::{
     crypto::{Group, Nonce},
     message::{
         Message, Spi,
-        num::{DhId, EncrId, EsnId, ExchangeType, IdType, IntegId, MessageFlags, NotifyType, PayloadType, Protocol, PrfId},
-        payload::{self, Payload, Id},
+        num::{
+            DhId, EncrId, EsnId, ExchangeType, IdType, IntegId, MessageFlags, NotifyType,
+            PayloadType, PrfId, Protocol,
+        },
+        payload::{self, Id, Payload},
         proposal::Proposal,
         serialize::{Deserialize, Serialize},
         traffic_selector,

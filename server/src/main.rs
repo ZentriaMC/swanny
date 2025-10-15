@@ -53,18 +53,10 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
                 .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
                 .esn(EsnId::NoEsn)
         })
-        .inbound_traffic_selector(|tc| {
-            tc.start_address(config.address)
-        })
-        .inbound_traffic_selector(|tc| {
-            tc.start_address(config.peer_address)
-        })
-        .outbound_traffic_selector(|tc| {
-            tc.start_address(config.address)
-        })
-        .outbound_traffic_selector(|tc| {
-            tc.start_address(config.peer_address)
-        })
+        .inbound_traffic_selector(|tc| tc.start_address(config.address))
+        .inbound_traffic_selector(|tc| tc.start_address(config.peer_address))
+        .outbound_traffic_selector(|tc| tc.start_address(config.address))
+        .outbound_traffic_selector(|tc| tc.start_address(config.peer_address))
         .psk(&config.psk)
         .mode(config.mode.into())
         .build(id)
