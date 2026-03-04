@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result, anyhow};
+use cidr::IpCidr;
 use clap::{ArgMatches, ValueEnum, arg, command, value_parser};
 use std::fs;
 use std::net::IpAddr;
@@ -27,6 +28,8 @@ impl From<Mode> for ChildSaMode {
 pub struct Config {
     pub address: IpAddr,
     pub peer_address: IpAddr,
+    pub local_ts: Vec<IpCidr>,
+    pub remote_ts: Vec<IpCidr>,
     pub psk: Vec<u8>,
     pub expires: Option<u64>,
     pub mode: Mode,
@@ -56,6 +59,22 @@ impl Config {
                 )
                 .required(true)
                 .value_parser(value_parser!(IpAddr)),
+            )
+            .arg(
+                arg!(
+                    --"local-ts" <CIDR> "Local traffic selector (CIDR, repeatable)"
+                )
+                .required(false)
+                .action(clap::ArgAction::Append)
+                .value_parser(|s: &str| s.parse::<IpCidr>().map_err(|err| err.to_string())),
+            )
+            .arg(
+                arg!(
+                    --"remote-ts" <CIDR> "Remote traffic selector (CIDR, repeatable)"
+                )
+                .required(false)
+                .action(clap::ArgAction::Append)
+                .value_parser(|s: &str| s.parse::<IpCidr>().map_err(|err| err.to_string())),
             )
             .arg(
                 arg!(
@@ -150,9 +169,16 @@ impl Config {
             .map(|if_id| if_id.try_into())
             .transpose()?;
 
+        let local_ts = parse_cidr_array(&config, "local_ts")?
+            .unwrap_or_else(|| vec![IpCidr::new_host(address)]);
+        let remote_ts = parse_cidr_array(&config, "remote_ts")?
+            .unwrap_or_else(|| vec![IpCidr::new_host(peer_address)]);
+
         Ok(Self {
             address,
             peer_address,
+            local_ts,
+            remote_ts,
             psk,
             expires,
             mode,
@@ -163,6 +189,14 @@ impl Config {
     fn from_matches(matches: &ArgMatches) -> Result<Self> {
         let address = *matches.try_get_one::<IpAddr>("address")?.unwrap();
         let peer_address = *matches.try_get_one::<IpAddr>("peer-address")?.unwrap();
+        let local_ts: Vec<IpCidr> = matches
+            .get_many::<IpCidr>("local-ts")
+            .map(|vals| vals.cloned().collect())
+            .unwrap_or_else(|| vec![IpCidr::new_host(address)]);
+        let remote_ts: Vec<IpCidr> = matches
+            .get_many::<IpCidr>("remote-ts")
+            .map(|vals| vals.cloned().collect())
+            .unwrap_or_else(|| vec![IpCidr::new_host(peer_address)]);
         let psk = matches.try_get_one::<String>("psk")?.unwrap().clone();
         let expires = matches.try_get_one::<u64>("expires")?.copied();
         let mode = matches
@@ -173,6 +207,8 @@ impl Config {
         Ok(Self {
             address,
             peer_address,
+            local_ts,
+            remote_ts,
             psk: psk.as_bytes().to_vec(),
             expires,
             mode,
@@ -186,4 +222,24 @@ fn ip_addr_from_value(value: &Value) -> Result<IpAddr> {
         .as_str()
         .ok_or_else(|| anyhow!("value must be string"))?
         .parse()?)
+}
+
+fn parse_cidr_array(config: &Table, key: &str) -> Result<Option<Vec<IpCidr>>> {
+    let Some(value) = config.get(key) else {
+        return Ok(None);
+    };
+    let array = value
+        .as_array()
+        .ok_or_else(|| anyhow!("{key} must be an array"))?;
+    let cidrs: Vec<IpCidr> = array
+        .iter()
+        .map(|v| {
+            let s = v
+                .as_str()
+                .ok_or_else(|| anyhow!("{key} elements must be strings"))?;
+            s.parse::<IpCidr>()
+                .with_context(|| format!("invalid CIDR in {key}: {s}"))
+        })
+        .collect::<Result<_>>()?;
+    Ok(Some(cidrs))
 }

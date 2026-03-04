@@ -1,5 +1,6 @@
 use anyhow::Result;
 use bytes::Bytes;
+use cidr::IpCidr;
 use futures::{
     SinkExt,
     future::Either,
@@ -36,7 +37,7 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
         IpAddr::V4(v4) => Id::new(IdType::ID_IPV4_ADDR.into(), &v4.octets()[..]),
         IpAddr::V6(v6) => Id::new(IdType::ID_IPV6_ADDR.into(), &v6.octets()[..]),
     };
-    ConfigBuilder::default()
+    let mut builder = ConfigBuilder::default()
         .ike_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
                 .prf(PrfId::PRF_HMAC_SHA2_256)
@@ -52,11 +53,30 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
                 .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
                 .esn(EsnId::NoEsn)
-        })
-        .inbound_traffic_selector(|tc| tc.start_address(config.address))
-        .inbound_traffic_selector(|tc| tc.start_address(config.peer_address))
-        .outbound_traffic_selector(|tc| tc.start_address(config.address))
-        .outbound_traffic_selector(|tc| tc.start_address(config.peer_address))
+        });
+
+    for cidr in &config.local_ts {
+        builder = builder.inbound_traffic_selector(|tc| {
+            tc.start_address(cidr.first_address())
+                .end_address(cidr.last_address())
+        });
+        builder = builder.outbound_traffic_selector(|tc| {
+            tc.start_address(cidr.first_address())
+                .end_address(cidr.last_address())
+        });
+    }
+    for cidr in &config.remote_ts {
+        builder = builder.inbound_traffic_selector(|tc| {
+            tc.start_address(cidr.first_address())
+                .end_address(cidr.last_address())
+        });
+        builder = builder.outbound_traffic_selector(|tc| {
+            tc.start_address(cidr.first_address())
+                .end_address(cidr.last_address())
+        });
+    }
+
+    builder
         .psk(&config.psk)
         .mode(config.mode.into())
         .build(id)
@@ -100,29 +120,36 @@ fn ipsec_to_xfrm(ipsec_protocol: Protocol) -> u8 {
 
 async fn create_policy(
     handle: Handle,
-    src_address: IpAddr,
-    dst_address: IpAddr,
+    selector_src: IpAddr,
+    selector_src_prefix: u8,
+    selector_dst: IpAddr,
+    selector_dst_prefix: u8,
+    template_src: IpAddr,
+    template_dst: IpAddr,
     direction: u8,
     ipsec_protocol: Protocol,
     mode: ChildSaMode,
     if_id: Option<u32>,
 ) -> Result<()> {
-    let prefix_len = if src_address.is_ipv4() { 32 } else { 128 };
-
     let xfrm_mode = match mode {
         ChildSaMode::Transport => XFRM_MODE_TRANSPORT,
         ChildSaMode::Tunnel => XFRM_MODE_TUNNEL,
     };
 
     let mut template = UserTemplate::default();
-    template.source(&src_address);
-    template.destination(&dst_address);
+    template.source(&template_src);
+    template.destination(&template_dst);
     template.protocol(ipsec_to_xfrm(ipsec_protocol));
     template.mode(xfrm_mode);
 
     let mut req = handle
         .policy()
-        .add(src_address, prefix_len, dst_address, prefix_len)
+        .add(
+            selector_src,
+            selector_src_prefix,
+            selector_dst,
+            selector_dst_prefix,
+        )
         .direction(direction)
         .priority(1000)
         .add_template(template);
@@ -158,6 +185,8 @@ async fn create_ike_bypass_policy(
 
 async fn install_policies(
     handle: Handle,
+    local_ts: &[IpCidr],
+    remote_ts: &[IpCidr],
     src_address: IpAddr,
     dst_address: IpAddr,
     ipsec_protocol: Protocol,
@@ -172,41 +201,71 @@ async fn install_policies(
     create_ike_bypass_policy(handle.clone(), dst_address, src_address, XFRM_POLICY_FWD).await?;
     debug!("installed IKE bypass policies");
 
-    create_policy(
-        handle.clone(),
-        src_address,
-        dst_address,
-        XFRM_POLICY_OUT,
-        ipsec_protocol,
-        mode,
-        if_id,
-    )
-    .await?;
-    debug!("installed outbound policy");
+    for local in local_ts {
+        for remote in remote_ts {
+            let local_addr = local.first_address();
+            let local_prefix = local.network_length();
+            let remote_addr = remote.first_address();
+            let remote_prefix = remote.network_length();
 
-    create_policy(
-        handle.clone(),
-        dst_address,
-        src_address,
-        XFRM_POLICY_IN,
-        ipsec_protocol,
-        mode,
-        if_id,
-    )
-    .await?;
-    debug!("installed inbound policy");
+            create_policy(
+                handle.clone(),
+                local_addr,
+                local_prefix,
+                remote_addr,
+                remote_prefix,
+                src_address,
+                dst_address,
+                XFRM_POLICY_OUT,
+                ipsec_protocol,
+                mode,
+                if_id,
+            )
+            .await?;
+            debug!(
+                local = %local, remote = %remote,
+                "installed outbound policy"
+            );
 
-    create_policy(
-        handle.clone(),
-        dst_address,
-        src_address,
-        XFRM_POLICY_FWD,
-        ipsec_protocol,
-        mode,
-        if_id,
-    )
-    .await?;
-    debug!("installed forward policy");
+            create_policy(
+                handle.clone(),
+                remote_addr,
+                remote_prefix,
+                local_addr,
+                local_prefix,
+                dst_address,
+                src_address,
+                XFRM_POLICY_IN,
+                ipsec_protocol,
+                mode,
+                if_id,
+            )
+            .await?;
+            debug!(
+                local = %local, remote = %remote,
+                "installed inbound policy"
+            );
+
+            create_policy(
+                handle.clone(),
+                remote_addr,
+                remote_prefix,
+                local_addr,
+                local_prefix,
+                dst_address,
+                src_address,
+                XFRM_POLICY_FWD,
+                ipsec_protocol,
+                mode,
+                if_id,
+            )
+            .await?;
+            debug!(
+                local = %local, remote = %remote,
+                "installed forward policy"
+            );
+        }
+    }
 
     info!("XFRM policies installed");
     Ok(())
@@ -248,7 +307,7 @@ async fn create_sa(
 ) -> Result<()> {
     let req = handle.state().add(src_address, dst_address);
 
-    let mode = match mode {
+    let xfrm_mode = match mode {
         ChildSaMode::Transport => XFRM_MODE_TRANSPORT,
         ChildSaMode::Tunnel => XFRM_MODE_TUNNEL,
     };
@@ -258,9 +317,22 @@ async fn create_sa(
         .spi(u32::from_be_bytes(*spi))
         .byte_limit(u64::MAX, u64::MAX)
         .packet_limit(u64::MAX, u64::MAX)
-        .selector_protocol(protocol)
-        .selector_addresses(src_address, 32, dst_address, 32)
-        .mode(mode);
+        .mode(xfrm_mode);
+
+    // In transport mode, set explicit selectors matching the endpoints.
+    // In tunnel mode, leave the default 0/0 selector — traffic matching
+    // is handled by XFRM policy + if_id.
+    match mode {
+        ChildSaMode::Transport => {
+            req = req.selector_protocol(protocol).selector_addresses(
+                src_address,
+                32,
+                dst_address,
+                32,
+            );
+        }
+        ChildSaMode::Tunnel => {}
+    }
 
     if let Some(expires) = expires {
         req = req.time_limit(expires, expires + 10);
@@ -302,14 +374,45 @@ async fn create_sa(
 async fn create_child_sa(
     handle: Handle,
     child_sa: &ChildSa,
+    local_ts: &[IpCidr],
+    src_address: IpAddr,
+    dst_address: IpAddr,
     expires: Option<u64>,
     mode: ChildSaMode,
     if_id: Option<u32>,
 ) -> Result<()> {
+    // Resolve SA endpoint addresses per direction.  In transport mode the
+    // SA endpoints equal the traffic-selector addresses.  In tunnel mode
+    // they are the outer tunnel endpoints (config.address / peer_address).
+    //
+    // ts_i always covers the IKE *initiator's* traffic.  Comparing against
+    // local_ts tells us whether we are the initiator or the responder so
+    // we can assign the tunnel endpoints to the right direction.
+    let (fwd_src, fwd_dst, rev_src, rev_dst) = match mode {
+        ChildSaMode::Transport => (
+            child_sa.ts_i().start_address(),
+            child_sa.ts_r().start_address(),
+            child_sa.ts_r().start_address(),
+            child_sa.ts_i().start_address(),
+        ),
+        ChildSaMode::Tunnel => {
+            let ts_i_is_local = local_ts
+                .iter()
+                .any(|cidr| cidr.contains(&child_sa.ts_i().start_address()));
+            if ts_i_is_local {
+                // We are the initiator: ts_i direction = local → remote
+                (src_address, dst_address, dst_address, src_address)
+            } else {
+                // We are the responder: ts_i direction = remote → local
+                (dst_address, src_address, src_address, dst_address)
+            }
+        }
+    };
+
     create_sa(
         handle.clone(),
-        child_sa.ts_i().start_address(),
-        child_sa.ts_r().start_address(),
+        fwd_src,
+        fwd_dst,
         child_sa.ts_i().ip_proto(),
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_r(),
@@ -323,8 +426,8 @@ async fn create_child_sa(
     debug!("created inbound state");
     create_sa(
         handle.clone(),
-        child_sa.ts_r().start_address(),
-        child_sa.ts_i().start_address(),
+        rev_src,
+        rev_dst,
         child_sa.ts_r().ip_proto(),
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_i(),
@@ -355,11 +458,37 @@ async fn delete_sa(
     Ok(req.execute().await?)
 }
 
-async fn delete_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
+async fn delete_child_sa(
+    handle: Handle,
+    child_sa: &ChildSa,
+    local_ts: &[IpCidr],
+    src_address: IpAddr,
+    dst_address: IpAddr,
+    mode: ChildSaMode,
+) -> Result<()> {
+    let (fwd_src, fwd_dst, rev_src, rev_dst) = match mode {
+        ChildSaMode::Transport => (
+            child_sa.ts_i().start_address(),
+            child_sa.ts_r().start_address(),
+            child_sa.ts_r().start_address(),
+            child_sa.ts_i().start_address(),
+        ),
+        ChildSaMode::Tunnel => {
+            let ts_i_is_local = local_ts
+                .iter()
+                .any(|cidr| cidr.contains(&child_sa.ts_i().start_address()));
+            if ts_i_is_local {
+                (src_address, dst_address, dst_address, src_address)
+            } else {
+                (dst_address, src_address, src_address, dst_address)
+            }
+        }
+    };
+
     delete_sa(
         handle.clone(),
-        child_sa.ts_i().start_address(),
-        child_sa.ts_r().start_address(),
+        fwd_src,
+        fwd_dst,
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_r(),
     )
@@ -367,8 +496,8 @@ async fn delete_child_sa(handle: Handle, child_sa: &ChildSa) -> Result<()> {
     debug!("deleted inbound state");
     delete_sa(
         handle.clone(),
-        child_sa.ts_r().start_address(),
-        child_sa.ts_i().start_address(),
+        rev_src,
+        rev_dst,
         child_sa.chosen_proposal().protocol(),
         child_sa.spi_i(),
     )
@@ -401,6 +530,8 @@ async fn main() -> Result<()> {
 
     install_policies(
         handle.clone(),
+        &config.local_ts,
+        &config.remote_ts,
         config.address,
         config.peer_address,
         Protocol::ESP,
@@ -469,6 +600,9 @@ async fn main() -> Result<()> {
                         create_child_sa(
                             handle.clone(),
                             &child_sa,
+                            &config.local_ts,
+                            config.address,
+                            config.peer_address,
                             config.expires,
                             config.mode.into(),
                             config.if_id,
@@ -478,6 +612,10 @@ async fn main() -> Result<()> {
                         delete_child_sa(
                             handle.clone(),
                             &child_sa,
+                            &config.local_ts,
+                            config.address,
+                            config.peer_address,
+                            config.mode.into(),
                         ).await?;
                     }
                 }

@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
+cidr.workspace = true
 clap = { workspace = true, features = ["cargo", "derive"] }
 futures.workspace = true
 libc.workspace = true
