@@ -7,8 +7,8 @@ use futures::{
 };
 use netlink_packet_core::NetlinkPayload;
 use netlink_packet_xfrm::{
-    XFRM_MODE_TRANSPORT, XFRM_MODE_TUNNEL, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage,
-    address::Address,
+    UserTemplate, XFRM_MODE_TRANSPORT, XFRM_MODE_TUNNEL, XFRM_POLICY_FWD, XFRM_POLICY_IN,
+    XFRM_POLICY_OUT, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage, address::Address,
 };
 use netlink_proto::sys::{AsyncSocket, SocketAddr};
 use std::net::IpAddr;
@@ -98,6 +98,120 @@ fn ipsec_to_xfrm(ipsec_protocol: Protocol) -> u8 {
     }
 }
 
+async fn create_policy(
+    handle: Handle,
+    src_address: IpAddr,
+    dst_address: IpAddr,
+    direction: u8,
+    ipsec_protocol: Protocol,
+    mode: ChildSaMode,
+    if_id: Option<u32>,
+) -> Result<()> {
+    let prefix_len = if src_address.is_ipv4() { 32 } else { 128 };
+
+    let xfrm_mode = match mode {
+        ChildSaMode::Transport => XFRM_MODE_TRANSPORT,
+        ChildSaMode::Tunnel => XFRM_MODE_TUNNEL,
+    };
+
+    let mut template = UserTemplate::default();
+    template.source(&src_address);
+    template.destination(&dst_address);
+    template.protocol(ipsec_to_xfrm(ipsec_protocol));
+    template.mode(xfrm_mode);
+
+    let mut req = handle
+        .policy()
+        .add(src_address, prefix_len, dst_address, prefix_len)
+        .direction(direction)
+        .priority(1000)
+        .add_template(template);
+
+    if let Some(id) = if_id {
+        req = req.ifid(id);
+    }
+
+    Ok(req.execute().await?)
+}
+
+async fn create_ike_bypass_policy(
+    handle: Handle,
+    src_address: IpAddr,
+    dst_address: IpAddr,
+    direction: u8,
+) -> Result<()> {
+    let prefix_len = if src_address.is_ipv4() { 32 } else { 128 };
+
+    // No template = bypass (allow without IPsec transforms)
+    handle
+        .policy()
+        .add(src_address, prefix_len, dst_address, prefix_len)
+        .direction(direction)
+        .priority(500)
+        .selector_protocol(libc::IPPROTO_UDP.try_into().expect("value out of range"))
+        .selector_protocol_dst_port(500)
+        .execute()
+        .await?;
+
+    Ok(())
+}
+
+async fn install_policies(
+    handle: Handle,
+    src_address: IpAddr,
+    dst_address: IpAddr,
+    ipsec_protocol: Protocol,
+    mode: ChildSaMode,
+    if_id: Option<u32>,
+) -> Result<()> {
+    // Bypass policies for IKE traffic (UDP port 500) so SA negotiation
+    // can proceed without IPsec — evaluated before ESP policies due to
+    // higher priority (lower number).
+    create_ike_bypass_policy(handle.clone(), src_address, dst_address, XFRM_POLICY_OUT).await?;
+    create_ike_bypass_policy(handle.clone(), dst_address, src_address, XFRM_POLICY_IN).await?;
+    create_ike_bypass_policy(handle.clone(), dst_address, src_address, XFRM_POLICY_FWD).await?;
+    debug!("installed IKE bypass policies");
+
+    create_policy(
+        handle.clone(),
+        src_address,
+        dst_address,
+        XFRM_POLICY_OUT,
+        ipsec_protocol,
+        mode,
+        if_id,
+    )
+    .await?;
+    debug!("installed outbound policy");
+
+    create_policy(
+        handle.clone(),
+        dst_address,
+        src_address,
+        XFRM_POLICY_IN,
+        ipsec_protocol,
+        mode,
+        if_id,
+    )
+    .await?;
+    debug!("installed inbound policy");
+
+    create_policy(
+        handle.clone(),
+        dst_address,
+        src_address,
+        XFRM_POLICY_FWD,
+        ipsec_protocol,
+        mode,
+        if_id,
+    )
+    .await?;
+    debug!("installed forward policy");
+
+    info!("XFRM policies installed");
+    Ok(())
+}
+
 fn integ_to_xfrm(integ: &Integ) -> (&'static str, usize) {
     match integ.id() {
         IntegId::AUTH_HMAC_MD5_96 => ("hmac(md5)", 12),
@@ -130,6 +244,7 @@ async fn create_sa(
     cipher_key: &EncryptionKey,
     expires: Option<u64>,
     mode: ChildSaMode,
+    if_id: Option<u32>,
 ) -> Result<()> {
     let req = handle.state().add(src_address, dst_address);
 
@@ -177,6 +292,10 @@ async fn create_sa(
         req = req.encryption(alg_name, &cipher_key.key().as_ref().to_vec())?;
     }
 
+    if let Some(id) = if_id {
+        req = req.ifid(id);
+    }
+
     Ok(req.execute().await?)
 }
 
@@ -185,6 +304,7 @@ async fn create_child_sa(
     child_sa: &ChildSa,
     expires: Option<u64>,
     mode: ChildSaMode,
+    if_id: Option<u32>,
 ) -> Result<()> {
     create_sa(
         handle.clone(),
@@ -197,6 +317,7 @@ async fn create_child_sa(
         &child_sa.keys().ei,
         expires,
         mode,
+        if_id,
     )
     .await?;
     debug!("created inbound state");
@@ -211,6 +332,7 @@ async fn create_child_sa(
         &child_sa.keys().er,
         expires,
         mode,
+        if_id,
     )
     .await?;
     debug!("created outbound state");
@@ -277,6 +399,16 @@ async fn main() -> Result<()> {
 
     tokio::spawn(connection);
 
+    install_policies(
+        handle.clone(),
+        config.address,
+        config.peer_address,
+        Protocol::ESP,
+        config.mode.into(),
+        config.if_id,
+    )
+    .await?;
+
     let incoming_socket = StdUdpSocket::bind((config.address, 500))?;
     incoming_socket.set_nonblocking(true)?;
     let incoming_socket = UdpSocket::from_std(incoming_socket)?;
@@ -339,6 +471,7 @@ async fn main() -> Result<()> {
                             &child_sa,
                             config.expires,
                             config.mode.into(),
+                            config.if_id,
                         ).await?;
                     }
                     ControlMessage::DeleteChildSa(child_sa) => {

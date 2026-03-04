@@ -30,16 +30,9 @@ This will create a network topology like:
 
 You can monitor IKE traffic over "bridge" with wireshark.
 
-### Installing XFRM policies
-
-```console
-$ sudo tests/setup-policies.sh ns1 ns2
-```
-
-This will install policies to require protection of ICMP traffic
-between ns1 and ns2.
-
 ### Running the server
+
+The server installs XFRM policies automatically on startup.
 
 On one terminal:
 ```console
@@ -61,12 +54,11 @@ $ sudo ip netns exec ns2 ping 192.168.1.1
 
 ### Testing against libreswan
 
-Follow the previous steps to set up network namespaces, but flush XFRM
-policies on one of them:
+Follow the previous steps to set up network namespaces, then flush XFRM
+policies on the namespace where libreswan will run (it manages its own):
 
 ```console
 $ sudo tests/setup-netns.sh ns1 ns2 bridge
-$ sudo tests/setup-policies.sh ns1 ns2
 $ sudo ip netns exec ns2 ip x p flush
 ```
 

@@ -165,18 +165,14 @@ fh_ssh --wait 30 -- true
 echo ">>> Deploying swanny and test scripts..."
 scp "${scp_opts[@]}" "${swanny_bin}" core@127.0.0.1:/tmp/swanny
 scp "${scp_opts[@]}" "${root}/tests/setup-netns.sh" core@127.0.0.1:/tmp/setup-netns.sh
-scp "${scp_opts[@]}" "${root}/tests/setup-policies.sh" core@127.0.0.1:/tmp/setup-policies.sh
 
-fh_ssh -- "chmod +x /tmp/swanny /tmp/setup-netns.sh /tmp/setup-policies.sh"
+fh_ssh -- "chmod +x /tmp/swanny /tmp/setup-netns.sh"
 
 # ---------------------------------------------------------------------------
-# Set up network namespaces and XFRM policies
+# Set up network namespaces
 # ---------------------------------------------------------------------------
 echo ">>> Setting up network namespaces..."
 fh_ssh -- "sudo /tmp/setup-netns.sh ns1 ns2"
-
-echo ">>> Installing XFRM policies..."
-fh_ssh -- "sudo /tmp/setup-policies.sh ns1 ns2"
 
 # ---------------------------------------------------------------------------
 # Start swanny in both namespaces
@@ -194,13 +190,12 @@ fh_ssh -- "sudo ip netns exec ns1 /tmp/swanny \
     </dev/null >/tmp/swanny-ns1.log 2>&1 &"
 
 # ---------------------------------------------------------------------------
-# Wait for IKE negotiation and validate with ping
+# Validate with ping (first packet triggers XFRM acquire + IKE negotiation,
+# so we send enough packets with a long enough timeout for the SA to be
+# established mid-stream)
 # ---------------------------------------------------------------------------
-echo ">>> Waiting for IKE negotiation..."
-sleep 5
-
 echo ">>> Verifying IPsec SA with ping..."
-if fh_ssh -- "sudo ip netns exec ns1 ping -c 3 -W 5 192.168.1.2"; then
+if fh_ssh -- "sudo ip netns exec ns1 ping -c 10 -W 10 192.168.1.2"; then
     echo ">>> PASS: ping succeeded over IPsec"
 else
     echo ">>> FAIL: ping failed — IKE negotiation or SA installation may have failed"

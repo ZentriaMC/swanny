@@ -30,6 +30,7 @@ pub struct Config {
     pub psk: Vec<u8>,
     pub expires: Option<u64>,
     pub mode: Mode,
+    pub if_id: Option<u32>,
 }
 
 impl Config {
@@ -75,6 +76,13 @@ impl Config {
                 )
                 .required(false)
                 .value_parser(value_parser!(Mode)),
+            )
+            .arg(
+                arg!(
+                    --"if-id" <ID> "XFRM interface ID"
+                )
+                .required(false)
+                .value_parser(value_parser!(u32)),
             )
             .get_matches();
 
@@ -131,12 +139,24 @@ impl Config {
             Some(mode) => return Err(anyhow!("unknown Child SA mode: {}", mode)),
         };
 
+        let if_id: Option<u32> = config
+            .get("if_id")
+            .map(|if_id| {
+                if_id
+                    .as_integer()
+                    .ok_or_else(|| anyhow!("value must be integer"))
+            })
+            .transpose()?
+            .map(|if_id| if_id.try_into())
+            .transpose()?;
+
         Ok(Self {
             address,
             peer_address,
             psk,
             expires,
             mode,
+            if_id,
         })
     }
 
@@ -149,12 +169,14 @@ impl Config {
             .try_get_one::<Mode>("mode")?
             .unwrap_or(&Mode::default())
             .clone();
+        let if_id = matches.try_get_one::<u32>("if-id")?.copied();
         Ok(Self {
             address,
             peer_address,
             psk: psk.as_bytes().to_vec(),
             expires,
             mode,
+            if_id,
         })
     }
 }
