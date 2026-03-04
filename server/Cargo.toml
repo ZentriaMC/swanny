@@ -6,6 +6,9 @@ edition.workspace = true
 authors.workspace = true
 license = "GPL-2.0-or-later"
 
+[features]
+vendored-openssl = ["swanny-ikev2/vendored-openssl"]
+
 [[bin]]
 name = "swanny"
 path = "src/main.rs"

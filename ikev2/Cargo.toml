@@ -6,6 +6,9 @@ edition.workspace = true
 authors.workspace = true
 license = "LGPL-2.1-or-later"
 
+[features]
+vendored-openssl = ["openssl/vendored"]
+
 [dependencies]
 async-trait.workspace = true
 bitflags.workspace = true
