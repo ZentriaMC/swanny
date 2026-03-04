@@ -1,0 +1,12 @@
+---
+command:
+  ssh-accessible:
+    exec: "whoami"
+    exit-status: 0
+    stdout:
+      - "core"
+  sudo-works:
+    exec: "sudo whoami"
+    exit-status: 0
+    stdout:
+      - "root"
