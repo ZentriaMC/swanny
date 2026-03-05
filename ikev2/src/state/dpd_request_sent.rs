@@ -2,15 +2,14 @@ use crate::{
     config::Config,
     message::{
         EspSpi, ProtectedMessage,
-        num::{ExchangeType, MessageFlags, PayloadType},
-        payload,
+        num::{ExchangeType, MessageFlags},
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
     sa::ControlMessage,
     state::{
-        DeleteChildSa, Established, ProtocolError, SendProtectedMessage, State, StateData,
-        StateDataCache, StateError, VerifyMessage, generate_informational_error,
+        Established, ProtocolError, SendProtectedMessage, State, StateData, StateDataCache,
+        StateError, VerifyMessage, generate_informational_error,
     },
 };
 use async_trait::async_trait;
@@ -19,48 +18,19 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-pub struct DeleteChildSaRequestSent;
+pub struct DpdRequestSent;
 
-impl SendProtectedMessage for DeleteChildSaRequestSent {}
-impl VerifyMessage for DeleteChildSaRequestSent {}
-impl DeleteChildSa for DeleteChildSaRequestSent {}
+impl SendProtectedMessage for DpdRequestSent {}
+impl VerifyMessage for DpdRequestSent {}
 
-impl std::fmt::Display for DeleteChildSaRequestSent {
+impl std::fmt::Display for DpdRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        f.debug_struct("DeleteChildSaRequestSent").finish()
+        f.debug_struct("DpdRequestSent").finish()
     }
 }
 
-fn handle_informational_response(
-    data: &mut StateDataCache<'_>,
-    response: &ProtectedMessage,
-) -> Result<(), StateError> {
-    let response = response
-        .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
-        .map_err(|e| StateError::Protocol(e.into()))?;
-
-    debug!(response = ?&response, "received protected response");
-
-    let delete: Option<&payload::Delete> = response.get(PayloadType::DELETE);
-    if let Some(delete) = delete {
-        for spi in delete.spis() {
-            let child_sas = data.child_sas.to_mut();
-            let index = child_sas
-                .iter()
-                .position(|child_sa| child_sa.chosen_proposal().spi() == spi);
-            if let Some(index) = index {
-                let child_sa = child_sas.swap_remove(index);
-                data.deleted_child_sas.to_mut().push(child_sa);
-            }
-        }
-    }
-    *data.last_request.to_mut() = None;
-    Ok(())
-}
-
-impl DeleteChildSaRequestSent {
+impl DpdRequestSent {
     async fn handle_response(
-        _config: &Config,
         sender: UnboundedSender<ControlMessage>,
         data: &mut StateDataCache<'_>,
         mut message: &[u8],
@@ -84,12 +54,11 @@ impl DeleteChildSaRequestSent {
 
         match response.exchange().assigned() {
             Some(ExchangeType::INFORMATIONAL) => {
-                handle_informational_response(data, &response)?;
-
-                for child_sa in data.deleted_child_sas.iter() {
-                    Self::delete_child_sa(sender.clone(), child_sa.clone())?;
-                }
-                data.deleted_child_sas.to_mut().clear();
+                let response = response
+                    .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
+                    .map_err(|e| StateError::Protocol(e.into()))?;
+                debug!(response = ?&response, "received DPD response");
+                *data.last_request.to_mut() = None;
             }
             _ => {
                 return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
@@ -101,10 +70,10 @@ impl DeleteChildSaRequestSent {
 }
 
 #[async_trait]
-impl State for DeleteChildSaRequestSent {
+impl State for DpdRequestSent {
     async fn handle_message(
         self: Box<Self>,
-        config: &Config,
+        _config: &Config,
         sender: UnboundedSender<ControlMessage>,
         data: Arc<RwLock<StateData>>,
         message: &[u8],
@@ -116,9 +85,8 @@ impl State for DeleteChildSaRequestSent {
             let data = data.read().await;
             let mut data = StateDataCache::new_borrowed(&data);
 
-            if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
-            {
-                debug!(error = ?e, "error processing INFORMATIONAL response for deleting Child SA");
+            if let Err(err) = Self::handle_response(sender.clone(), &mut data, message).await {
+                debug!(?err, "error processing DPD response");
                 return Ok(Box::new(Established {}));
             }
 

@@ -559,6 +559,22 @@ fn generate_new_child_sa_request(
     Ok(request)
 }
 
+fn generate_dpd_request(data: &StateDataCache<'_>) -> Result<ProtectedMessage, StateError> {
+    let request = Message::new(
+        data.initiator_spi()?,
+        data.responder_spi()?,
+        ExchangeType::INFORMATIONAL.into(),
+        MessageFlags::I,
+        *data.message_id,
+    );
+
+    debug!(request = ?&request, "sending DPD request");
+
+    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
+
+    Ok(request)
+}
+
 fn generate_delete_child_sa_request(
     data: &StateDataCache<'_>,
     child_sa: &ChildSa,
@@ -947,6 +963,32 @@ impl State for Established {
         }
 
         Ok(Box::new(state::RekeyIkeSaRequestSent {}))
+    }
+
+    async fn handle_dpd(
+        self: Box<Self>,
+        _config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+    ) -> Result<Box<dyn State>, StateError> {
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
+
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            let request = generate_dpd_request(&data)?;
+            Self::send_message(sender.clone(), &mut data, request)?;
+            data.swap(&default)
+        };
+
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
+        }
+
+        Ok(Box::new(state::DpdRequestSent {}))
     }
 
     #[cfg(test)]

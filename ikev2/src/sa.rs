@@ -320,6 +320,30 @@ impl IkeSa {
 
         Ok(())
     }
+
+    /// Sends a Dead Peer Detection probe
+    pub async fn handle_dpd(&self) -> Result<(), StateError> {
+        let mut state = self.state.lock().await;
+        if let Some(old_state) = state.take() {
+            let old_state_name = old_state.to_string();
+
+            let new_state = old_state
+                .handle_dpd(
+                    &self.config,
+                    self.sender.clone(),
+                    self.data.clone(),
+                )
+                .await?;
+
+            let new_state_name = new_state.to_string();
+
+            *state = Some(new_state);
+
+            info!("state transitioned from {old_state_name} to {new_state_name}");
+        }
+
+        Ok(())
+    }
 }
 
 /// Cryptograhic proposal negotiated with the peer

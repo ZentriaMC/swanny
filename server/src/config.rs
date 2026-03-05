@@ -33,6 +33,7 @@ pub struct Config {
     pub psk: Vec<u8>,
     pub expires: Option<u64>,
     pub ike_lifetime: Option<u64>,
+    pub dpd_interval: Option<u64>,
     pub mode: Mode,
     pub if_id: Option<u32>,
     pub strict_ts: bool,
@@ -94,6 +95,13 @@ impl Config {
             .arg(
                 arg!(
                     --"ike-lifetime" <SECONDS> "IKE SA lifetime in seconds (triggers rekey)"
+                )
+                .required(false)
+                .value_parser(value_parser!(u64)),
+            )
+            .arg(
+                arg!(
+                    --"dpd-interval" <SECONDS> "Dead Peer Detection interval in seconds"
                 )
                 .required(false)
                 .value_parser(value_parser!(u64)),
@@ -174,6 +182,16 @@ impl Config {
             .map(|v| v.try_into())
             .transpose()?;
 
+        let dpd_interval: Option<u64> = config
+            .get("dpd_interval")
+            .map(|v| {
+                v.as_integer()
+                    .ok_or_else(|| anyhow!("value must be integer"))
+            })
+            .transpose()?
+            .map(|v| v.try_into())
+            .transpose()?;
+
         let mode = match config
             .get("mode")
             .map(|mode| mode.as_str().ok_or_else(|| anyhow!("value must be string")))
@@ -214,6 +232,7 @@ impl Config {
             psk,
             expires,
             ike_lifetime,
+            dpd_interval,
             mode,
             if_id,
             strict_ts,
@@ -234,6 +253,7 @@ impl Config {
         let psk = matches.try_get_one::<String>("psk")?.unwrap().clone();
         let expires = matches.try_get_one::<u64>("expires")?.copied();
         let ike_lifetime = matches.try_get_one::<u64>("ike-lifetime")?.copied();
+        let dpd_interval = matches.try_get_one::<u64>("dpd-interval")?.copied();
         let mode = matches
             .try_get_one::<Mode>("mode")?
             .unwrap_or(&Mode::default())
@@ -248,6 +268,7 @@ impl Config {
             psk: psk.as_bytes().to_vec(),
             expires,
             ike_lifetime,
+            dpd_interval,
             mode,
             if_id,
             strict_ts,

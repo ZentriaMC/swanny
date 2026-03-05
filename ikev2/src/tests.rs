@@ -1,5 +1,6 @@
 mod all_good;
 mod create_child_sa;
+mod dpd;
 mod ike_auth;
 mod ike_sa_init;
 

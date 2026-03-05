@@ -50,6 +50,9 @@ pub(crate) use rekey_child_sa_request_sent::RekeyChildSaRequestSent;
 mod rekey_ike_sa_request_sent;
 pub(crate) use rekey_ike_sa_request_sent::RekeyIkeSaRequestSent;
 
+mod dpd_request_sent;
+pub(crate) use dpd_request_sent::DpdRequestSent;
+
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidStateError {
     #[error("no proposal chosen")]
@@ -133,6 +136,13 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
     ) -> Result<Box<dyn State>, StateError>;
 
     async fn handle_rekey_ike_sa(
+        self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+    ) -> Result<Box<dyn State>, StateError>;
+
+    async fn handle_dpd(
         self: Box<Self>,
         config: &Config,
         sender: UnboundedSender<ControlMessage>,

@@ -570,6 +570,12 @@ async fn main() -> Result<()> {
         .unwrap_or(std::time::Duration::from_secs(u64::MAX));
     let mut ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
 
+    let dpd_interval = config
+        .dpd_interval
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(std::time::Duration::from_secs(u64::MAX));
+    let mut dpd_timer = sleep(dpd_interval).boxed().fuse();
+
     loop {
         futures::select! {
             netlink_message = xfrm_messages.select_next_some() => {
@@ -628,6 +634,7 @@ async fn main() -> Result<()> {
                 match result {
                     Ok((message, _peer_address)) => {
                         pending_operations.push(ike_sa.handle_message(message.to_vec()).boxed_local());
+                        dpd_timer = sleep(dpd_interval).boxed().fuse();
                     },
                     Err(e) => {
                         debug!(error = %e, "error receiving IKEv2 message");
@@ -638,6 +645,11 @@ async fn main() -> Result<()> {
                 info!("IKE SA lifetime expired, initiating rekey");
                 pending_operations.push(ike_sa.handle_rekey_ike_sa().boxed_local());
                 ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
+            }
+            _ = &mut dpd_timer => {
+                debug!("DPD interval expired, sending probe");
+                pending_operations.push(ike_sa.handle_dpd().boxed_local());
+                dpd_timer = sleep(dpd_interval).boxed().fuse();
             }
             result = pending_operations.select_next_some() => {
                 debug!(result = ?result, "pending operation completed");
