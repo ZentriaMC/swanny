@@ -228,6 +228,7 @@ pub struct ConfigBuilder {
     outbound_traffic_selectors: Vec<TrafficSelectorBuilder>,
     psk: Option<Key>,
     mode: ChildSaMode,
+    strict_ts: bool,
 }
 
 impl ConfigBuilder {
@@ -287,6 +288,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Enables strict traffic selector matching (exact match instead of narrowing)
+    pub fn strict_ts(mut self, strict: bool) -> Self {
+        self.strict_ts = strict;
+        self
+    }
+
     /// Turn this `ConfigBuilder` into an actual `Config`
     pub fn build(mut self, id: Id) -> Result<Config, ConfigError> {
         let inbound_traffic_selectors: Result<Vec<_>, _> = self
@@ -307,6 +314,7 @@ impl ConfigBuilder {
             outbound_traffic_selectors: outbound_traffic_selectors?,
             psk: self.psk.take(),
             mode: self.mode,
+            strict_ts: self.strict_ts,
             id,
         })
     }
@@ -322,6 +330,7 @@ pub struct Config {
     outbound_traffic_selectors: Vec<TrafficSelector>,
     psk: Option<Key>,
     mode: ChildSaMode,
+    strict_ts: bool,
     id: Id,
 }
 
@@ -374,6 +383,11 @@ impl Config {
         self.mode
     }
 
+    /// Returns whether strict traffic selector matching is enabled
+    pub fn strict_ts(&self) -> bool {
+        self.strict_ts
+    }
+
     /// Returns the identity of IKE SA
     pub fn id(&self) -> &Id {
         &self.id
@@ -417,6 +431,43 @@ pub(crate) mod tests {
             .outbound_traffic_selector(|tc| tc.start_address("192.168.1.3".parse().unwrap()))
             .outbound_traffic_selector(|tc| tc.start_address("192.168.1.2".parse().unwrap()))
             .psk(b"test test test")
+            .build(Id::new(IdType::ID_KEY_ID.into(), id.as_ref()))
+            .expect("building config should succeed")
+    }
+
+    pub(crate) fn create_strict_config(id: impl AsRef<[u8]>) -> Config {
+        let builder = ConfigBuilder::default();
+        builder
+            .ike_proposal(|pc| {
+                pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
+                    .encryption(EncrId::ENCR_AES_CBC, Some(256))
+                    .prf(PrfId::PRF_HMAC_SHA1)
+                    .integrity(IntegId::AUTH_HMAC_SHA1_96)
+                    .dh(DhId::MODP2048)
+                    .esn(EsnId::NoEsn)
+                    .esn(EsnId::Esn)
+            })
+            .ike_proposal(|pc| {
+                pc.encryption(EncrId::ENCR_AES_CTR, Some(128))
+                    .encryption(EncrId::ENCR_AES_CTR, Some(256))
+                    .prf(PrfId::PRF_HMAC_SHA1)
+                    .integrity(IntegId::AUTH_HMAC_SHA1_96)
+                    .dh(DhId::MODP2048)
+            })
+            .ipsec_protocol(Protocol::ESP)
+            .ipsec_proposal(|pc| {
+                pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
+                    .encryption(EncrId::ENCR_AES_CBC, Some(256))
+                    .prf(PrfId::PRF_HMAC_SHA1)
+                    .integrity(IntegId::AUTH_HMAC_SHA1_96)
+                    .dh(DhId::MODP2048)
+            })
+            .inbound_traffic_selector(|tc| tc.start_address("192.168.1.2".parse().unwrap()))
+            .inbound_traffic_selector(|tc| tc.start_address("192.168.1.3".parse().unwrap()))
+            .outbound_traffic_selector(|tc| tc.start_address("192.168.1.3".parse().unwrap()))
+            .outbound_traffic_selector(|tc| tc.start_address("192.168.1.2".parse().unwrap()))
+            .psk(b"test test test")
+            .strict_ts(true)
             .build(Id::new(IdType::ID_KEY_ID.into(), id.as_ref()))
             .expect("building config should succeed")
     }

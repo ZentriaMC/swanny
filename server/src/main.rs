@@ -82,6 +82,7 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
     builder
         .psk(&config.psk)
         .mode(config.mode.into())
+        .strict_ts(config.strict_ts)
         .build(id)
         .expect("building config should succeed")
 }

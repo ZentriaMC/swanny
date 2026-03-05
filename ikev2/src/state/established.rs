@@ -151,15 +151,25 @@ fn handle_new_child_sa_request(
     nonce_r: &Nonce,
     use_transport_mode: bool,
 ) -> Result<(), StateError> {
-    let ts_i =
+    let ts_i = if config.strict_ts() {
+        TrafficSelector::exact_match(config.inbound_traffic_selectors(), ts_i.traffic_selectors())
+    } else {
         TrafficSelector::negotiate(config.inbound_traffic_selectors(), ts_i.traffic_selectors())
-            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+    }
+    .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_i = ?&ts_i, "negotiated TSi");
 
-    let ts_r = TrafficSelector::negotiate(
-        config.outbound_traffic_selectors(),
-        ts_r.traffic_selectors(),
-    )
+    let ts_r = if config.strict_ts() {
+        TrafficSelector::exact_match(
+            config.outbound_traffic_selectors(),
+            ts_r.traffic_selectors(),
+        )
+    } else {
+        TrafficSelector::negotiate(
+            config.outbound_traffic_selectors(),
+            ts_r.traffic_selectors(),
+        )
+    }
     .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
     info!(ts_r = ?&ts_r, "negotiated TSr");
 

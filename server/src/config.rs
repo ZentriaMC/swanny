@@ -35,6 +35,7 @@ pub struct Config {
     pub ike_lifetime: Option<u64>,
     pub mode: Mode,
     pub if_id: Option<u32>,
+    pub strict_ts: bool,
 }
 
 impl Config {
@@ -110,6 +111,13 @@ impl Config {
                 )
                 .required(false)
                 .value_parser(value_parser!(u32)),
+            )
+            .arg(
+                arg!(
+                    --"strict-ts" "Require exact traffic selector match"
+                )
+                .required(false)
+                .action(clap::ArgAction::SetTrue),
             )
             .get_matches();
 
@@ -187,6 +195,12 @@ impl Config {
             .map(|if_id| if_id.try_into())
             .transpose()?;
 
+        let strict_ts = config
+            .get("strict_ts")
+            .map(|v| v.as_bool().ok_or_else(|| anyhow!("value must be boolean")))
+            .transpose()?
+            .unwrap_or(false);
+
         let local_ts = parse_cidr_array(&config, "local_ts")?
             .unwrap_or_else(|| vec![IpCidr::new_host(address)]);
         let remote_ts = parse_cidr_array(&config, "remote_ts")?
@@ -202,6 +216,7 @@ impl Config {
             ike_lifetime,
             mode,
             if_id,
+            strict_ts,
         })
     }
 
@@ -224,6 +239,7 @@ impl Config {
             .unwrap_or(&Mode::default())
             .clone();
         let if_id = matches.try_get_one::<u32>("if-id")?.copied();
+        let strict_ts = matches.get_flag("strict-ts");
         Ok(Self {
             address,
             peer_address,
@@ -234,6 +250,7 @@ impl Config {
             ike_lifetime,
             mode,
             if_id,
+            strict_ts,
         })
     }
 }

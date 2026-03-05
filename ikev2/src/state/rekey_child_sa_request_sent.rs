@@ -34,6 +34,7 @@ impl std::fmt::Display for RekeyChildSaRequestSent {
 }
 
 fn handle_create_child_sa_response(
+    config: &Config,
     data: &mut StateDataCache<'_>,
     response: &ProtectedMessage,
 ) -> Result<(), StateError> {
@@ -60,14 +61,28 @@ fn handle_create_child_sa_response(
         let ts_i: &payload::Ts = response
             .get(PayloadType::TSi)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
-        TrafficSelector::negotiate(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
-            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+        if config.strict_ts() {
+            TrafficSelector::exact_match(
+                Some(&creating_child_sa.ts_i),
+                ts_i.traffic_selectors(),
+            )
+        } else {
+            TrafficSelector::negotiate(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
+        }
+        .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
         let ts_r: &payload::Ts = response
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
-        TrafficSelector::negotiate(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
-            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+        if config.strict_ts() {
+            TrafficSelector::exact_match(
+                Some(&creating_child_sa.ts_r),
+                ts_r.traffic_selectors(),
+            )
+        } else {
+            TrafficSelector::negotiate(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
+        }
+        .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
 
         // For rekeying, only check the peer proposal matches the current one
         let proposals = &creating_child_sa.proposals;
@@ -100,7 +115,7 @@ fn handle_create_child_sa_response(
 
 impl RekeyChildSaRequestSent {
     async fn handle_response(
-        _config: &Config,
+        config: &Config,
         sender: UnboundedSender<ControlMessage>,
         data: &mut StateDataCache<'_>,
         mut message: &[u8],
@@ -128,7 +143,7 @@ impl RekeyChildSaRequestSent {
 
         match response.exchange().assigned() {
             Some(ExchangeType::CREATE_CHILD_SA) => {
-                handle_create_child_sa_response(data, &response)?;
+                handle_create_child_sa_response(config, data, &response)?;
 
                 if let Some(child_sa) = data.created_child_sa.to_mut().take() {
                     Self::create_child_sa(sender.clone(), data, child_sa)?;

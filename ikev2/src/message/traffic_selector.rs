@@ -70,7 +70,7 @@ impl TrafficSelector {
     /// Returns the first matching `TrafficSelector`
     pub fn negotiate<'a, 'b>(
         this: impl IntoIterator<Item = &'a TrafficSelector>,
-        other: impl IntoIterator<Item = &'a TrafficSelector>,
+        other: impl IntoIterator<Item = &'b TrafficSelector>,
     ) -> Option<Self> {
         let this: Vec<_> = this.into_iter().collect();
         let other: Vec<_> = other.into_iter().collect();
@@ -82,6 +82,18 @@ impl TrafficSelector {
                     .iter()
                     .find_map(|tx| this.iter().find_map(|ty| tx.intersection(ty)))
             })
+    }
+
+    /// Returns the first exactly matching `TrafficSelector`
+    pub fn exact_match<'a, 'b>(
+        this: impl IntoIterator<Item = &'a TrafficSelector>,
+        other: impl IntoIterator<Item = &'b TrafficSelector>,
+    ) -> Option<Self> {
+        let this: Vec<_> = this.into_iter().collect();
+        let other: Vec<_> = other.into_iter().collect();
+        debug!(this = ?this, other = ?other, "TrafficSelector::exact_match");
+        this.iter()
+            .find_map(|t| other.iter().find(|o| *t == **o).map(|o| (*o).clone()))
     }
 
     fn is_subset_of(&self, other: &Self) -> bool {
@@ -259,6 +271,43 @@ pub(crate) mod tests {
             .expect("unable to deserialize traffic selector");
 
         assert_eq!(traffic_selector, traffic_selector2);
+    }
+
+    #[test]
+    fn test_exact_match() {
+        let ts1 = create_traffic_selector("192.168.1.2".parse().unwrap());
+        let ts2 = create_traffic_selector("192.168.1.2".parse().unwrap());
+
+        // Exact match succeeds
+        let result = TrafficSelector::exact_match(Some(&ts1), Some(&ts2));
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), ts1);
+
+        // Overlapping but different TS fails exact match
+        let wide = TrafficSelector::new(
+            TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
+            0,
+            "192.168.1.1".parse().unwrap(),
+            "192.168.1.255".parse().unwrap(),
+            0,
+            65535,
+        );
+        let narrow = TrafficSelector::new(
+            TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
+            0,
+            "192.168.1.2".parse().unwrap(),
+            "192.168.1.2".parse().unwrap(),
+            0,
+            65535,
+        );
+
+        // These would succeed with negotiate() but must fail with exact_match()
+        let result = TrafficSelector::exact_match(Some(&wide), Some(&narrow));
+        assert!(result.is_none());
+
+        // Verify negotiate() would accept them
+        let result = TrafficSelector::negotiate(Some(&wide), Some(&narrow));
+        assert!(result.is_some());
     }
 
     #[test]
