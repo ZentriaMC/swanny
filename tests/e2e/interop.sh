@@ -20,7 +20,7 @@ charon-systemd {
         cfg = 3
         knl = 3
         net = 3
-        enc = 4
+        enc = 1
         esp = 3
         lib = 2
         mgr = 2
