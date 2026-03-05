@@ -111,6 +111,9 @@ pub enum ProtocolError {
     #[error("authentication failed")]
     AuthenticationFailed,
 
+    #[error("peer identity mismatch")]
+    PeerIdentityMismatch,
+
     #[error("integrity check failed")]
     IntegrityCheckFailed,
 

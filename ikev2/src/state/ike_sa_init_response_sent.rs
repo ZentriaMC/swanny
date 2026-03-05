@@ -72,9 +72,16 @@ fn handle_ike_auth_request(
     };
 
     if authenticated? {
-        info!(spi = &data.initiator_spi()?[..], "authenticated initiator");
+        info!(peer_id = %id_i, spi = &data.initiator_spi()?[..], "authenticated initiator");
     } else {
         return Err(ProtocolError::AuthenticationFailed.into());
+    }
+
+    if let Some(expected) = config.remote_id()
+        && expected != id_i
+    {
+        warn!(expected = %expected, received = %id_i, "peer identity mismatch");
+        return Err(ProtocolError::PeerIdentityMismatch.into());
     }
 
     let ts_i = if config.strict_ts() {
@@ -239,7 +246,9 @@ fn generate_error_response(
     );
 
     let notification = match error {
-        ProtocolError::AuthenticationFailed => NotifyType::AUTHENTICATION_FAILED,
+        ProtocolError::AuthenticationFailed | ProtocolError::PeerIdentityMismatch => {
+            NotifyType::AUTHENTICATION_FAILED
+        }
         ProtocolError::TrafficSelectorUnacceptable => NotifyType::TS_UNACCEPTABLE,
         ProtocolError::NoProposalChosen => NotifyType::NO_PROPOSAL_CHOSEN,
         _ => NotifyType::INVALID_SYNTAX,

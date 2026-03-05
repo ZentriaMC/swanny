@@ -359,6 +359,93 @@ impl Id {
     }
 }
 
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.ty.assigned() {
+            Some(IdType::ID_IPV4_ADDR) if self.id_data.len() == 4 => {
+                let addr = std::net::Ipv4Addr::new(
+                    self.id_data[0],
+                    self.id_data[1],
+                    self.id_data[2],
+                    self.id_data[3],
+                );
+                write!(f, "ipv4:{addr}")
+            }
+            Some(IdType::ID_IPV6_ADDR) if self.id_data.len() == 16 => {
+                let octets: [u8; 16] = self.id_data[..16].try_into().unwrap();
+                let addr = std::net::Ipv6Addr::from(octets);
+                write!(f, "ipv6:{addr}")
+            }
+            Some(IdType::ID_FQDN) => match std::str::from_utf8(&self.id_data) {
+                Ok(s) => write!(f, "fqdn:{s}"),
+                Err(_) => write!(f, "fqdn:<invalid utf-8>"),
+            },
+            Some(IdType::ID_RFC822_ADDR) => match std::str::from_utf8(&self.id_data) {
+                Ok(s) => write!(f, "email:{s}"),
+                Err(_) => write!(f, "email:<invalid utf-8>"),
+            },
+            Some(IdType::ID_KEY_ID) => match std::str::from_utf8(&self.id_data) {
+                Ok(s) => write!(f, "keyid:{s}"),
+                Err(_) => {
+                    write!(f, "keyid:0x")?;
+                    for b in &self.id_data {
+                        write!(f, "{b:02x}")?;
+                    }
+                    Ok(())
+                }
+            },
+            _ => {
+                write!(f, "unknown({}):", u8::from(self.ty))?;
+                for b in &self.id_data {
+                    write!(f, "{b:02x}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum IdParseError {
+    #[error("missing type prefix (expected `ipv4:`, `ipv6:`, `fqdn:`, `email:`, or `keyid:`)")]
+    MissingPrefix,
+
+    #[error("invalid IPv4 address: {0}")]
+    InvalidIpv4(#[from] std::net::AddrParseError),
+
+    #[error("invalid IPv6 address")]
+    InvalidIpv6,
+
+    #[error("empty identity value")]
+    EmptyValue,
+}
+
+impl std::str::FromStr for Id {
+    type Err = IdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (prefix, value) = s.split_once(':').ok_or(IdParseError::MissingPrefix)?;
+        if value.is_empty() {
+            return Err(IdParseError::EmptyValue);
+        }
+        match prefix {
+            "ipv4" => {
+                let addr: std::net::Ipv4Addr = value.parse()?;
+                Ok(Id::new(IdType::ID_IPV4_ADDR.into(), &addr.octets()[..]))
+            }
+            "ipv6" => {
+                let addr: std::net::Ipv6Addr =
+                    value.parse().map_err(|_| IdParseError::InvalidIpv6)?;
+                Ok(Id::new(IdType::ID_IPV6_ADDR.into(), &addr.octets()[..]))
+            }
+            "fqdn" => Ok(Id::new(IdType::ID_FQDN.into(), value.as_bytes())),
+            "email" => Ok(Id::new(IdType::ID_RFC822_ADDR.into(), value.as_bytes())),
+            "keyid" => Ok(Id::new(IdType::ID_KEY_ID.into(), value.as_bytes())),
+            _ => Err(IdParseError::MissingPrefix),
+        }
+    }
+}
+
 impl serialize::Serialize for Id {
     fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
         buf.put_u8(self.ty.into());

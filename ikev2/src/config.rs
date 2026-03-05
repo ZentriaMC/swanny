@@ -229,6 +229,7 @@ pub struct ConfigBuilder {
     psk: Option<Key>,
     mode: ChildSaMode,
     strict_ts: bool,
+    remote_id: Option<Id>,
 }
 
 impl ConfigBuilder {
@@ -294,6 +295,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the expected remote peer identity for validation
+    pub fn remote_id(mut self, remote_id: Id) -> Self {
+        self.remote_id = Some(remote_id);
+        self
+    }
+
     /// Turn this `ConfigBuilder` into an actual `Config`
     pub fn build(mut self, id: Id) -> Result<Config, ConfigError> {
         let inbound_traffic_selectors: Result<Vec<_>, _> = self
@@ -316,6 +323,7 @@ impl ConfigBuilder {
             mode: self.mode,
             strict_ts: self.strict_ts,
             id,
+            remote_id: self.remote_id,
         })
     }
 }
@@ -332,6 +340,7 @@ pub struct Config {
     mode: ChildSaMode,
     strict_ts: bool,
     id: Id,
+    remote_id: Option<Id>,
 }
 
 impl Config {
@@ -391,6 +400,11 @@ impl Config {
     /// Returns the identity of IKE SA
     pub fn id(&self) -> &Id {
         &self.id
+    }
+
+    /// Returns the expected remote peer identity, if configured
+    pub fn remote_id(&self) -> Option<&Id> {
+        self.remote_id.as_ref()
     }
 }
 

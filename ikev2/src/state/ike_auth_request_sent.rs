@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub struct IkeAuthRequestSent;
 
@@ -71,9 +71,16 @@ fn handle_ike_auth_response(
     };
 
     if authenticated? {
-        info!(spi = &data.responder_spi()?[..], "authenticated responder");
+        info!(peer_id = %id_r, spi = &data.responder_spi()?[..], "authenticated responder");
     } else {
         return Err(ProtocolError::AuthenticationFailed.into());
+    }
+
+    if let Some(expected) = config.remote_id()
+        && expected != id_r
+    {
+        warn!(expected = %expected, received = %id_r, "peer identity mismatch");
+        return Err(ProtocolError::PeerIdentityMismatch.into());
     }
 
     let creating_child_sa = data

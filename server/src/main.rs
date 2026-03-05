@@ -36,10 +36,11 @@ use xfrmnetlink::Handle;
 mod config;
 
 fn create_ike_sa_config(config: &config::Config) -> Config {
-    let id = match &config.address {
+    let id = config.identity.clone().unwrap_or_else(|| match &config.address {
         IpAddr::V4(v4) => Id::new(IdType::ID_IPV4_ADDR.into(), &v4.octets()[..]),
         IpAddr::V6(v6) => Id::new(IdType::ID_IPV6_ADDR.into(), &v6.octets()[..]),
-    };
+    });
+    info!(identity = %id, "using local IKE identity");
     let mut builder = ConfigBuilder::default()
         .ike_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(256))
@@ -91,12 +92,17 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
         });
     }
 
-    builder
+    let mut builder = builder
         .psk(&config.psk)
         .mode(config.mode.into())
-        .strict_ts(config.strict_ts)
-        .build(id)
-        .expect("building config should succeed")
+        .strict_ts(config.strict_ts);
+
+    if let Some(remote_id) = &config.remote_identity {
+        info!(remote_identity = %remote_id, "expecting remote IKE identity");
+        builder = builder.remote_id(remote_id.clone());
+    }
+
+    builder.build(id).expect("building config should succeed")
 }
 
 fn traffic_selector_from_cidr(cidr: &IpCidr) -> TrafficSelector {
