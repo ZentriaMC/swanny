@@ -92,6 +92,9 @@ pub enum ProtocolError {
     #[error("missing SPI")]
     MissingSpi,
 
+    #[error("invalid SPI length {0} (expected 4)")]
+    InvalidSpiLength(usize),
+
     #[error("transform ID conversion error")]
     TryFromTransformId(#[from] TryFromTransformIdError),
 
@@ -424,12 +427,19 @@ impl ChosenProposal {
             .map(|t| t.id().try_into())
             .transpose()?;
 
+        let protocol = proposal
+            .protocol()
+            .assigned()
+            .ok_or(ProtocolError::UnknownProtocol(proposal.protocol()))?;
+
+        let spi = proposal.spi();
+        if matches!(protocol, Protocol::ESP | Protocol::AH) && spi.len() != 4 {
+            return Err(ProtocolError::InvalidSpiLength(spi.len()));
+        }
+
         Ok(Self {
-            protocol: proposal
-                .protocol()
-                .assigned()
-                .ok_or(ProtocolError::UnknownProtocol(proposal.protocol()))?,
-            spi: proposal.spi().to_vec(),
+            protocol,
+            spi: spi.to_vec(),
             cipher,
             prf,
             integ,
@@ -813,16 +823,18 @@ impl ChildSa {
         if self.on_initiator {
             &self.spi
         } else {
-            let spi = self.chosen_proposal.spi.as_slice();
-            spi.try_into().expect("SPI should be longer than 4 octets")
+            self.chosen_proposal.spi.as_slice().try_into().expect(
+                "SPI length validated in ChosenProposal::new",
+            )
         }
     }
 
     /// Returns the responder SPI
     pub fn spi_r(&self) -> &EspSpi {
         if self.on_initiator {
-            let spi = self.chosen_proposal.spi.as_slice();
-            spi.try_into().expect("SPI should be longer than 4 octets")
+            self.chosen_proposal.spi.as_slice().try_into().expect(
+                "SPI length validated in ChosenProposal::new",
+            )
         } else {
             &self.spi
         }
