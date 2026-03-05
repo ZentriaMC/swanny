@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     message::{
-        EspSpi, ProtectedMessage,
+        EspSpi, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags, PayloadType},
         payload,
         proposal::Proposal,
@@ -10,7 +10,7 @@ use crate::{
     },
     sa::{ChosenProposal, ControlMessage},
     state::{
-        CreateChildSa, Established, ProtocolError, SendProtectedMessage, State, StateData,
+        Established, InvalidStateError, ProtocolError, SendProtectedMessage, State, StateData,
         StateDataCache, StateError, VerifyMessage, generate_informational_error,
     },
 };
@@ -20,15 +20,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-pub struct NewChildSaRequestSent;
+pub struct RekeyIkeSaRequestSent;
 
-impl SendProtectedMessage for NewChildSaRequestSent {}
-impl VerifyMessage for NewChildSaRequestSent {}
-impl CreateChildSa for NewChildSaRequestSent {}
+impl SendProtectedMessage for RekeyIkeSaRequestSent {}
+impl VerifyMessage for RekeyIkeSaRequestSent {}
 
-impl std::fmt::Display for NewChildSaRequestSent {
+impl std::fmt::Display for RekeyIkeSaRequestSent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        f.debug_struct("NewChildSaRequestSent").finish()
+        f.debug_struct("RekeyIkeSaRequestSent").finish()
     }
 }
 
@@ -38,57 +37,95 @@ fn handle_create_child_sa_response(
 ) -> Result<(), StateError> {
     let response = response
         .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
-        .map_err(|e| StateError::Protocol(e.into()))?;
+        .map_err(|err| StateError::Protocol(err.into()))?;
 
-    debug!(response = ?&response, "received protected response");
+    debug!(response = ?&response, "received IKE SA rekey response");
 
     let sa: &payload::Sa = response
         .get(PayloadType::SA)
         .ok_or(ProtocolError::MissingPayload(PayloadType::SA))?;
 
+    let ke: &payload::Ke = response
+        .get(PayloadType::KE)
+        .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
+
     let nonce_r: &payload::Nonce = response
         .get(PayloadType::NONCE)
         .ok_or(ProtocolError::MissingPayload(PayloadType::NONCE))?;
 
-    let creating_child_sa = data.creating_child_sa.to_mut().take();
+    // Get peer's new SPI from SA proposal
+    let peer_proposal = sa
+        .proposals()
+        .next()
+        .ok_or(ProtocolError::NoProposalsReceived)?;
+    let peer_new_spi: Spi = peer_proposal
+        .spi()
+        .try_into()
+        .map_err(|_| ProtocolError::MissingSpi)?;
 
-    // Create a new Child SA, if creating_child_sa is set
-    if let Some(creating_child_sa) = creating_child_sa {
-        let ts_i: &payload::Ts = response
-            .get(PayloadType::TSi)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
-        TrafficSelector::negotiate(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
-            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+    // Get our new SPI from rekeying_ike_spi
+    let our_new_spi = data
+        .rekeying_ike_spi
+        .to_mut()
+        .take()
+        .ok_or(InvalidStateError::PeerSpiNotSet)?;
 
-        let ts_r: &payload::Ts = response
-            .get(PayloadType::TSr)
-            .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
-        TrafficSelector::negotiate(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
-            .ok_or(ProtocolError::TrafficSelectorUnacceptable)?;
+    // Negotiate proposal
+    let proposals: Vec<_> = vec![peer_proposal.clone()];
+    let config_proposals = [data.chosen_proposal()?.proposal(1, crate::message::num::Protocol::IKE.into(), &our_new_spi[..])];
+    let proposal = Proposal::negotiate(&config_proposals, proposals.iter())
+        .ok_or(ProtocolError::NoProposalChosen)?;
+    info!(proposal = ?&proposal, "negotiated IKE SA rekey proposal");
+    let chosen_proposal = ChosenProposal::new(&proposal)?;
 
-        let proposals = &creating_child_sa.proposals;
+    // Compute SKEYSEED = prf(SK_d_old, g^ir_new | Ni | Nr)
+    let private_key = data
+        .private_key
+        .as_ref()
+        .as_ref()
+        .ok_or(InvalidStateError::GroupPrivateKeyNotSet)?;
+    let nonce_i = (*data.nonce_i)
+        .as_ref()
+        .ok_or(InvalidStateError::NonceNotRecorded)?;
+    let old_sk_d = &data.keys()?.derivation.d;
+    let skeyseed = chosen_proposal.generate_rekey_skeyseed(
+        old_sk_d,
+        nonce_i,
+        nonce_r.nonce(),
+        private_key,
+        ke.ke_data(),
+    )?;
+    debug!(skeyseed = ?&skeyseed, "generated rekey SKEYSEED");
 
-        let proposal = Proposal::negotiate(proposals, sa.proposals())
-            .ok_or(ProtocolError::NoProposalChosen)?;
-        info!(proposal = ?&proposal, "negotiated proposal");
-        let chosen_proposal = ChosenProposal::new(&proposal)?;
+    // Derive new keys (SPI order follows original initiator/responder roles)
+    let is_initiator = (*data.is_initiator)
+        .ok_or(InvalidStateError::InitiatorNotDetermined)?;
+    let (spi_i, spi_r) = if is_initiator {
+        (&our_new_spi, &peer_new_spi)
+    } else {
+        (&peer_new_spi, &our_new_spi)
+    };
+    let keys = chosen_proposal.generate_keys(&skeyseed, nonce_i, nonce_r.nonce(), spi_i, spi_r)?;
+    debug!(keys = ?&keys, "generated rekey keys");
 
-        let child_sa = creating_child_sa.build(
-            &chosen_proposal,
-            &data.keys()?.derivation.d,
-            (*data.nonce_i).as_ref().expect("nonce should be set"),
-            nonce_r.nonce(),
-            None,
-        )?;
-        *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
-    }
-
+    // Atomic switchover
+    info!("IKE SA rekeyed, switching to new keys");
+    *data.spi.to_mut() = our_new_spi;
+    *data.peer_spi.to_mut() = Some(peer_new_spi);
+    *data.chosen_proposal.to_mut() = Some(chosen_proposal);
+    *data.keys.to_mut() = Some(keys);
+    *data.message_id.to_mut() = 0;
+    *data.received_message_id.to_mut() = 0;
+    *data.ike_sa_init_request.to_mut() = None;
+    *data.ike_sa_init_response.to_mut() = None;
     *data.last_request.to_mut() = None;
+    *data.public_key.to_mut() = None;
+    *data.private_key.to_mut() = None;
 
     Ok(())
 }
 
-impl NewChildSaRequestSent {
+impl RekeyIkeSaRequestSent {
     async fn handle_response(
         _config: &Config,
         sender: UnboundedSender<ControlMessage>,
@@ -97,7 +134,7 @@ impl NewChildSaRequestSent {
     ) -> Result<(), StateError> {
         let serialized_response = message;
         let response = ProtectedMessage::deserialize(&mut message)
-            .map_err(|e| StateError::Protocol(e.into()))?;
+            .map_err(|err| StateError::Protocol(err.into()))?;
 
         Self::verify_message(data, serialized_response)?;
 
@@ -119,10 +156,6 @@ impl NewChildSaRequestSent {
         match response.exchange().assigned() {
             Some(ExchangeType::CREATE_CHILD_SA) => {
                 handle_create_child_sa_response(data, &response)?;
-
-                if let Some(child_sa) = data.created_child_sa.to_mut().take() {
-                    Self::create_child_sa(sender.clone(), data, child_sa)?;
-                }
             }
             _ => {
                 return Err(ProtocolError::UnexpectedExchange(response.exchange()).into());
@@ -133,7 +166,7 @@ impl NewChildSaRequestSent {
 }
 
 #[async_trait]
-impl State for NewChildSaRequestSent {
+impl State for RekeyIkeSaRequestSent {
     async fn handle_message(
         self: Box<Self>,
         config: &Config,
@@ -148,9 +181,10 @@ impl State for NewChildSaRequestSent {
             let data = data.read().await;
             let mut data = StateDataCache::new_borrowed(&data);
 
-            if let Err(e) = Self::handle_response(config, sender.clone(), &mut data, message).await
+            if let Err(err) =
+                Self::handle_response(config, sender.clone(), &mut data, message).await
             {
-                debug!(error = ?e, "error processing CREATE_CHILD_SA response for creating new Child SA");
+                debug!(?err, "error processing CREATE_CHILD_SA response for rekeying IKE SA");
                 return Ok(Box::new(Established {}));
             }
 

@@ -24,7 +24,7 @@ netlink-packet-core.workspace = true
 netlink-packet-xfrm.workspace = true
 netlink-proto.workspace = true
 swanny-ikev2.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "time"] }
 tokio-util = { workspace = true, features = ["codec", "net"] }
 toml.workspace = true
 tracing.workspace = true

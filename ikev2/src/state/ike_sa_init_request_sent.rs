@@ -255,6 +255,15 @@ impl State for IkeSaInitRequestSent {
         Ok(self)
     }
 
+    async fn handle_rekey_ike_sa(
+        self: Box<Self>,
+        _config: &Config,
+        _sender: UnboundedSender<ControlMessage>,
+        _data: Arc<RwLock<StateData>>,
+    ) -> Result<Box<dyn State>, StateError> {
+        Ok(self)
+    }
+
     #[cfg(test)]
     fn as_any(&self) -> &(dyn std::any::Any + Send) {
         self

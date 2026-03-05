@@ -247,6 +247,60 @@ async fn test_all_good() {
 
     assert!(initiator.in_state(&state::Established {}).await);
 
+    // IKE SA Rekeying
+    let initiator2 = initiator.clone();
+
+    let handle = tokio::spawn(async move {
+        initiator2
+            .handle_rekey_ike_sa()
+            .await
+            .expect("unable to handle rekey IKE SA");
+    });
+
+    let message = match messages_i.next().await {
+        Some(ControlMessage::IkeMessage(message)) => message,
+        _ => panic!("unexpected message"),
+    };
+
+    handle.await.expect("handle should be awaited");
+
+    assert!(
+        initiator
+            .in_state(&state::RekeyIkeSaRequestSent {})
+            .await
+    );
+
+    let responder2 = responder.clone();
+
+    let handle = tokio::spawn(async move {
+        responder2
+            .handle_message(message)
+            .await
+            .expect("unable to handle message");
+    });
+
+    let message = match messages_r.next().await {
+        Some(ControlMessage::IkeMessage(message)) => message,
+        _ => panic!("unexpected message"),
+    };
+
+    handle.await.expect("handle should be awaited");
+
+    assert!(responder.in_state(&state::Established {}).await);
+
+    let initiator2 = initiator.clone();
+
+    let handle = tokio::spawn(async move {
+        initiator2
+            .handle_message(message)
+            .await
+            .expect("unable to handle message");
+    });
+
+    handle.await.expect("handle should be awaited");
+
+    assert!(initiator.in_state(&state::Established {}).await);
+
     // Recreating
     let initiator2 = initiator.clone();
 

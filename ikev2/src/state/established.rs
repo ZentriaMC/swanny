@@ -1,6 +1,6 @@
 use crate::{
     config::{Config, ConfigError},
-    crypto::Nonce,
+    crypto::{self, Nonce},
     message::{
         EspSpi, Message, ProtectedMessage, Spi,
         num::{ExchangeType, MessageFlags, NotifyType, PayloadType, Protocol},
@@ -9,7 +9,7 @@ use crate::{
         serialize::Deserialize,
         traffic_selector::TrafficSelector,
     },
-    sa::{ChosenProposal, ControlMessage, LarvalChildSa},
+    sa::{ChosenProposal, ControlMessage, Keys, LarvalChildSa},
     state::{
         self, ChildSa, ChildSaMode, CreateChildSa, DeleteChildSa, InvalidStateError, ProtocolError,
         SendProtectedMessage, State, StateData, StateDataCache, StateError, VerifyMessage,
@@ -192,11 +192,142 @@ fn handle_new_child_sa_request(
     Ok(())
 }
 
+struct IkeSaRekeyResult {
+    new_spi: Spi,
+    peer_new_spi: Spi,
+    public_key: Vec<u8>,
+    chosen_proposal: ChosenProposal,
+    keys: Keys,
+}
+
+fn handle_rekey_ike_sa_request(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+    sa: &payload::Sa,
+    nonce_i: &Nonce,
+    nonce_r: &Nonce,
+    ke: &payload::Ke,
+) -> Result<IkeSaRekeyResult, StateError> {
+    // Generate our new SPI
+    let mut new_spi = Spi::default();
+    crypto::rand_bytes(&mut new_spi)?;
+
+    // Negotiate IKE proposals
+    let proposals: Vec<_> = config.ike_proposals(Some(&new_spi)).collect();
+    if proposals.is_empty() {
+        return Err(ConfigError::NoProposalsSet.into());
+    }
+
+    let proposal = Proposal::negotiate(&proposals, sa.proposals())
+        .ok_or(ProtocolError::NoProposalChosen)?;
+    info!(proposal = ?&proposal, "negotiated IKE SA rekey proposal");
+    let chosen_proposal = ChosenProposal::new(&proposal)?;
+
+    // Get peer's new SPI from their SA proposal
+    let peer_proposal = sa
+        .proposals()
+        .next()
+        .ok_or(ProtocolError::NoProposalsReceived)?;
+    let peer_new_spi: Spi = peer_proposal
+        .spi()
+        .try_into()
+        .map_err(|_| ProtocolError::MissingSpi)?;
+
+    // Generate our DH key pair
+    let group = chosen_proposal
+        .group()
+        .ok_or(ConfigError::InsufficientProposal)?;
+    let private_key = group.generate_key()?;
+    let public_key = private_key.public_key()?;
+
+    // Compute SKEYSEED = prf(SK_d_old, g^ir_new | Ni | Nr)
+    let old_sk_d = &data.keys()?.derivation.d;
+    let skeyseed = chosen_proposal.generate_rekey_skeyseed(
+        old_sk_d,
+        nonce_i,
+        nonce_r,
+        &private_key,
+        ke.ke_data(),
+    )?;
+    debug!(skeyseed = ?&skeyseed, "generated rekey SKEYSEED");
+
+    // Derive new keys (SPI order follows original initiator/responder roles)
+    let is_initiator = (*data.is_initiator)
+        .ok_or(InvalidStateError::InitiatorNotDetermined)?;
+    let (spi_i, spi_r) = if is_initiator {
+        (&new_spi, &peer_new_spi)
+    } else {
+        (&peer_new_spi, &new_spi)
+    };
+    let keys = chosen_proposal.generate_keys(&skeyseed, nonce_i, nonce_r, spi_i, spi_r)?;
+    debug!(keys = ?&keys, "generated rekey keys");
+
+    Ok(IkeSaRekeyResult {
+        new_spi,
+        peer_new_spi,
+        public_key,
+        chosen_proposal,
+        keys,
+    })
+}
+
+fn generate_rekey_ike_sa_response(
+    data: &mut StateDataCache<'_>,
+    rekey: &IkeSaRekeyResult,
+    request: &ProtectedMessage,
+) -> Result<ProtectedMessage, StateError> {
+    let mut response = Message::new(
+        data.initiator_spi()?,
+        data.responder_spi()?,
+        ExchangeType::CREATE_CHILD_SA.into(),
+        MessageFlags::R,
+        request.id(),
+    );
+
+    let proposal =
+        rekey
+            .chosen_proposal
+            .proposal(1, Protocol::IKE.into(), &rekey.new_spi[..]);
+
+    let group = rekey
+        .chosen_proposal
+        .group()
+        .expect("group must be set");
+
+    response.add_payloads([
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(Some(proposal))),
+            true,
+        ),
+        Payload::new(
+            PayloadType::NONCE.into(),
+            payload::Content::Nonce(payload::Nonce::new(
+                (*data.nonce_r)
+                    .as_ref()
+                    .ok_or(InvalidStateError::NonceNotRecorded)?,
+            )),
+            true,
+        ),
+        Payload::new(
+            PayloadType::KE.into(),
+            payload::Content::Ke(payload::Ke::new(group.id().into(), &rekey.public_key)),
+            true,
+        ),
+    ]);
+
+    debug!(response = ?&response, "sending IKE SA rekey response");
+
+    response
+        .protect(data.encrypting_key()?, data.chosen_proposal()?.integ())
+        .map_err(Into::into)
+}
+
 fn handle_create_child_sa_request(
     config: &Config,
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
-) -> Result<(), StateError> {
+) -> Result<Option<IkeSaRekeyResult>, StateError> {
     let request = request
         .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
         .map_err(|e| StateError::Protocol(e.into()))?;
@@ -261,11 +392,18 @@ fn handle_create_child_sa_request(
         )?;
     } else {
         // Otherwise, rekey an IKE SA
+        let ke: &payload::Ke = request
+            .get(PayloadType::KE)
+            .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
+        let result =
+            handle_rekey_ike_sa_request(config, data, sa, nonce_i.nonce(), &nonce, ke)?;
+        *data.nonce_r.to_mut() = Some(nonce);
+        return Ok(Some(result));
     }
 
     *data.nonce_r.to_mut() = Some(nonce);
 
-    Ok(())
+    Ok(None)
 }
 
 fn generate_new_child_sa_response(
@@ -490,6 +628,68 @@ fn generate_rekey_child_sa_request(
     Ok(request)
 }
 
+fn generate_rekey_ike_sa_request(
+    config: &Config,
+    data: &mut StateDataCache<'_>,
+) -> Result<ProtectedMessage, StateError> {
+    let mut request = Message::new(
+        data.initiator_spi()?,
+        data.responder_spi()?,
+        ExchangeType::CREATE_CHILD_SA.into(),
+        MessageFlags::I,
+        *data.message_id,
+    );
+
+    // Generate new SPI
+    let mut new_spi = Spi::default();
+    crypto::rand_bytes(&mut new_spi)?;
+
+    // Get proposals with our new SPI
+    let proposals: Vec<_> = config.ike_proposals(Some(&new_spi)).collect();
+    if proposals.is_empty() {
+        return Err(ConfigError::NoProposalsSet.into());
+    }
+
+    // Generate nonce
+    let nonce = Nonce::new()?;
+
+    // Generate DH key pair
+    let chosen_proposal = ChosenProposal::new(&proposals[0])?;
+    let group = chosen_proposal
+        .group()
+        .ok_or(ConfigError::InsufficientProposal)?;
+    let private_key = group.generate_key()?;
+    let public_key = private_key.public_key()?;
+
+    request.add_payloads([
+        Payload::new(
+            PayloadType::SA.into(),
+            payload::Content::Sa(payload::Sa::new(proposals)),
+            true,
+        ),
+        Payload::new(
+            PayloadType::NONCE.into(),
+            payload::Content::Nonce(payload::Nonce::new(nonce.as_ref())),
+            true,
+        ),
+        Payload::new(
+            PayloadType::KE.into(),
+            payload::Content::Ke(payload::Ke::new(group.id().into(), &public_key)),
+            true,
+        ),
+    ]);
+
+    debug!(request = ?&request, "sending IKE SA rekey request");
+
+    let request = request.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?;
+
+    *data.rekeying_ike_spi.to_mut() = Some(new_spi);
+    *data.private_key.to_mut() = Some(private_key);
+    *data.nonce_i.to_mut() = Some(nonce);
+
+    Ok(request)
+}
+
 impl Established {
     async fn handle_request(
         config: &Config,
@@ -517,7 +717,7 @@ impl Established {
                 data.deleted_child_sas.to_mut().clear();
             }
             Some(ExchangeType::CREATE_CHILD_SA) => {
-                handle_create_child_sa_request(config, data, &request)?;
+                let ike_rekey = handle_create_child_sa_request(config, data, &request)?;
 
                 if let Some(child_sa) = data.created_child_sa.to_mut().take() {
                     let response = generate_new_child_sa_response(data, &child_sa, &request)?;
@@ -527,6 +727,25 @@ impl Established {
 
                 if let Some(child_sa) = data.rekeyed_child_sa.to_mut().take() {
                     Self::delete_child_sa(sender.clone(), child_sa)?;
+                }
+
+                // IKE SA rekey: send response with old keys, then atomic switchover
+                if let Some(rekey) = ike_rekey {
+                    let response = generate_rekey_ike_sa_response(data, &rekey, &request)?;
+                    Self::send_message(sender.clone(), data, response)?;
+
+                    info!("IKE SA rekeyed, switching to new keys");
+                    *data.spi.to_mut() = rekey.new_spi;
+                    *data.peer_spi.to_mut() = Some(rekey.peer_new_spi);
+                    *data.chosen_proposal.to_mut() = Some(rekey.chosen_proposal);
+                    *data.keys.to_mut() = Some(rekey.keys);
+                    *data.message_id.to_mut() = 0;
+                    *data.received_message_id.to_mut() = 0;
+                    *data.ike_sa_init_request.to_mut() = None;
+                    *data.ike_sa_init_response.to_mut() = None;
+                    *data.last_request.to_mut() = None;
+                    *data.public_key.to_mut() = None;
+                    *data.private_key.to_mut() = None;
                 }
             }
             _ => {
@@ -679,6 +898,32 @@ impl State for Established {
         } else {
             Ok(Box::new(state::RekeyChildSaRequestSent {}))
         }
+    }
+
+    async fn handle_rekey_ike_sa(
+        self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
+    ) -> Result<Box<dyn State>, StateError> {
+        let default = StateData::default();
+        let default = StateDataCache::new_borrowed(&default);
+
+        let cache = {
+            let data = data.read().await;
+            let mut data = StateDataCache::new_borrowed(&data);
+
+            let request = generate_rekey_ike_sa_request(config, &mut data)?;
+            Self::send_message(sender.clone(), &mut data, request)?;
+            data.swap(&default)
+        };
+
+        {
+            let mut data = data.write().await;
+            cache.write_into(&mut data);
+        }
+
+        Ok(Box::new(state::RekeyIkeSaRequestSent {}))
     }
 
     #[cfg(test)]

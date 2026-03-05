@@ -47,6 +47,9 @@ pub(crate) use new_child_sa_request_sent::NewChildSaRequestSent;
 mod rekey_child_sa_request_sent;
 pub(crate) use rekey_child_sa_request_sent::RekeyChildSaRequestSent;
 
+mod rekey_ike_sa_request_sent;
+pub(crate) use rekey_ike_sa_request_sent::RekeyIkeSaRequestSent;
+
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidStateError {
     #[error("no proposal chosen")]
@@ -127,6 +130,13 @@ pub(crate) trait State: Send + Sync + std::fmt::Display {
         data: Arc<RwLock<StateData>>,
         spi: &EspSpi,
         hard: bool,
+    ) -> Result<Box<dyn State>, StateError>;
+
+    async fn handle_rekey_ike_sa(
+        self: Box<Self>,
+        config: &Config,
+        sender: UnboundedSender<ControlMessage>,
+        data: Arc<RwLock<StateData>>,
     ) -> Result<Box<dyn State>, StateError>;
 
     #[cfg(test)]
@@ -229,6 +239,7 @@ cache_cow! {
         created_child_sa: Option<Box<ChildSa>>,
         rekeyed_child_sa: Option<Box<ChildSa>>,
         deleted_child_sas: Vec<Box<ChildSa>>,
+        rekeying_ike_spi: Option<Spi>,
     }
 }
 

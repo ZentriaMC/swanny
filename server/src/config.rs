@@ -32,6 +32,7 @@ pub struct Config {
     pub remote_ts: Vec<IpCidr>,
     pub psk: Vec<u8>,
     pub expires: Option<u64>,
+    pub ike_lifetime: Option<u64>,
     pub mode: Mode,
     pub if_id: Option<u32>,
 }
@@ -85,6 +86,13 @@ impl Config {
             .arg(
                 arg!(
                     --expires <SECONDS> "SA expiry in seconds"
+                )
+                .required(false)
+                .value_parser(value_parser!(u64)),
+            )
+            .arg(
+                arg!(
+                    --"ike-lifetime" <SECONDS> "IKE SA lifetime in seconds (triggers rekey)"
                 )
                 .required(false)
                 .value_parser(value_parser!(u64)),
@@ -148,6 +156,16 @@ impl Config {
             .map(|expires| expires.try_into())
             .transpose()?;
 
+        let ike_lifetime: Option<u64> = config
+            .get("ike_lifetime")
+            .map(|v| {
+                v.as_integer()
+                    .ok_or_else(|| anyhow!("value must be integer"))
+            })
+            .transpose()?
+            .map(|v| v.try_into())
+            .transpose()?;
+
         let mode = match config
             .get("mode")
             .map(|mode| mode.as_str().ok_or_else(|| anyhow!("value must be string")))
@@ -181,6 +199,7 @@ impl Config {
             remote_ts,
             psk,
             expires,
+            ike_lifetime,
             mode,
             if_id,
         })
@@ -199,6 +218,7 @@ impl Config {
             .unwrap_or_else(|| vec![IpCidr::new_host(peer_address)]);
         let psk = matches.try_get_one::<String>("psk")?.unwrap().clone();
         let expires = matches.try_get_one::<u64>("expires")?.copied();
+        let ike_lifetime = matches.try_get_one::<u64>("ike-lifetime")?.copied();
         let mode = matches
             .try_get_one::<Mode>("mode")?
             .unwrap_or(&Mode::default())
@@ -211,6 +231,7 @@ impl Config {
             remote_ts,
             psk: psk.as_bytes().to_vec(),
             expires,
+            ike_lifetime,
             mode,
             if_id,
         })

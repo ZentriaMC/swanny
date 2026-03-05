@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod message;
 pub mod sa;
 mod state;
+pub use state::StateError;
 
 #[cfg(test)]
 mod tests;

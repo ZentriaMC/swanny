@@ -2,8 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use cidr::IpCidr;
 use futures::{
-    SinkExt,
-    future::Either,
+    FutureExt, SinkExt,
     stream::{FuturesUnordered, StreamExt},
 };
 use netlink_packet_core::NetlinkPayload;
@@ -12,8 +11,10 @@ use netlink_packet_xfrm::{
     XFRM_POLICY_OUT, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage, address::Address,
 };
 use netlink_proto::sys::{AsyncSocket, SocketAddr};
+use std::future::Future;
 use std::net::IpAddr;
 use std::net::UdpSocket as StdUdpSocket;
+use std::pin::Pin;
 use swanny_ikev2::{
     config::{Config, ConfigBuilder},
     crypto::{AuthenticationKey, Cipher, EncryptionKey, Integ},
@@ -23,9 +24,11 @@ use swanny_ikev2::{
         payload::Id,
         traffic_selector::TrafficSelector,
     },
+    StateError,
     sa::{ChildSa, ChildSaMode, ControlMessage, IkeSa},
 };
 use tokio::net::UdpSocket;
+use tokio::time::sleep;
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, info};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -554,7 +557,14 @@ async fn main() -> Result<()> {
 
     let (ike_sa, mut ike_sa_messages) = IkeSa::new(&ike_sa_config)?;
 
-    let mut pending_operations = FuturesUnordered::new();
+    let mut pending_operations: FuturesUnordered<Pin<Box<dyn Future<Output = Result<(), StateError>>>>> =
+        FuturesUnordered::new();
+
+    let ike_lifetime_duration = config
+        .ike_lifetime
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(std::time::Duration::from_secs(u64::MAX));
+    let mut ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
 
     loop {
         futures::select! {
@@ -576,12 +586,12 @@ async fn main() -> Result<()> {
                                 &acquire.acquire.selector.daddr,
                                 acquire.acquire.selector.dport,
                             )?;
-                            pending_operations.push(Either::Left(Either::Right(ike_sa.handle_acquire(ts_i, ts_r))));
+                            pending_operations.push(ike_sa.handle_acquire(ts_i, ts_r).boxed_local());
                         },
                         XfrmMessage::Expire(expire) => {
                             let spi = expire.expire.state.id.spi.to_be_bytes();
                             debug!("expired: {:?}", &spi);
-                            pending_operations.push(Either::Left(Either::Left(ike_sa.handle_expire(spi, expire.expire.hard != 0))));
+                            pending_operations.push(ike_sa.handle_expire(spi, expire.expire.hard != 0).boxed_local());
                         },
                         _ => info!("Other XFRM event message - {:?}", xfrm_message),
                     };
@@ -623,7 +633,7 @@ async fn main() -> Result<()> {
             result = incoming_framed.select_next_some() => {
                 match result {
                     Ok((message, _peer_address)) => {
-                        pending_operations.push(Either::Right(Either::Left(ike_sa.handle_message(message.to_vec()))));
+                        pending_operations.push(ike_sa.handle_message(message.to_vec()).boxed_local());
                     },
                     Err(e) => {
                         debug!(error = %e, "error receiving IKEv2 message");
@@ -633,12 +643,17 @@ async fn main() -> Result<()> {
             result = outgoing_framed.select_next_some() => {
                 match result {
                     Ok((message, _peer_address)) => {
-                        pending_operations.push(Either::Right(Either::Right(ike_sa.handle_message(message.to_vec()))));
+                        pending_operations.push(ike_sa.handle_message(message.to_vec()).boxed_local());
                     },
                     Err(e) => {
                         debug!(error = %e, "error receiving IKEv2 message");
                     },
                 }
+            }
+            _ = &mut ike_rekey_timer => {
+                info!("IKE SA lifetime expired, initiating rekey");
+                pending_operations.push(ike_sa.handle_rekey_ike_sa().boxed_local());
+                ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
             }
             result = pending_operations.select_next_some() => {
                 debug!(result = ?result, "pending operation completed");

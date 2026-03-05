@@ -296,6 +296,30 @@ impl IkeSa {
 
         Ok(())
     }
+
+    /// Initiates IKE SA rekeying
+    pub async fn handle_rekey_ike_sa(&self) -> Result<(), StateError> {
+        let mut state = self.state.lock().await;
+        if let Some(old_state) = state.take() {
+            let old_state_name = old_state.to_string();
+
+            let new_state = old_state
+                .handle_rekey_ike_sa(
+                    &self.config,
+                    self.sender.clone(),
+                    self.data.clone(),
+                )
+                .await?;
+
+            let new_state_name = new_state.to_string();
+
+            *state = Some(new_state);
+
+            info!("state transitioned from {old_state_name} to {new_state_name}");
+        }
+
+        Ok(())
+    }
 }
 
 /// Cryptograhic proposal negotiated with the peer
@@ -410,6 +434,28 @@ impl ChosenProposal {
     /// Returns the key exchange group
     pub fn group(&self) -> Option<&Group> {
         self.group.as_ref()
+    }
+
+    /// Generates SKEYSEED for IKE SA rekeying
+    ///
+    /// Uses `prf(SK_d_old, g^ir_new | Ni | Nr)` per RFC 7296 section 2.18
+    pub(crate) fn generate_rekey_skeyseed(
+        &self,
+        old_sk_d: &DerivationKey,
+        nonce_i: impl AsRef<[u8]>,
+        nonce_r: impl AsRef<[u8]>,
+        private_key: &GroupPrivateKey,
+        peer_public_key: impl AsRef<[u8]>,
+    ) -> Result<DerivationKey, CryptoError> {
+        let g_ir = private_key.compute_key(peer_public_key)?;
+        let mut buf = g_ir.as_ref().to_vec();
+        buf.extend_from_slice(nonce_i.as_ref());
+        buf.extend_from_slice(nonce_r.as_ref());
+        let prf = self.prf().expect("PRF must be set");
+        Ok(DerivationKey::new(
+            prf,
+            old_sk_d.prf().prf(old_sk_d.key(), buf)?,
+        ))
     }
 
     /// Generates SKEYSEED
