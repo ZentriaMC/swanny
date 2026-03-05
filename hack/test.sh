@@ -169,6 +169,7 @@ source "${root}/tests/e2e/lib.sh"
 source "${root}/tests/e2e/transport.sh"
 source "${root}/tests/e2e/tunnel.sh"
 source "${root}/tests/e2e/ike-rekey.sh"
+source "${root}/tests/e2e/multi-sa.sh"
 source "${root}/tests/e2e/interop.sh"
 
 # ---------------------------------------------------------------------------
@@ -187,6 +188,7 @@ fh_ssh -- "chmod +x /tmp/swanny /tmp/setup-netns.sh /tmp/setup-tunnel-netns.sh"
 test_transport
 test_tunnel
 test_ike_rekey
+test_multi_sa
 test_interop_swanny_initiator
 test_interop_strongswan_initiator
 

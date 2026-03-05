@@ -593,49 +593,6 @@ fn route_incoming_message(
     }
 }
 
-/// Tears down all IKE SAs except the one identified by `keep_spi`,
-/// deleting their XFRM child SAs.
-async fn teardown_stale_sas(
-    sa_table: &mut HashMap<Spi, IkeSa>,
-    keep_spi: Spi,
-    handle: Handle,
-    local_ts: &[IpCidr],
-    src_address: IpAddr,
-    dst_address: IpAddr,
-    mode: ChildSaMode,
-) {
-    let stale_spis: Vec<Spi> = sa_table
-        .keys()
-        .filter(|&&spi| spi != keep_spi)
-        .copied()
-        .collect();
-
-    for spi in stale_spis {
-        if let Some(sa) = sa_table.remove(&spi) {
-            let child_sas = sa.child_sas().await;
-            for child in &child_sas {
-                if let Err(err) = delete_child_sa(
-                    handle.clone(),
-                    child,
-                    local_ts,
-                    src_address,
-                    dst_address,
-                    mode,
-                )
-                .await
-                {
-                    warn!(?err, spi = ?&spi, "failed to delete child SA during teardown");
-                }
-            }
-            info!(
-                spi = ?&spi,
-                child_sas = child_sas.len(),
-                "tore down stale IKE SA"
-            );
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = config::Config::new()?;
@@ -788,20 +745,46 @@ async fn main() -> Result<()> {
                         ).await?;
                     }
                     ControlMessage::InitialContact(peer_id) => {
+                        let stale_spis: Vec<Spi> = sa_table
+                            .keys()
+                            .filter(|&&spi| spi != sa_spi)
+                            .copied()
+                            .collect();
+
                         info!(
                             peer_id = %peer_id,
                             sa_spi = ?&sa_spi,
+                            stale_count = stale_spis.len(),
                             "INITIAL_CONTACT received, tearing down stale SAs"
                         );
-                        teardown_stale_sas(
-                            &mut sa_table,
-                            sa_spi,
-                            handle.clone(),
-                            &config.local_ts,
-                            config.address,
-                            config.peer_address,
-                            config.mode.into(),
-                        ).await;
+
+                        for spi in stale_spis {
+                            if let Some(sa) = sa_table.remove(&spi) {
+                                let handle = handle.clone();
+                                let local_ts = config.local_ts.clone();
+                                let src = config.address;
+                                let dst = config.peer_address;
+                                let mode: ChildSaMode = config.mode.into();
+                                pending_operations.push(async move {
+                                    let child_sas = sa.child_sas().await;
+                                    for child in &child_sas {
+                                        if let Err(err) = delete_child_sa(
+                                            handle.clone(),
+                                            child,
+                                            &local_ts,
+                                            src,
+                                            dst,
+                                            mode,
+                                        ).await {
+                                            warn!(?err, spi = ?spi, "failed to delete child SA during teardown");
+                                        }
+                                    }
+                                    info!(spi = ?spi, child_sas = child_sas.len(), "tore down stale IKE SA");
+                                    Ok(())
+                                }.boxed_local());
+                            }
+                        }
+
                         primary_spi = Some(sa_spi);
                     }
                 }
