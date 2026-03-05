@@ -497,6 +497,10 @@ impl serialize::Deserialize for Nonce {
     where
         Self: Sized,
     {
+        let len = buf.remaining();
+        if !(16..=256).contains(&len) {
+            return Err(serialize::DeserializeError::InvalidNonceLength(len));
+        }
         Ok(Self::new(buf.chunk()))
     }
 }

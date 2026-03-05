@@ -57,6 +57,9 @@ pub enum DeserializeError {
     #[error("payload conversion error")]
     TryFromPayload(#[from] TryFromPayloadError),
 
+    #[error("nonce length {0} outside valid range (16..=256)")]
+    InvalidNonceLength(usize),
+
     #[error("encrypted payload is expected but missing")]
     MissingEncryptedPayload,
 
