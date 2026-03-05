@@ -48,13 +48,13 @@ use crate::{
     message::{
         EspSpi, Spi,
         num::{
-            AttributeType, DhId, EncrId, ExchangeType, IntegId, Num, PayloadType, PrfId, Protocol,
-            TransformType, TryFromTransformIdError,
+            AttributeType, DhId, EncrId, EsnId, ExchangeType, IntegId, Num, PayloadType, PrfId,
+            Protocol, TransformType, TryFromTransformIdError,
         },
         proposal::Proposal,
         serialize::DeserializeError,
         traffic_selector::TrafficSelector,
-        transform::Transform,
+        transform::{Attribute, Transform},
     },
     state::{self, State, StateData, StateError},
 };
@@ -331,6 +331,7 @@ pub struct ChosenProposal {
     prf: Option<Prf>,
     integ: Option<Integ>,
     group: Option<Group>,
+    esn: Option<EsnId>,
 }
 
 impl ChosenProposal {
@@ -393,6 +394,12 @@ impl ChosenProposal {
             },
         };
 
+        let esn = proposal
+            .transforms()
+            .find(|t| matches!(t.ty().assigned(), Some(TransformType::ESN)))
+            .map(|t| t.id().try_into())
+            .transpose()?;
+
         Ok(Self {
             protocol: proposal
                 .protocol()
@@ -403,6 +410,7 @@ impl ChosenProposal {
             prf,
             integ,
             group,
+            esn,
         })
     }
 
@@ -434,6 +442,11 @@ impl ChosenProposal {
     /// Returns the key exchange group
     pub fn group(&self) -> Option<&Group> {
         self.group.as_ref()
+    }
+
+    /// Returns the ESN option
+    pub fn esn(&self) -> Option<EsnId> {
+        self.esn
     }
 
     /// Generates SKEYSEED for IKE SA rekeying
@@ -614,6 +627,13 @@ impl ChosenProposal {
         }
         if let Some(group) = self.group() {
             transforms.push(group.into());
+        }
+        if let Some(esn) = self.esn {
+            transforms.push(Transform::new(
+                TransformType::ESN.into(),
+                esn.into(),
+                None::<Attribute>,
+            ));
         }
 
         Proposal::new(number, protocol, spi.as_ref(), transforms)
