@@ -12,14 +12,14 @@ test_ike_rekey() {
     echo ">>> [ike-rekey] Starting swanny responder in rk2..."
     swanny_start rk2 \
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
-        --local-ts 192.168.1.2/32 --remote-ts 192.168.1.1/32
+        --mode transport --local-ts 192.168.1.2/32 --remote-ts 192.168.1.1/32
 
     sleep 1
 
     echo ">>> [ike-rekey] Starting swanny initiator in rk1 (--ike-lifetime 5)..."
     swanny_start rk1 \
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
-        --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
+        --mode transport --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
         --ike-lifetime 5
 
     echo ">>> [ike-rekey] Initial ping to establish SA..."

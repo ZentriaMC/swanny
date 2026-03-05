@@ -10,8 +10,8 @@ use toml::{Table, Value};
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Mode {
-    #[default]
     Transport,
+    #[default]
     Tunnel,
 }
 
@@ -197,8 +197,8 @@ impl Config {
             .map(|mode| mode.as_str().ok_or_else(|| anyhow!("value must be string")))
             .transpose()?
         {
-            Some("transport") | None => Mode::Transport,
-            Some("tunnel") => Mode::Tunnel,
+            Some("transport") => Mode::Transport,
+            Some("tunnel") | None => Mode::Tunnel,
             Some(mode) => return Err(anyhow!("unknown Child SA mode: {}", mode)),
         };
 
