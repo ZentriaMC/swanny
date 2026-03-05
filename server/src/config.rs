@@ -38,7 +38,7 @@ pub struct Config {
     pub mode: Mode,
     pub if_id: Option<u32>,
     pub strict_ts: bool,
-    pub identity: Option<Id>,
+    pub local_identity: Option<Id>,
     pub remote_identity: Option<Id>,
 }
 
@@ -132,7 +132,7 @@ impl Config {
             )
             .arg(
                 arg!(
-                    --identity <IDENTITY> "Local IKE identity (e.g. fqdn:vpn.example.com, email:user@example.com, keyid:device-01)"
+                    --"local-identity" <IDENTITY> "Local IKE identity (e.g. fqdn:vpn.example.com, email:user@example.com, keyid:device-01)"
                 )
                 .required(false)
                 .value_parser(|s: &str| s.parse::<Id>().map_err(|err| err.to_string())),
@@ -241,14 +241,14 @@ impl Config {
         let remote_ts = parse_cidr_array(&config, "remote_ts")?
             .unwrap_or_else(|| vec![IpCidr::new_host(peer_address)]);
 
-        let identity: Option<Id> = config
-            .get("identity")
+        let local_identity: Option<Id> = config
+            .get("local_identity")
             .map(|v| {
                 let s = v
                     .as_str()
-                    .ok_or_else(|| anyhow!("identity must be a string"))?;
+                    .ok_or_else(|| anyhow!("local_identity must be a string"))?;
                 s.parse::<Id>()
-                    .map_err(|err| anyhow!("invalid identity: {err}"))
+                    .map_err(|err| anyhow!("invalid local_identity: {err}"))
             })
             .transpose()?;
 
@@ -275,7 +275,7 @@ impl Config {
             mode,
             if_id,
             strict_ts,
-            identity,
+            local_identity,
             remote_identity,
         })
     }
@@ -301,7 +301,7 @@ impl Config {
             .clone();
         let if_id = matches.try_get_one::<u32>("if-id")?.copied();
         let strict_ts = matches.get_flag("strict-ts");
-        let identity = matches.try_get_one::<Id>("identity")?.cloned();
+        let local_identity = matches.try_get_one::<Id>("local-identity")?.cloned();
         let remote_identity = matches.try_get_one::<Id>("remote-identity")?.cloned();
         Ok(Self {
             address,
@@ -315,7 +315,7 @@ impl Config {
             mode,
             if_id,
             strict_ts,
-            identity,
+            local_identity,
             remote_identity,
         })
     }

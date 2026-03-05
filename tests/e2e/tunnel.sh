@@ -14,7 +14,7 @@ test_tunnel() {
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
         --mode tunnel --if-id 1338 \
         --local-ts 10.0.2.0/24 --remote-ts 10.0.1.0/24 \
-        --identity fqdn:tun2.swanny.test --remote-identity fqdn:tun1.swanny.test
+        --local-identity fqdn:tun2.swanny.test --remote-identity fqdn:tun1.swanny.test
 
     sleep 1
 
@@ -23,7 +23,7 @@ test_tunnel() {
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
         --mode tunnel --if-id 1337 \
         --local-ts 10.0.1.0/24 --remote-ts 10.0.2.0/24 \
-        --identity fqdn:tun1.swanny.test --remote-identity fqdn:tun2.swanny.test
+        --local-identity fqdn:tun1.swanny.test --remote-identity fqdn:tun2.swanny.test
 
     echo ">>> [tunnel] Verifying 10.0.1.1 → 10.0.2.1..."
     if ! swanny_ping tun1 10.0.2.1 10 10; then

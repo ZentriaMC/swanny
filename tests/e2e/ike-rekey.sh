@@ -13,7 +13,7 @@ test_ike_rekey() {
     swanny_start rk2 \
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
         --mode transport --local-ts 192.168.1.2/32 --remote-ts 192.168.1.1/32 \
-        --identity fqdn:rk2.swanny.test --remote-identity fqdn:rk1.swanny.test
+        --local-identity fqdn:rk2.swanny.test --remote-identity fqdn:rk1.swanny.test
 
     sleep 1
 
@@ -22,7 +22,7 @@ test_ike_rekey() {
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
         --mode transport --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
         --ike-lifetime 5 \
-        --identity fqdn:rk1.swanny.test --remote-identity fqdn:rk2.swanny.test
+        --local-identity fqdn:rk1.swanny.test --remote-identity fqdn:rk2.swanny.test
 
     echo ">>> [ike-rekey] Initial ping to establish SA..."
     if ! swanny_ping rk1 192.168.1.2 5 10; then

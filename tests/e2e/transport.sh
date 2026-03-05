@@ -10,7 +10,7 @@ test_transport() {
     swanny_start ns2 \
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
         --mode transport --local-ts 192.168.1.2/32 --remote-ts 192.168.1.1/32 \
-        --identity fqdn:ns2.swanny.test --remote-identity fqdn:ns1.swanny.test
+        --local-identity fqdn:ns2.swanny.test --remote-identity fqdn:ns1.swanny.test
 
     sleep 1
 
@@ -18,7 +18,7 @@ test_transport() {
     swanny_start ns1 \
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
         --mode transport --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
-        --identity fqdn:ns1.swanny.test --remote-identity fqdn:ns2.swanny.test
+        --local-identity fqdn:ns1.swanny.test --remote-identity fqdn:ns2.swanny.test
 
     echo ">>> [transport] Verifying IPsec SA with ping..."
     if ! swanny_ping ns1 192.168.1.2 10 10; then

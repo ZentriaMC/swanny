@@ -42,7 +42,7 @@ test_interop_swanny_initiator() {
     swanny_start sw1 \
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
         --mode transport --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
-        --identity keyid:swannywashere --remote-identity ipv4:192.168.1.2
+        --local-identity keyid:swannywashere --remote-identity ipv4:192.168.1.2
 
     echo ">>> [interop] Verifying IPsec SA with ping..."
     if ! swanny_ping sw1 192.168.1.2 10 10; then
@@ -66,7 +66,7 @@ test_interop_strongswan_initiator() {
     swanny_start sw2 \
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
         --mode transport --local-ts 192.168.1.2/32 --remote-ts 192.168.1.1/32 \
-        --identity keyid:swannywashere --remote-identity ipv4:192.168.1.1
+        --local-identity keyid:swannywashere --remote-identity ipv4:192.168.1.1
 
     sleep 1
 

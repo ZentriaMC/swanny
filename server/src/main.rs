@@ -36,7 +36,7 @@ use xfrmnetlink::Handle;
 mod config;
 
 fn create_ike_sa_config(config: &config::Config) -> Config {
-    let id = config.identity.clone().unwrap_or_else(|| match &config.address {
+    let id = config.local_identity.clone().unwrap_or_else(|| match &config.address {
         IpAddr::V4(v4) => Id::new(IdType::ID_IPV4_ADDR.into(), &v4.octets()[..]),
         IpAddr::V6(v6) => Id::new(IdType::ID_IPV6_ADDR.into(), &v6.octets()[..]),
     });
