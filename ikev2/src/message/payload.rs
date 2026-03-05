@@ -23,6 +23,7 @@ pub enum Content {
     Notify(Notify),
     Ts(Ts),
     Sk(Sk),
+    Skf(Skf),
     Delete(Delete),
 }
 
@@ -37,6 +38,7 @@ impl Serialize for Content {
             Content::Notify(notify) => notify.serialize(buf),
             Content::Ts(ts) => ts.serialize(buf),
             Content::Sk(sk) => sk.serialize(buf),
+            Content::Skf(skf) => skf.serialize(buf),
             Content::Delete(delete) => delete.serialize(buf),
         }
     }
@@ -51,6 +53,7 @@ impl Serialize for Content {
             Content::Notify(notify) => notify.size(),
             Content::Ts(ts) => ts.size(),
             Content::Sk(sk) => sk.size(),
+            Content::Skf(skf) => skf.size(),
             Content::Delete(delete) => delete.size(),
         }
     }
@@ -147,6 +150,10 @@ impl Payload {
                 next_payload_type,
                 &mut &buf.chunk()[..len],
             )?),
+            Some(PayloadType::SKF) => Content::Skf(Skf::deserialize(
+                next_payload_type,
+                &mut &buf.chunk()[..len],
+            )?),
             Some(PayloadType::DELETE) => {
                 Content::Delete(Delete::deserialize(&mut &buf.chunk()[..len])?)
             }
@@ -194,6 +201,7 @@ emit_try_from_payload!(PayloadType::NONCE, Nonce);
 emit_try_from_payload!(PayloadType::NOTIFY, Notify);
 emit_try_from_payload!(PayloadType::TSi | PayloadType::TSr, Ts);
 emit_try_from_payload!(PayloadType::SK, Sk);
+emit_try_from_payload!(PayloadType::SKF, Skf);
 emit_try_from_payload!(PayloadType::DELETE, Delete);
 
 /// Security Association content
@@ -695,6 +703,21 @@ impl Sk {
         &self.ciphertext
     }
 
+    /// Encrypts raw plaintext bytes, creates a new `Sk` content
+    pub fn encrypt_raw(
+        key: &EncryptionKey,
+        plaintext: &[u8],
+        inner: Num<u8, PayloadType>,
+        integ: Option<&Integ>,
+    ) -> Result<Self, serialize::SerializeError> {
+        let ciphertext = key.cipher().encrypt(key.key(), plaintext)?;
+        Ok(Self {
+            ciphertext,
+            inner,
+            integ: integ.cloned(),
+        })
+    }
+
     /// Encrypts payloads with given cipher and key, creates a new `Sk` content
     pub fn encrypt<'a>(
         key: &EncryptionKey,
@@ -759,6 +782,127 @@ impl serialize::Serialize for Sk {
     fn size(&self) -> Result<usize, serialize::SerializeError> {
         self.ciphertext
             .len()
+            .checked_add(
+                self.integ
+                    .as_ref()
+                    .map(|integ| integ.output_size())
+                    .unwrap_or(0),
+            )
+            .ok_or(serialize::SerializeError::Overflow)
+    }
+}
+
+/// Encrypted Fragment content (RFC 7383)
+#[derive(Debug, PartialEq)]
+pub struct Skf {
+    fragment_number: u16,
+    total_fragments: u16,
+    ciphertext: Vec<u8>,
+    inner: Num<u8, PayloadType>,
+    integ: Option<Integ>,
+}
+
+impl Skf {
+    /// Creates a new `Skf` content
+    pub fn new(
+        fragment_number: u16,
+        total_fragments: u16,
+        ciphertext: impl AsRef<[u8]>,
+        inner: Num<u8, PayloadType>,
+        integ: Option<Integ>,
+    ) -> Self {
+        Self {
+            fragment_number,
+            total_fragments,
+            ciphertext: ciphertext.as_ref().to_owned(),
+            inner,
+            integ,
+        }
+    }
+
+    /// Returns the fragment number (1-based)
+    pub fn fragment_number(&self) -> u16 {
+        self.fragment_number
+    }
+
+    /// Returns the total number of fragments
+    pub fn total_fragments(&self) -> u16 {
+        self.total_fragments
+    }
+
+    /// Returns the first inner payload type (only meaningful for fragment 1)
+    pub fn inner(&self) -> Num<u8, PayloadType> {
+        self.inner
+    }
+
+    /// Decrypts this fragment, returning raw plaintext bytes
+    pub fn decrypt_raw(
+        &self,
+        key: &EncryptionKey,
+        integ: Option<&Integ>,
+    ) -> Result<Vec<u8>, serialize::DeserializeError> {
+        let integ_size = integ.map(|integ| integ.output_size()).unwrap_or(0);
+        if integ_size > self.ciphertext.len() {
+            return Err(serialize::DeserializeError::PrematureEof);
+        }
+        let plaintext = key.cipher().decrypt(
+            key.key(),
+            &self.ciphertext[..self.ciphertext.len() - integ_size],
+        )?;
+        Ok(plaintext)
+    }
+
+    /// Encrypts a plaintext chunk as an SKF fragment
+    pub fn encrypt(
+        key: &EncryptionKey,
+        fragment_number: u16,
+        total_fragments: u16,
+        plaintext: &[u8],
+        inner: Num<u8, PayloadType>,
+        integ: Option<&Integ>,
+    ) -> Result<Self, serialize::SerializeError> {
+        let ciphertext = key.cipher().encrypt(key.key(), plaintext)?;
+        Ok(Self {
+            fragment_number,
+            total_fragments,
+            ciphertext,
+            inner,
+            integ: integ.cloned(),
+        })
+    }
+
+    /// Deserializes `buf` as an `Skf` content with given inner payload type
+    pub fn deserialize(
+        payload_type: Num<u8, PayloadType>,
+        buf: &mut dyn Buf,
+    ) -> Result<Self, serialize::DeserializeError>
+    where
+        Self: Sized,
+    {
+        let fragment_number = buf.try_get_u16()?;
+        let total_fragments = buf.try_get_u16()?;
+        Ok(Self::new(
+            fragment_number,
+            total_fragments,
+            buf.chunk(),
+            payload_type,
+            None,
+        ))
+    }
+}
+
+impl serialize::Serialize for Skf {
+    fn serialize(&self, buf: &mut dyn BufMut) -> Result<(), serialize::SerializeError> {
+        buf.put_u16(self.fragment_number);
+        buf.put_u16(self.total_fragments);
+        buf.put_slice(&self.ciphertext[..]);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<usize, serialize::SerializeError> {
+        4usize
+            .checked_add(self.ciphertext.len())
+            .ok_or(serialize::SerializeError::Overflow)?
             .checked_add(
                 self.integ
                     .as_ref()
@@ -848,13 +992,13 @@ pub(crate) fn serialize_payloads<'a>(
 ) -> Result<(), serialize::SerializeError> {
     let payloads: Vec<_> = payloads.into_iter().collect();
     let last = payloads.last().map(|p| match p.ty().assigned() {
-        Some(PayloadType::SK) => Some(p.content()),
+        Some(PayloadType::SK | PayloadType::SKF) => Some(p.content()),
         _ => None,
     });
-    let trailer = if let Some(Some(Content::Sk(sk))) = last {
-        sk.inner
-    } else {
-        0.into()
+    let trailer = match last {
+        Some(Some(Content::Sk(sk))) => sk.inner,
+        Some(Some(Content::Skf(skf))) => skf.inner,
+        _ => 0.into(),
     };
     let trailer: Vec<Num<u8, PayloadType>> = vec![trailer; 1];
     let mut next_types = payloads.iter().map(|p| p.ty()).chain(trailer);
@@ -873,7 +1017,7 @@ pub(crate) fn deserialize_payloads(
     while buf.has_remaining() {
         let (payload, next_type) = Payload::deserialize(payload_type, buf)?;
         payloads.push(payload);
-        if let Some(PayloadType::SK) = payload_type.assigned() {
+        if matches!(payload_type.assigned(), Some(PayloadType::SK | PayloadType::SKF)) {
             break;
         }
         payload_type = next_type;

@@ -250,6 +250,7 @@ cache_cow! {
         rekeyed_child_sa: Option<Box<ChildSa>>,
         deleted_child_sas: Vec<Box<ChildSa>>,
         rekeying_ike_spi: Option<Spi>,
+        fragmentation_supported: bool,
     }
 }
 
@@ -412,6 +413,35 @@ impl StateDataCache<'_> {
         Ok(Some(key.integ().sign(key.key(), message.as_ref())?))
     }
 
+    /// Signs a message as if it were from the peer (for fragment reassembly)
+    pub(crate) fn message_sign_as_peer(&self, message: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, StateError> {
+        if self.chosen_proposal()?.integ().is_none() {
+            return Ok(None);
+        }
+
+        let key = match *self.is_initiator {
+            Some(true) => self
+                .keys()?
+                .protection
+                .ar
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))?,
+            Some(false) => self
+                .keys()?
+                .protection
+                .ai
+                .as_ref()
+                .ok_or(StateError::InvalidState(InvalidStateError::NoKeysSet))?,
+            None => {
+                return Err(StateError::InvalidState(
+                    InvalidStateError::InitiatorNotDetermined,
+                ));
+            }
+        };
+
+        Ok(Some(key.integ().sign(key.key(), message.as_ref())?))
+    }
+
     fn message_verify(&self, message: impl AsRef<[u8]>) -> Result<bool, StateError> {
         if self.chosen_proposal()?.integ().is_none() {
             return Ok(true);
@@ -494,6 +524,10 @@ trait SendMessage {
     }
 }
 
+/// Maximum IKE message size before fragmentation kicks in.
+/// Based on a conservative 1280-byte IPv6 minimum MTU minus IP (40) and UDP (8) headers.
+const FRAGMENT_MAX_MESSAGE_SIZE: usize = 1232;
+
 trait SendProtectedMessage {
     fn send_message(
         sender: UnboundedSender<ControlMessage>,
@@ -501,6 +535,20 @@ trait SendProtectedMessage {
         message: ProtectedMessage,
     ) -> Result<(), StateError> {
         let len = message.size()?;
+        let integ_size = data
+            .chosen_proposal()
+            .ok()
+            .and_then(|p| p.integ())
+            .map(|i| i.output_size())
+            .unwrap_or(0);
+
+        // If fragmentation is negotiated and the message (with ICV) exceeds
+        // the threshold, decrypt the SK payload back to plaintext and
+        // re-encrypt as SKF fragments. This avoids changing every caller.
+        if *data.fragmentation_supported && len + integ_size > FRAGMENT_MAX_MESSAGE_SIZE {
+            return Self::send_fragmented(sender, data, message);
+        }
+
         let mut buf = BytesMut::with_capacity(len);
         message.serialize(&mut buf)?;
 
@@ -515,6 +563,56 @@ trait SendProtectedMessage {
         }
 
         Ok(sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?)
+    }
+
+    /// Sends a message as SKF fragments (RFC 7383).
+    fn send_fragmented(
+        sender: UnboundedSender<ControlMessage>,
+        data: &mut StateDataCache<'_>,
+        message: ProtectedMessage,
+    ) -> Result<(), StateError> {
+        // Decrypt the SK payload to recover the inner plaintext
+        let inner_message = message
+            .unprotect(data.encrypting_key()?, data.chosen_proposal()?.integ())
+            .map_err(|err| StateError::Protocol(err.into()))?;
+
+        let key = data.encrypting_key()?;
+        let integ = data.chosen_proposal()?.integ();
+        let fragments =
+            inner_message.protect_fragmented(key, integ, FRAGMENT_MAX_MESSAGE_SIZE)?;
+
+        debug!(
+            total_fragments = fragments.len(),
+            "sending fragmented IKE message"
+        );
+
+        let is_request = message.flags().contains(MessageFlags::I);
+
+        // For retransmission of fragmented requests, store all fragment
+        // datagrams concatenated so the retransmit path can split them.
+        let mut all_fragments = Vec::new();
+
+        for fragment in fragments {
+            let frag_len = fragment.size()?;
+            let mut buf = BytesMut::with_capacity(frag_len);
+            fragment.serialize(&mut buf)?;
+
+            if let Some(checksum) = data.message_sign(&buf)? {
+                buf.extend_from_slice(&checksum);
+            }
+
+            all_fragments.push(buf.to_vec());
+            sender.unbounded_send(ControlMessage::IkeMessage(buf.to_vec()))?;
+        }
+
+        if is_request {
+            // Store the first fragment as the retransmit payload. The server
+            // will re-send all fragments when it retransmits.
+            *data.last_request.to_mut() = all_fragments.into_iter().next();
+            *data.message_id.to_mut() = message.id().wrapping_add(1);
+        }
+
+        Ok(())
     }
 }
 

@@ -163,6 +163,7 @@ pub enum PayloadType {
     SK = 46,
     CP = 47,
     EAP = 48,
+    SKF = 53,
 }
 
 impl From<PayloadType> for u8 {
@@ -547,6 +548,7 @@ pub enum NotifyType {
     REKEY_SA = 16393,
     ESP_TFC_PADDING_NOT_SUPPORTED = 16394,
     NON_FIRST_FRAGMENTS_ALSO = 16395,
+    IKEV2_FRAGMENTATION_SUPPORTED = 16430,
 }
 
 impl From<NotifyType> for u16 {

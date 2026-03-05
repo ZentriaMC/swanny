@@ -71,6 +71,16 @@ fn generate_ike_sa_init_request(
             payload::Content::Ke(payload::Ke::new(group.id().into(), &public_key)),
             true,
         ),
+        Payload::new(
+            PayloadType::NOTIFY.into(),
+            payload::Content::Notify(payload::Notify::new(
+                Protocol::IKE.into(),
+                None,
+                NotifyType::IKEV2_FRAGMENTATION_SUPPORTED.into(),
+                b"",
+            )),
+            false,
+        ),
     ]);
 
     *data.is_initiator.to_mut() = Some(true);
@@ -135,6 +145,15 @@ fn handle_ike_sa_init_request(
     )?;
     debug!(keys = ?&keys, "generated keys");
 
+    let peer_fragmentation = request.payloads().any(|p| {
+        matches!(p.ty().assigned(), Some(PayloadType::NOTIFY))
+            && matches!(
+                p.content(),
+                payload::Content::Notify(n)
+                    if n.ty().assigned() == Some(NotifyType::IKEV2_FRAGMENTATION_SUPPORTED)
+            )
+    });
+
     *data.is_initiator.to_mut() = Some(false);
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
     *data.public_key.to_mut() = Some(public_key);
@@ -143,6 +162,7 @@ fn handle_ike_sa_init_request(
     *data.nonce_r.to_mut() = Some(nonce);
     *data.peer_spi.to_mut() = Some(request.spi_i().to_owned());
     *data.received_message_id.to_mut() = Some(request.id());
+    *data.fragmentation_supported.to_mut() = peer_fragmentation;
 
     Ok(())
 }
@@ -191,6 +211,19 @@ fn generate_ike_sa_init_response(data: &StateDataCache<'_>) -> Result<Message, S
             true,
         ),
     ]);
+
+    if *data.fragmentation_supported {
+        response.add_payloads(Some(Payload::new(
+            PayloadType::NOTIFY.into(),
+            payload::Content::Notify(payload::Notify::new(
+                Protocol::IKE.into(),
+                None,
+                NotifyType::IKEV2_FRAGMENTATION_SUPPORTED.into(),
+                b"",
+            )),
+            false,
+        )));
+    }
 
     debug!(response = ?&response, "sending unprotected response");
 

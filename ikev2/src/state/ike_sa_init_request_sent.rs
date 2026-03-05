@@ -79,11 +79,21 @@ fn handle_ike_sa_init_response(
     )?;
     debug!(keys = ?&keys, "generated keys");
 
+    let peer_fragmentation = response.payloads().any(|p| {
+        matches!(p.ty().assigned(), Some(PayloadType::NOTIFY))
+            && matches!(
+                p.content(),
+                payload::Content::Notify(n)
+                    if n.ty().assigned() == Some(NotifyType::IKEV2_FRAGMENTATION_SUPPORTED)
+            )
+    });
+
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
     *data.keys.to_mut() = Some(keys);
     *data.nonce_r.to_mut() = Some(nonce_r.nonce().clone());
     *data.peer_spi.to_mut() = Some(response.spi_r().to_owned());
     *data.last_request.to_mut() = None;
+    *data.fragmentation_supported.to_mut() = peer_fragmentation;
 
     Ok(())
 }

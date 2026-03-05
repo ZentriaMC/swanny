@@ -46,23 +46,21 @@ use crate::{
         GroupPrivateKey, Integ, Key, Prf,
     },
     message::{
-        EspSpi, Spi,
+        EspSpi, Header, Spi,
         num::{
             AttributeType, DhId, EncrId, EsnId, ExchangeType, IntegId, Num, PayloadType, PrfId,
             Protocol, TransformType, TryFromTransformIdError,
         },
+        payload::{self, Payload},
         proposal::Proposal,
-        serialize::DeserializeError,
+        serialize::{self, DeserializeError},
         traffic_selector::TrafficSelector,
         transform::{Attribute, Transform},
     },
-    state::{self, State, StateData, StateError},
+    state::{self, State, StateData, StateDataCache, StateError},
 };
 #[cfg(test)]
-use crate::{
-    message::{Message, ProtectedMessage},
-    state::StateDataCache,
-};
+use crate::message::{Message, ProtectedMessage};
 use bytes::Buf;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::sync::Arc;
@@ -138,6 +136,32 @@ pub enum ProtocolError {
     TemporaryFailure,
 }
 
+/// Buffer for collecting IKE message fragments (RFC 7383)
+#[derive(Debug)]
+struct FragmentBuffer {
+    message_id: u32,
+    total_fragments: u16,
+    inner: Num<u8, PayloadType>,
+    fragments: std::collections::BTreeMap<u16, Vec<u8>>,
+}
+
+impl Default for FragmentBuffer {
+    fn default() -> Self {
+        Self {
+            message_id: 0,
+            total_fragments: 0,
+            inner: 0u8.into(),
+            fragments: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl FragmentBuffer {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// IKE SA abstraction
 ///
 /// The `IkeSa` data structure is an opaque handle to the IKEv2 state
@@ -148,6 +172,7 @@ pub struct IkeSa {
     state: Arc<Mutex<Option<Box<dyn State>>>>,
     config: Config,
     sender: UnboundedSender<ControlMessage>,
+    fragment_buffer: Arc<Mutex<FragmentBuffer>>,
 }
 
 impl IkeSa {
@@ -165,6 +190,7 @@ impl IkeSa {
                 state: Arc::new(Mutex::new(Some(Box::new(state::Initial {})))),
                 config: config.to_owned(),
                 sender,
+                fragment_buffer: Arc::new(Mutex::new(FragmentBuffer::default())),
             },
             receiver,
         ))
@@ -219,8 +245,145 @@ impl IkeSa {
         Ok(message.protect(data.encrypting_key()?, data.chosen_proposal()?.integ())?)
     }
 
+    /// Checks if the message contains an SKF payload and attempts fragment reassembly.
+    /// Returns `Some(reassembled_bytes)` when all fragments are collected, `None` if
+    /// still waiting for more fragments, or passes through non-fragmented messages.
+    async fn try_reassemble_fragments(
+        &self,
+        message: &[u8],
+    ) -> Result<Option<Vec<u8>>, StateError> {
+        use bytes::{Buf, BytesMut};
+
+        // Parse just the header to check the first payload type (peek, don't consume).
+        // If the header can't be parsed, pass the message through so the state handler
+        // can generate the appropriate error notification.
+        let mut buf: &[u8] = message;
+        let (header, first_payload_type) = match Header::deserialize(&mut buf) {
+            Ok(result) => result,
+            Err(_) => return Ok(Some(message.to_vec())),
+        };
+
+        if first_payload_type.assigned() != Some(PayloadType::SKF) {
+            return Ok(Some(message.to_vec()));
+        }
+
+        // Skip message length (4 bytes)
+        if buf.remaining() < 4 {
+            return Err(ProtocolError::DeserializeError(DeserializeError::PrematureEof).into());
+        }
+        buf.advance(4);
+
+        // Parse generic payload header: next_payload(1), critical(1), length(2)
+        if buf.remaining() < 4 {
+            return Err(ProtocolError::DeserializeError(DeserializeError::PrematureEof).into());
+        }
+        let inner_payload_type: u8 = buf.get_u8();
+        let _critical = buf.get_u8();
+        let _payload_len = buf.get_u16();
+
+        // Parse fragment header: fragment_number(2), total_fragments(2)
+        if buf.remaining() < 4 {
+            return Err(ProtocolError::DeserializeError(DeserializeError::PrematureEof).into());
+        }
+        let fragment_number = buf.get_u16();
+        let total_fragments = buf.get_u16();
+
+        // The rest is encrypted content (IV + ciphertext + padding + ICV inside the payload,
+        // plus the message-level ICV appended after the serialized message)
+        let encrypted_content = buf.to_vec();
+
+        let mut frag_buf = self.fragment_buffer.lock().await;
+
+        // If this is a new message ID or mismatched total, reset the buffer
+        if frag_buf.fragments.is_empty()
+            || frag_buf.message_id != header.id()
+            || frag_buf.total_fragments != total_fragments
+        {
+            frag_buf.reset();
+            frag_buf.message_id = header.id();
+            frag_buf.total_fragments = total_fragments;
+        }
+
+        // Store the inner payload type from fragment 1
+        if fragment_number == 1 {
+            frag_buf.inner = inner_payload_type.into();
+        }
+
+        frag_buf.fragments.insert(fragment_number, encrypted_content);
+
+        info!(
+            fragment_number,
+            total_fragments,
+            collected = frag_buf.fragments.len(),
+            "received IKE fragment"
+        );
+
+        if frag_buf.fragments.len() as u16 != total_fragments {
+            return Ok(None); // Still waiting for more fragments
+        }
+
+        // All fragments collected — reassemble
+        let inner = frag_buf.inner;
+        let fragments: Vec<_> = (1..=total_fragments)
+            .map(|i| frag_buf.fragments.remove(&i).expect("fragment should exist"))
+            .collect();
+        frag_buf.reset();
+        drop(frag_buf);
+
+        // Decrypt each fragment and concatenate plaintext
+        let data = self.data.read().await;
+        let data = StateDataCache::new_borrowed(&data);
+        let decrypt_key = data.decrypting_key()?;
+        let integ = data.chosen_proposal()?.integ();
+
+        let mut plaintext = Vec::new();
+        for fragment_data in &fragments {
+            let skf = payload::Skf::new(0, 0, &fragment_data[..], inner, None);
+            let chunk = skf.decrypt_raw(decrypt_key, integ)
+                .map_err(|err| StateError::Protocol(err.into()))?;
+            plaintext.extend_from_slice(&chunk);
+        }
+
+        // Re-encrypt the concatenated plaintext as a single SK payload using the
+        // peer's encrypting key (= our decrypting key). The state handler will
+        // decrypt with the same key, recovering the original plaintext.
+        let sk = payload::Sk::encrypt_raw(decrypt_key, &plaintext, inner, integ)?;
+
+        let reassembled = crate::message::ProtectedMessage::from_parts(
+            header,
+            vec![Payload::new(
+                PayloadType::SK.into(),
+                payload::Content::Sk(sk),
+                true,
+            )],
+        );
+
+        // Serialize the reassembled message
+        let len = serialize::Serialize::size(&reassembled)?;
+        let mut buf = BytesMut::with_capacity(len);
+        serialize::Serialize::serialize(&reassembled, &mut buf)?;
+
+        // Sign with the peer's auth key so verify_message() in the state handler succeeds
+        if let Some(checksum) = data.message_sign_as_peer(&buf)? {
+            buf.extend_from_slice(&checksum);
+        }
+
+        drop(data);
+
+        info!(
+            total_fragments = fragments.len(),
+            "reassembled IKE fragments into complete message"
+        );
+        Ok(Some(buf.to_vec()))
+    }
+
     /// Processes IKE message
     pub async fn handle_message(&self, message: impl AsRef<[u8]>) -> Result<(), StateError> {
+        let message = match self.try_reassemble_fragments(message.as_ref()).await? {
+            Some(msg) => msg,
+            None => return Ok(()), // Fragment buffered, waiting for more
+        };
+
         let mut state = self.state.lock().await;
         if let Some(old_state) = state.take() {
             let old_state_name = old_state.to_string();
@@ -230,7 +393,7 @@ impl IkeSa {
                     &self.config,
                     self.sender.clone(),
                     self.data.clone(),
-                    message.as_ref(),
+                    &message,
                 )
                 .await?;
 
