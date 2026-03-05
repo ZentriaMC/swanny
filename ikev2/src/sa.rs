@@ -73,6 +73,7 @@ pub enum ControlMessage {
     IkeMessage(Vec<u8>),
     CreateChildSa(Box<ChildSa>),
     DeleteChildSa(Box<ChildSa>),
+    InitialContact(payload::Id),
 }
 
 /// Errors at the protocol level
@@ -171,6 +172,7 @@ impl FragmentBuffer {
 /// machine.
 #[derive(Clone)]
 pub struct IkeSa {
+    spi: Spi,
     data: Arc<RwLock<StateData>>,
     state: Arc<Mutex<Option<Box<dyn State>>>>,
     config: Config,
@@ -189,6 +191,7 @@ impl IkeSa {
 
         Ok((
             Self {
+                spi,
                 data: Arc::new(RwLock::new(data)),
                 state: Arc::new(Mutex::new(Some(Box::new(state::Initial {})))),
                 config: config.to_owned(),
@@ -197,6 +200,11 @@ impl IkeSa {
             },
             receiver,
         ))
+    }
+
+    /// Returns the local SPI for this IKE SA
+    pub fn spi(&self) -> Spi {
+        self.spi
     }
 
     /// Returns the initiator/responder status if it has been determined
@@ -209,6 +217,12 @@ impl IkeSa {
     pub async fn pending_request(&self) -> Option<Vec<u8>> {
         let data = self.data.read().await;
         data.pending_request()
+    }
+
+    /// Returns all active Child SAs for this IKE SA
+    pub async fn child_sas(&self) -> Vec<Box<ChildSa>> {
+        let data = self.data.read().await;
+        data.child_sas().to_vec()
     }
 
     /// Returns true if this `IkeSa` is in the given state

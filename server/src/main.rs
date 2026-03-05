@@ -3,6 +3,7 @@ use bytes::Bytes;
 use cidr::IpCidr;
 use futures::{
     FutureExt, SinkExt,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
     stream::{FuturesUnordered, StreamExt},
 };
 use netlink_packet_core::NetlinkPayload;
@@ -11,16 +12,20 @@ use netlink_packet_xfrm::{
     XFRM_POLICY_OUT, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage,
 };
 use netlink_proto::sys::{AsyncSocket, SocketAddr};
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::IpAddr;
 use std::net::UdpSocket as StdUdpSocket;
 use std::pin::Pin;
 use swanny_ikev2::{
-    config::{Config, ConfigBuilder},
+    config::ConfigBuilder,
     crypto::{AuthenticationKey, Cipher, EncryptionKey, Integ},
     message::{
-        EspSpi,
-        num::{DhId, EncrId, EsnId, IdType, IntegId, PrfId, Protocol, TrafficSelectorType},
+        EspSpi, Header, Spi,
+        num::{
+            DhId, EncrId, EsnId, ExchangeType, IdType, IntegId, MessageFlags, PrfId, Protocol,
+            TrafficSelectorType,
+        },
         payload::Id,
         traffic_selector::TrafficSelector,
     },
@@ -30,12 +35,12 @@ use swanny_ikev2::{
 use tokio::net::UdpSocket;
 use tokio::time::sleep;
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use xfrmnetlink::Handle;
 mod config;
 
-fn create_ike_sa_config(config: &config::Config) -> Config {
+fn create_ike_sa_config(config: &config::Config) -> swanny_ikev2::config::Config {
     let id = config.local_identity.clone().unwrap_or_else(|| match &config.address {
         IpAddr::V4(v4) => Id::new(IdType::ID_IPV4_ADDR.into(), &v4.octets()[..]),
         IpAddr::V6(v6) => Id::new(IdType::ID_IPV6_ADDR.into(), &v6.octets()[..]),
@@ -524,6 +529,113 @@ async fn delete_child_sa(
     Ok(())
 }
 
+/// Spawns a task that forwards control messages from an SA's receiver
+/// to the shared tagged channel.
+fn register_sa(
+    sa_table: &mut HashMap<Spi, IkeSa>,
+    spi: Spi,
+    sa: IkeSa,
+    rx: UnboundedReceiver<ControlMessage>,
+    shared_tx: UnboundedSender<(Spi, ControlMessage)>,
+) {
+    sa_table.insert(spi, sa);
+    tokio::spawn(async move {
+        let mut rx = rx;
+        while let Some(msg) = rx.next().await {
+            if shared_tx.unbounded_send((spi, msg)).is_err() {
+                break;
+            }
+        }
+    });
+    info!(spi = ?&spi, "registered IKE SA");
+}
+
+/// Routes an incoming IKE message to the correct SA by parsing the header.
+///
+/// Returns the local SPI to route to, creating a new SA if this is an
+/// IKE_SA_INIT request from the peer.
+fn route_incoming_message(
+    message: &[u8],
+    sa_table: &mut HashMap<Spi, IkeSa>,
+    ike_sa_config: &swanny_ikev2::config::Config,
+    shared_tx: &UnboundedSender<(Spi, ControlMessage)>,
+) -> Result<Option<Spi>> {
+    let mut buf: &[u8] = message;
+    let (header, _) = Header::deserialize(&mut buf)?;
+
+    let zero_spi = Spi::default();
+
+    // IKE_SA_INIT request from peer: SPI_r == 0, I flag set
+    if *header.spi_r() == zero_spi
+        && header.flags().contains(MessageFlags::I)
+        && header.exchange().assigned() == Some(ExchangeType::IKE_SA_INIT)
+    {
+        let (sa, rx) = IkeSa::new(ike_sa_config)?;
+        let spi = sa.spi();
+        register_sa(sa_table, spi, sa, rx, shared_tx.clone());
+        return Ok(Some(spi));
+    }
+
+    // Determine our local SPI from the message flags:
+    // - I flag set: sender is the initiator → we're responder → our SPI is SPI_r
+    // - I flag not set: sender is the responder → we're initiator → our SPI is SPI_i
+    let local_spi = if header.flags().contains(MessageFlags::I) {
+        *header.spi_r()
+    } else {
+        *header.spi_i()
+    };
+
+    if sa_table.contains_key(&local_spi) {
+        Ok(Some(local_spi))
+    } else {
+        debug!(spi = ?&local_spi, "no SA found for SPI, dropping message");
+        Ok(None)
+    }
+}
+
+/// Tears down all IKE SAs except the one identified by `keep_spi`,
+/// deleting their XFRM child SAs.
+async fn teardown_stale_sas(
+    sa_table: &mut HashMap<Spi, IkeSa>,
+    keep_spi: Spi,
+    handle: Handle,
+    local_ts: &[IpCidr],
+    src_address: IpAddr,
+    dst_address: IpAddr,
+    mode: ChildSaMode,
+) {
+    let stale_spis: Vec<Spi> = sa_table
+        .keys()
+        .filter(|&&spi| spi != keep_spi)
+        .copied()
+        .collect();
+
+    for spi in stale_spis {
+        if let Some(sa) = sa_table.remove(&spi) {
+            let child_sas = sa.child_sas().await;
+            for child in &child_sas {
+                if let Err(err) = delete_child_sa(
+                    handle.clone(),
+                    child,
+                    local_ts,
+                    src_address,
+                    dst_address,
+                    mode,
+                )
+                .await
+                {
+                    warn!(?err, spi = ?&spi, "failed to delete child SA during teardown");
+                }
+            }
+            info!(
+                spi = ?&spi,
+                child_sas = child_sas.len(),
+                "tore down stale IKE SA"
+            );
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = config::Config::new()?;
@@ -566,10 +678,15 @@ async fn main() -> Result<()> {
 
     let ike_sa_config = create_ike_sa_config(&config);
 
-    let (ike_sa, mut ike_sa_messages) = IkeSa::new(&ike_sa_config)?;
+    // SA table keyed by local SPI, with a shared control message channel.
+    let mut sa_table: HashMap<Spi, IkeSa> = HashMap::new();
+    let (shared_tx, mut shared_rx) = unbounded::<(Spi, ControlMessage)>();
 
     let mut pending_operations: FuturesUnordered<Pin<Box<dyn Future<Output = Result<(), StateError>>>>> =
         FuturesUnordered::new();
+
+    // Track the primary (most recently established) SA for DPD and rekey.
+    let mut primary_spi: Option<Spi> = None;
 
     let ike_lifetime_duration = config
         .ike_lifetime
@@ -593,12 +710,43 @@ async fn main() -> Result<()> {
                         XfrmMessage::Acquire(_) => {
                             let ts_i = traffic_selector_from_cidr(&config.local_ts[0]);
                             let ts_r = traffic_selector_from_cidr(&config.remote_ts[0]);
-                            pending_operations.push(ike_sa.handle_acquire(ts_i, ts_r).boxed_local());
+
+                            // Use the primary SA if it exists, otherwise create a new one.
+                            let sa = if let Some(spi) = primary_spi {
+                                if let Some(sa) = sa_table.get(&spi) {
+                                    sa.clone()
+                                } else {
+                                    let (sa, rx) = IkeSa::new(&ike_sa_config)?;
+                                    let spi = sa.spi();
+                                    register_sa(&mut sa_table, spi, sa.clone(), rx, shared_tx.clone());
+                                    primary_spi = Some(spi);
+                                    sa
+                                }
+                            } else {
+                                let (sa, rx) = IkeSa::new(&ike_sa_config)?;
+                                let spi = sa.spi();
+                                register_sa(&mut sa_table, spi, sa.clone(), rx, shared_tx.clone());
+                                primary_spi = Some(spi);
+                                sa
+                            };
+
+                            pending_operations.push(async move {
+                                sa.handle_acquire(ts_i, ts_r).await
+                            }.boxed_local());
+                            ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
+                            dpd_timer = sleep(dpd_interval).boxed().fuse();
                         },
                         XfrmMessage::Expire(expire) => {
                             let spi = expire.expire.state.id.spi.to_be_bytes();
-                            debug!("expired: {:?}", &spi);
-                            pending_operations.push(ike_sa.handle_expire(spi, expire.expire.hard != 0).boxed_local());
+                            let hard = expire.expire.hard != 0;
+                            debug!(child_spi = ?&spi, hard, "XFRM expire");
+                            // Broadcast to all SAs — each will ignore SPIs it doesn't own.
+                            for sa in sa_table.values() {
+                                let sa = sa.clone();
+                                pending_operations.push(async move {
+                                    sa.handle_expire(spi, hard).await
+                                }.boxed_local());
+                            }
                         },
                         _ => info!("Other XFRM event message - {:?}", xfrm_message),
                     };
@@ -606,8 +754,9 @@ async fn main() -> Result<()> {
                     info!("Other netlink message - {:?}", payload);
                 }
             }
-            ike_sa_message = ike_sa_messages.select_next_some() => {
-                match ike_sa_message {
+            tagged_msg = shared_rx.select_next_some() => {
+                let (sa_spi, msg) = tagged_msg;
+                match msg {
                     ControlMessage::IkeMessage(message) => {
                         let message: Bytes = message.into();
                         let peer_address: std::net::SocketAddr = (config.peer_address, 500).into();
@@ -624,6 +773,9 @@ async fn main() -> Result<()> {
                             config.mode.into(),
                             config.if_id,
                         ).await?;
+                        primary_spi = Some(sa_spi);
+                        ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
+                        dpd_timer = sleep(dpd_interval).boxed().fuse();
                     }
                     ControlMessage::DeleteChildSa(child_sa) => {
                         delete_child_sa(
@@ -635,27 +787,68 @@ async fn main() -> Result<()> {
                             config.mode.into(),
                         ).await?;
                     }
+                    ControlMessage::InitialContact(peer_id) => {
+                        info!(
+                            peer_id = %peer_id,
+                            sa_spi = ?&sa_spi,
+                            "INITIAL_CONTACT received, tearing down stale SAs"
+                        );
+                        teardown_stale_sas(
+                            &mut sa_table,
+                            sa_spi,
+                            handle.clone(),
+                            &config.local_ts,
+                            config.address,
+                            config.peer_address,
+                            config.mode.into(),
+                        ).await;
+                        primary_spi = Some(sa_spi);
+                    }
                 }
             },
             result = framed.select_next_some() => {
                 match result {
                     Ok((message, _peer_address)) => {
-                        pending_operations.push(ike_sa.handle_message(message.to_vec()).boxed_local());
+                        if let Some(spi) = route_incoming_message(
+                            &message,
+                            &mut sa_table,
+                            &ike_sa_config,
+                            &shared_tx,
+                        )? {
+                            if let Some(sa) = sa_table.get(&spi).cloned() {
+                                let message = message.to_vec();
+                                pending_operations.push(async move {
+                                    sa.handle_message(message).await
+                                }.boxed_local());
+                            }
+                        }
                         dpd_timer = sleep(dpd_interval).boxed().fuse();
                     },
-                    Err(e) => {
-                        debug!(error = %e, "error receiving IKEv2 message");
+                    Err(err) => {
+                        debug!(?err, "error receiving IKEv2 message");
                     },
                 }
             }
             _ = &mut ike_rekey_timer => {
-                info!("IKE SA lifetime expired, initiating rekey");
-                pending_operations.push(ike_sa.handle_rekey_ike_sa().boxed_local());
+                if let Some(spi) = primary_spi {
+                    if let Some(sa) = sa_table.get(&spi).cloned() {
+                        info!("IKE SA lifetime expired, initiating rekey");
+                        pending_operations.push(async move {
+                            sa.handle_rekey_ike_sa().await
+                        }.boxed_local());
+                    }
+                }
                 ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
             }
             _ = &mut dpd_timer => {
-                debug!("DPD interval expired, sending probe");
-                pending_operations.push(ike_sa.handle_dpd().boxed_local());
+                if let Some(spi) = primary_spi {
+                    if let Some(sa) = sa_table.get(&spi).cloned() {
+                        debug!("DPD interval expired, sending probe");
+                        pending_operations.push(async move {
+                            sa.handle_dpd().await
+                        }.boxed_local());
+                    }
+                }
                 dpd_timer = sleep(dpd_interval).boxed().fuse();
             }
             result = pending_operations.select_next_some() => {

@@ -36,7 +36,7 @@ fn handle_ike_auth_request(
     config: &Config,
     data: &mut StateDataCache<'_>,
     request: &ProtectedMessage,
-) -> Result<(), StateError> {
+) -> Result<Option<payload::Id>, StateError> {
     let request = request
         .unprotect(data.decrypting_key()?, data.chosen_proposal()?.integ())
         .map_err(|e| StateError::Protocol(e.into()))?;
@@ -161,7 +161,11 @@ fn handle_ike_auth_request(
     *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
     *data.received_message_id.to_mut() = Some(request.id());
 
-    Ok(())
+    if initial_contact {
+        Ok(Some(id_i.clone()))
+    } else {
+        Ok(None)
+    }
 }
 
 fn generate_ike_auth_response(
@@ -301,7 +305,7 @@ impl IkeSaInitResponseSent {
             Some(ExchangeType::IKE_AUTH) => {
                 Self::verify_message(data, serialized_request)?;
 
-                handle_ike_auth_request(config, data, &request)?;
+                let initial_contact_peer = handle_ike_auth_request(config, data, &request)?;
 
                 let response = generate_ike_auth_response(config, data, &request)?;
 
@@ -309,6 +313,10 @@ impl IkeSaInitResponseSent {
 
                 if let Some(child_sa) = data.created_child_sa.to_mut().take() {
                     Self::create_child_sa(sender.clone(), data, child_sa)?;
+                }
+
+                if let Some(peer_id) = initial_contact_peer {
+                    sender.unbounded_send(ControlMessage::InitialContact(peer_id))?;
                 }
             }
             _ => {

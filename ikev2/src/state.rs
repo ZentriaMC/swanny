@@ -493,6 +493,10 @@ impl StateData {
     pub fn pending_request(&self) -> Option<Vec<u8>> {
         self.last_request.clone()
     }
+
+    pub fn child_sas(&self) -> &[Box<ChildSa>] {
+        &self.child_sas
+    }
 }
 
 trait SendMessage {

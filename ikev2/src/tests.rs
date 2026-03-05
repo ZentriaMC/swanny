@@ -123,6 +123,10 @@ pub(crate) async fn establish_sa(
         Some(ControlMessage::CreateChildSa(child_sa)) => child_sa,
         _ => panic!("unexpected message"),
     };
+    match messages_r.next().await {
+        Some(ControlMessage::InitialContact(_)) => {}
+        _ => panic!("expected InitialContact"),
+    };
     handle.await.expect("handle should be awaited");
     assert!(responder.in_state(&state::Established {}).await);
 

@@ -90,6 +90,11 @@ async fn test_all_good() {
         _ => panic!("unexpected message"),
     };
 
+    match messages_r.next().await {
+        Some(ControlMessage::InitialContact(_)) => {}
+        _ => panic!("expected InitialContact"),
+    };
+
     handle.await.expect("handle should be awaited");
 
     assert_eq!(child_sa.mode(), ChildSaMode::Transport);
