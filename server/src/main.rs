@@ -8,7 +8,7 @@ use futures::{
 use netlink_packet_core::NetlinkPayload;
 use netlink_packet_xfrm::{
     UserTemplate, XFRM_MODE_TRANSPORT, XFRM_MODE_TUNNEL, XFRM_POLICY_FWD, XFRM_POLICY_IN,
-    XFRM_POLICY_OUT, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage, address::Address,
+    XFRM_POLICY_OUT, XFRMNLGRP_ACQUIRE, XFRMNLGRP_EXPIRE, XfrmMessage,
 };
 use netlink_proto::sys::{AsyncSocket, SocketAddr};
 use std::future::Future;
@@ -42,12 +42,24 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
     };
     let mut builder = ConfigBuilder::default()
         .ike_proposal(|pc| {
+            pc.encryption(EncrId::ENCR_AES_CBC, Some(256))
+                .prf(PrfId::PRF_HMAC_SHA2_256)
+                .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
+                .dh(DhId::MODP2048)
+        })
+        .ike_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_CBC, Some(128))
                 .prf(PrfId::PRF_HMAC_SHA2_256)
                 .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
                 .dh(DhId::MODP2048)
         })
         .ipsec_protocol(Protocol::ESP)
+        .ipsec_proposal(|pc| {
+            pc.encryption(EncrId::ENCR_AES_CBC, Some(256))
+                .integrity(IntegId::AUTH_HMAC_SHA2_256_128)
+                .dh(DhId::MODP2048)
+                .esn(EsnId::NoEsn)
+        })
         .ipsec_proposal(|pc| {
             pc.encryption(EncrId::ENCR_AES_GCM_16, Some(256))
                 .esn(EsnId::NoEsn)
@@ -87,31 +99,20 @@ fn create_ike_sa_config(config: &config::Config) -> Config {
         .expect("building config should succeed")
 }
 
-fn create_traffic_selector(
-    family: u16,
-    proto: u8,
-    address: &Address,
-    _port: u16,
-) -> Result<TrafficSelector> {
-    match family as i32 {
-        libc::AF_INET => Ok(TrafficSelector::new(
-            TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
-            proto,
-            IpAddr::V4(address.to_ipv4()),
-            IpAddr::V4(address.to_ipv4()),
-            0,
-            65535,
-        )),
-        libc::AF_INET6 => Ok(TrafficSelector::new(
-            TrafficSelectorType::TS_IPV6_ADDR_RANGE.into(),
-            proto,
-            IpAddr::V6(address.to_ipv6()),
-            IpAddr::V6(address.to_ipv6()),
-            0,
-            65535,
-        )),
-        _ => Err(anyhow::anyhow!("unsupported address family")),
-    }
+fn traffic_selector_from_cidr(cidr: &IpCidr) -> TrafficSelector {
+    let (ty, start, end) = match cidr {
+        IpCidr::V4(v4) => (
+            TrafficSelectorType::TS_IPV4_ADDR_RANGE,
+            IpAddr::V4(v4.first_address()),
+            IpAddr::V4(v4.last_address()),
+        ),
+        IpCidr::V6(v6) => (
+            TrafficSelectorType::TS_IPV6_ADDR_RANGE,
+            IpAddr::V6(v6.first_address()),
+            IpAddr::V6(v6.last_address()),
+        ),
+    };
+    TrafficSelector::new(ty.into(), 0, start, end, 0, 65535)
 }
 
 fn ipsec_to_xfrm(ipsec_protocol: Protocol) -> u8 {
@@ -576,19 +577,9 @@ async fn main() -> Result<()> {
                 let payload = netlink_message.payload;
                 if let NetlinkPayload::InnerMessage(xfrm_message) = payload {
                     match xfrm_message {
-                        XfrmMessage::Acquire(acquire) => {
-                            let ts_i = create_traffic_selector(
-                                acquire.acquire.selector.family,
-                                acquire.acquire.selector.proto,
-                                &acquire.acquire.selector.saddr,
-                                acquire.acquire.selector.sport,
-                            )?;
-                            let ts_r = create_traffic_selector(
-                                acquire.acquire.selector.family,
-                                acquire.acquire.selector.proto,
-                                &acquire.acquire.selector.daddr,
-                                acquire.acquire.selector.dport,
-                            )?;
+                        XfrmMessage::Acquire(_) => {
+                            let ts_i = traffic_selector_from_cidr(&config.local_ts[0]);
+                            let ts_r = traffic_selector_from_cidr(&config.remote_ts[0]);
                             pending_operations.push(ike_sa.handle_acquire(ts_i, ts_r).boxed_local());
                         },
                         XfrmMessage::Expire(expire) => {
