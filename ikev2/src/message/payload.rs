@@ -580,6 +580,9 @@ impl serialize::Deserialize for Notify {
         let protocol = buf.try_get_u8()?;
         let spi_len: usize = buf.try_get_u8()?.into();
         let ty = buf.try_get_u16()?;
+        if spi_len > buf.remaining() {
+            return Err(serialize::DeserializeError::PrematureEof);
+        }
         let spi = if spi_len > 0 {
             Some(&buf.chunk()[..spi_len])
         } else {
@@ -712,10 +715,13 @@ impl Sk {
         key: &EncryptionKey,
         integ: Option<&Integ>,
     ) -> Result<Vec<Payload>, serialize::DeserializeError> {
+        let integ_size = integ.map(|integ| integ.output_size()).unwrap_or(0);
+        if integ_size > self.ciphertext.len() {
+            return Err(serialize::DeserializeError::PrematureEof);
+        }
         let plaintext = key.cipher().decrypt(
             key.key(),
-            &self.ciphertext
-                [..self.ciphertext.len() - integ.map(|integ| integ.output_size()).unwrap_or(0)],
+            &self.ciphertext[..self.ciphertext.len() - integ_size],
         )?;
         let mut payload_type: Num<u8, PayloadType> = self.inner;
         let mut plaintext = plaintext.as_slice();

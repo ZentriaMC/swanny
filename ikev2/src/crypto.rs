@@ -636,6 +636,10 @@ impl Cipher {
         count += decrypter.finalize(&mut plaintext[count..])?;
         plaintext.truncate(count);
 
+        if plaintext.is_empty() {
+            return Err(CryptoError::InvalidPadding);
+        }
+
         let pad_len: usize = plaintext[plaintext.len() - 1].into();
         if pad_len > block_size {
             return Err(CryptoError::InvalidPadding);
