@@ -4,39 +4,90 @@
 # Expects lib.sh to be sourced and fh_ssh/scp_opts available.
 
 strongswan_start() {
-    local ns="$1"
-    local conf="$2"
+    local conf="$1"
 
     # Deploy config before starting
     scp "${scp_opts[@]}" "${conf}" core@127.0.0.1:/tmp/swanny-interop.conf
     fh_ssh -- "sudo mkdir -p /etc/strongswan/swanctl/conf.d && \
         sudo cp /tmp/swanny-interop.conf /etc/strongswan/swanctl/conf.d/swanny.conf"
 
-    # Start charon inside the namespace
-    fh_ssh -- "sudo ip netns exec ${ns} strongswan start"
+    # Enable verbose charon-systemd logging to journal
+    fh_ssh -- "sudo tee /etc/strongswan/strongswan.d/zz-logging.conf > /dev/null" <<'LOGGING'
+charon-systemd {
+    journal {
+        default = 2
+        ike = 4
+        cfg = 3
+        knl = 3
+        net = 3
+        enc = 4
+        esp = 3
+        lib = 2
+        mgr = 2
+        tls = 4
+    }
+}
+LOGGING
+
+    # Grab journalctl cursor before starting so we can dump logs later
+    strongswan_journal_cursor=$(fh_ssh -- "journalctl -u strongswan -n 0 --show-cursor 2>/dev/null \
+        | sed -n 's/^-- cursor: //p'")
+
+    fh_ssh -- "sudo systemctl start strongswan"
     sleep 2
 
     # Load connections and secrets
-    fh_ssh -- "sudo ip netns exec ${ns} swanctl --load-all 2>&1"
+    fh_ssh -- "sudo swanctl --load-all 2>&1"
+}
+
+strongswan_dump_logs() {
+    echo ">>> --- strongSwan journal ---"
+    if [ -n "${strongswan_journal_cursor:-}" ]; then
+        fh_ssh -- "journalctl -u strongswan --after-cursor='${strongswan_journal_cursor}' --no-pager" || true
+    else
+        fh_ssh -- "journalctl -u strongswan -n 50 --no-pager" || true
+    fi
 }
 
 strongswan_stop() {
-    fh_ssh -- "sudo strongswan stop" || true
-    fh_ssh -- "sudo rm -f /etc/strongswan/swanctl/conf.d/swanny.conf" || true
+    fh_ssh -- "sudo systemctl stop strongswan" || true
+    fh_ssh -- "sudo rm -f /etc/strongswan/swanctl/conf.d/swanny.conf \
+        /etc/strongswan/strongswan.d/zz-logging.conf" || true
     sleep 1
 }
 
 strongswan_initiate() {
+    fh_ssh -- "sudo swanctl --initiate --child swanny 2>&1"
+}
+
+# Set up a veth pair with one end in a namespace (for swanny) and the
+# other in the default namespace (for strongSwan).
+interop_setup_netns() {
     local ns="$1"
-    fh_ssh -- "sudo ip netns exec ${ns} swanctl --initiate --child swanny 2>&1"
+    local ns_addr="$2"
+    local host_addr="$3"
+
+    fh_ssh -- "sudo ip netns add ${ns} && \
+        sudo ip link add ${ns}-veth type veth peer ss-veth && \
+        sudo ip link set ${ns}-veth netns ${ns} && \
+        sudo ip netns exec ${ns} ip addr add ${ns_addr}/24 dev ${ns}-veth && \
+        sudo ip netns exec ${ns} ip link set ${ns}-veth up && \
+        sudo ip netns exec ${ns} ip link set lo up && \
+        sudo ip addr add ${host_addr}/24 dev ss-veth && \
+        sudo ip link set ss-veth up"
+}
+
+interop_cleanup_netns() {
+    local ns="$1"
+    fh_ssh -- "sudo ip netns del ${ns}" || true
 }
 
 test_interop_swanny_initiator() {
-    echo ">>> [interop] Setting up network namespaces..."
-    fh_ssh -- "sudo /tmp/setup-netns.sh sw1 sw2"
+    echo ">>> [interop] Setting up network..."
+    interop_setup_netns sw1 192.168.1.1 192.168.1.2
 
-    echo ">>> [interop] Starting strongSwan responder in sw2..."
-    strongswan_start sw2 "${root}/tests/e2e/strongswan-responder.conf"
+    echo ">>> [interop] Starting strongSwan responder..."
+    strongswan_start "${root}/tests/e2e/strongswan-responder.conf"
 
     echo ">>> [interop] Starting swanny initiator in sw1..."
     swanny_start sw1 \
@@ -47,20 +98,23 @@ test_interop_swanny_initiator() {
     echo ">>> [interop] Verifying IPsec SA with ping..."
     if ! swanny_ping sw1 192.168.1.2 10 10; then
         echo ">>> --- strongSwan status ---"
-        fh_ssh -- "sudo ip netns exec sw2 swanctl --list-sas" || true
-        swanny_fail "ping failed — swanny→strongSwan negotiation failed" sw1 sw2
+        fh_ssh -- "sudo swanctl --list-sas" || true
+        strongswan_dump_logs
+        swanny_fail "ping failed — swanny→strongSwan negotiation failed" sw1
     fi
     echo ">>> [interop] PASS: swanny initiator → strongSwan responder"
+
+    strongswan_dump_logs
 
     echo ">>> [interop] Cleaning up..."
     swanny_stop
     strongswan_stop
-    fh_ssh -- "sudo ip netns del sw1; sudo ip netns del sw2" || true
+    interop_cleanup_netns sw1
 }
 
 test_interop_strongswan_initiator() {
-    echo ">>> [interop] Setting up network namespaces..."
-    fh_ssh -- "sudo /tmp/setup-netns.sh sw1 sw2"
+    echo ">>> [interop] Setting up network..."
+    interop_setup_netns sw2 192.168.1.2 192.168.1.1
 
     echo ">>> [interop] Starting swanny responder in sw2..."
     swanny_start sw2 \
@@ -70,20 +124,20 @@ test_interop_strongswan_initiator() {
 
     sleep 1
 
-    echo ">>> [interop] Starting strongSwan initiator in sw1..."
-    strongswan_start sw1 "${root}/tests/e2e/strongswan-initiator.conf"
-    strongswan_initiate sw1
+    echo ">>> [interop] Starting strongSwan initiator..."
+    strongswan_start "${root}/tests/e2e/strongswan-initiator.conf"
+    strongswan_initiate
 
     echo ">>> [interop] Verifying IPsec SA with ping..."
-    if ! swanny_ping sw1 192.168.1.2 10 10; then
+    if ! swanny_ping sw2 192.168.1.1 10 10; then
         echo ">>> --- strongSwan status ---"
-        fh_ssh -- "sudo ip netns exec sw1 swanctl --list-sas" || true
-        swanny_fail "ping failed — strongSwan→swanny negotiation failed" sw1 sw2
+        fh_ssh -- "sudo swanctl --list-sas" || true
+        swanny_fail "ping failed — strongSwan→swanny negotiation failed" sw2
     fi
     echo ">>> [interop] PASS: strongSwan initiator → swanny responder"
 
     echo ">>> [interop] Cleaning up..."
     swanny_stop
     strongswan_stop
-    fh_ssh -- "sudo ip netns del sw1; sudo ip netns del sw2" || true
+    interop_cleanup_netns sw2
 }
