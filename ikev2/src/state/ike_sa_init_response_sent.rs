@@ -205,6 +205,19 @@ fn generate_ike_auth_response(
         ),
     ]);
 
+    if child_sa.mode() == ChildSaMode::Transport {
+        response.add_payloads(Some(Payload::new(
+            PayloadType::NOTIFY.into(),
+            payload::Content::Notify(payload::Notify::new(
+                Protocol::ESP.into(),
+                Some(&child_sa.spi()[..]),
+                NotifyType::USE_TRANSPORT_MODE.into(),
+                b"",
+            )),
+            true,
+        )));
+    }
+
     debug!(response = ?&response, "sending protected response");
 
     response
