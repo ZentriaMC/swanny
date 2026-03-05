@@ -83,24 +83,8 @@ async fn test_strict_ts_unacceptable() {
     let config_i = config::tests::create_config(b"initiator");
     let config_r = config::tests::create_strict_config(b"responder");
 
-    // Establish with TS that exactly match the config (host addr + full port
-    // range) so strict exact_match succeeds during IKE_AUTH.
-    let ts_i = TrafficSelector::new(
-        TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
-        0,
-        "192.168.1.2".parse().unwrap(),
-        "192.168.1.2".parse().unwrap(),
-        0,
-        65535,
-    );
-    let ts_r = TrafficSelector::new(
-        TrafficSelectorType::TS_IPV4_ADDR_RANGE.into(),
-        0,
-        "192.168.1.3".parse().unwrap(),
-        "192.168.1.3".parse().unwrap(),
-        0,
-        65535,
-    );
+    let ts_i = traffic_selector::tests::create_traffic_selector("192.168.1.2".parse().unwrap());
+    let ts_r = traffic_selector::tests::create_traffic_selector("192.168.1.3".parse().unwrap());
 
     let (initiator, mut messages_i, responder, mut messages_r) =
         establish_sa(&config_i, &config_r, ts_i, ts_r).await;

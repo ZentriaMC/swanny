@@ -43,7 +43,7 @@ fn create_traffic_selector(address: IpAddr) -> TrafficSelector {
         address,
         address,
         0,
-        0,
+        65535,
     )
 }
 

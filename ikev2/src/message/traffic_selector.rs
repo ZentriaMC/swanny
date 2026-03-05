@@ -251,7 +251,7 @@ pub(crate) mod tests {
             address,
             address,
             0,
-            0,
+            65535,
         )
     }
 
