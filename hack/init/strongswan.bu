@@ -1,0 +1,26 @@
+---
+variant: "fcos"
+version: "1.5.0"
+
+systemd:
+  units:
+    - name: "rpm-ostree-install-strongswan.service"
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Layer strongswan with rpm-ostree
+        Wants=network-online.target
+        After=network-online.target
+        Before=zincati.service
+        ConditionPathExists=!/var/lib/%N.stamp
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/rpm-ostree install --assumeyes --idempotent --apply-live strongswan
+        ExecStart=/bin/touch /var/lib/%N.stamp
+
+        [Install]
+        WantedBy=multi-user.target
+
+# vim: ft=yaml

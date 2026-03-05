@@ -7,5 +7,6 @@ ignition:
     merge:
       - local: "base.ign"
       - local: "users.ign"
+      - local: "strongswan.ign"
 
 # vim: ft=yaml

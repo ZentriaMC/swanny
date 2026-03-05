@@ -10,3 +10,11 @@ command:
     exit-status: 0
     stdout:
       - "root"
+  strongswan-installed:
+    exec: "rpm -q strongswan"
+    exit-status: 0
+    stdout:
+      - "/^strongswan-/"
+  swanctl-available:
+    exec: "which swanctl"
+    exit-status: 0

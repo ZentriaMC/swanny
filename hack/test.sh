@@ -117,6 +117,9 @@ if [ "${use_snapshot}" = false ]; then
     echo ">>> Waiting for SSH..."
     fh_ssh --wait 180 -- true
 
+    echo ">>> Waiting for strongswan install..."
+    fh_ssh -- "sudo systemctl start rpm-ostree-install-strongswan.service"
+
     echo ">>> Running goss validation..."
     fh goss "${root}/hack/goss.yaml" \
         --ssh-key "${ssh_key}" \
