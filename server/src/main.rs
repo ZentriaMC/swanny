@@ -126,6 +126,16 @@ fn traffic_selector_from_cidr(cidr: &IpCidr) -> TrafficSelector {
     TrafficSelector::new(ty.into(), 0, start, end, 0, 65535)
 }
 
+/// Compute XFRM policy priority from traffic-selector prefix lengths.
+///
+/// More specific selectors (larger prefixes) get a lower priority number,
+/// which means higher precedence in the kernel — matching strongSwan's
+/// behavior.  The IKE bypass policies at priority 500 always win.
+fn policy_priority(src_prefix: u8, dst_prefix: u8) -> u32 {
+    const BASE: u32 = 2000;
+    BASE - u32::from(src_prefix) - u32::from(dst_prefix)
+}
+
 fn ipsec_to_xfrm(ipsec_protocol: Protocol) -> u8 {
     match ipsec_protocol {
         Protocol::AH => libc::IPPROTO_AH.try_into().expect("value out of range"),
@@ -167,7 +177,7 @@ async fn create_policy(
             selector_dst_prefix,
         )
         .direction(direction)
-        .priority(1000)
+        .priority(policy_priority(selector_src_prefix, selector_dst_prefix))
         .add_template(template);
 
     if let Some(id) = if_id {
@@ -838,5 +848,40 @@ async fn main() -> Result<()> {
                 debug!(result = ?result, "pending operation completed");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn policy_priority_most_specific() {
+        // Two /32 host selectors → highest precedence (lowest number)
+        assert_eq!(policy_priority(32, 32), 2000 - 64);
+    }
+
+    #[test]
+    fn policy_priority_least_specific() {
+        // Two /0 selectors → lowest precedence (highest number)
+        assert_eq!(policy_priority(0, 0), 2000);
+    }
+
+    #[test]
+    fn policy_priority_asymmetric() {
+        // /24 src + /32 dst should equal /32 src + /24 dst
+        assert_eq!(policy_priority(24, 32), policy_priority(32, 24));
+    }
+
+    #[test]
+    fn policy_priority_more_specific_wins() {
+        // /32+/32 should beat /24+/24 (lower number = higher precedence)
+        assert!(policy_priority(32, 32) < policy_priority(24, 24));
+    }
+
+    #[test]
+    fn policy_priority_above_ike_bypass() {
+        // All computed priorities must stay above the IKE bypass priority (500)
+        assert!(policy_priority(128, 128) > 500);
     }
 }
