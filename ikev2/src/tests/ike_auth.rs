@@ -98,7 +98,8 @@ async fn test_ts_unacceptable() {
 
     handle.await.expect("handle should be awaited");
 
-    assert!(responder.in_state(&state::IkeSaInitResponseSent {}).await);
+    // Responder returns to Initial after IKE_AUTH rejection
+    assert!(responder.in_state(&state::Initial {}).await);
 
     let message =
         ProtectedMessage::deserialize(&mut &message[..]).expect("message should be deserialized");
@@ -208,8 +209,8 @@ async fn test_strict_ts_unacceptable() {
     };
     handle.await.expect("handle should be awaited");
 
-    // Responder stays in IkeSaInitResponseSent (rejected the TS)
-    assert!(responder.in_state(&state::IkeSaInitResponseSent {}).await);
+    // Responder returns to Initial after IKE_AUTH rejection
+    assert!(responder.in_state(&state::Initial {}).await);
 
     let message =
         ProtectedMessage::deserialize(&mut &message[..]).expect("message should be deserialized");

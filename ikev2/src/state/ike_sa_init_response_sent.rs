@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub struct IkeSaInitResponseSent;
 
@@ -306,12 +306,14 @@ impl State for IkeSaInitResponseSent {
 
             if let Err(e) = Self::handle_request(config, sender.clone(), &mut data, message).await {
                 if let StateError::Protocol(pe) = e {
+                    warn!(?pe, "IKE_AUTH failed, returning to Initial");
                     let response = generate_error_response(&data, pe)?;
                     Self::send_message(sender.clone(), &mut data, response)?;
                 }
 
-                // Do not write partial state data upon error
-                return Ok(self);
+                // IKE SA is dead after IKE_AUTH failure — return to
+                // Initial so a new IKE_SA_INIT can be accepted.
+                return Ok(Box::new(state::Initial {}));
             }
 
             data.swap(&default)
