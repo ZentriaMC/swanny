@@ -170,6 +170,7 @@ async fn create_ike_bypass_policy(
     src_address: IpAddr,
     dst_address: IpAddr,
     direction: u8,
+    port: u16,
 ) -> Result<()> {
     let prefix_len = if src_address.is_ipv4() { 32 } else { 128 };
 
@@ -180,7 +181,7 @@ async fn create_ike_bypass_policy(
         .direction(direction)
         .priority(500)
         .selector_protocol(libc::IPPROTO_UDP.try_into().expect("value out of range"))
-        .selector_protocol_dst_port(500)
+        .selector_protocol_dst_port(port)
         .execute()
         .await?;
 
@@ -196,14 +197,18 @@ async fn install_policies(
     ipsec_protocol: Protocol,
     mode: ChildSaMode,
     if_id: Option<u32>,
+    ike_port: u16,
 ) -> Result<()> {
-    // Bypass policies for IKE traffic (UDP port 500) so SA negotiation
-    // can proceed without IPsec — evaluated before ESP policies due to
-    // higher priority (lower number).
-    create_ike_bypass_policy(handle.clone(), src_address, dst_address, XFRM_POLICY_OUT).await?;
-    create_ike_bypass_policy(handle.clone(), dst_address, src_address, XFRM_POLICY_IN).await?;
-    create_ike_bypass_policy(handle.clone(), dst_address, src_address, XFRM_POLICY_FWD).await?;
-    debug!("installed IKE bypass policies");
+    // Bypass policies for IKE traffic so SA negotiation can proceed
+    // without IPsec — evaluated before ESP policies due to higher
+    // priority (lower number).
+    create_ike_bypass_policy(handle.clone(), src_address, dst_address, XFRM_POLICY_OUT, ike_port)
+        .await?;
+    create_ike_bypass_policy(handle.clone(), dst_address, src_address, XFRM_POLICY_IN, ike_port)
+        .await?;
+    create_ike_bypass_policy(handle.clone(), dst_address, src_address, XFRM_POLICY_FWD, ike_port)
+        .await?;
+    debug!(ike_port, "installed IKE bypass policies");
 
     for local in local_ts {
         for remote in remote_ts {
@@ -532,6 +537,12 @@ async fn main() -> Result<()> {
 
     tokio::spawn(connection);
 
+    let socket = StdUdpSocket::bind((config.address, 500))?;
+    let ike_port = socket.local_addr()?.port();
+    socket.set_nonblocking(true)?;
+    let socket = UdpSocket::from_std(socket)?;
+    let mut framed = UdpFramed::new(socket, BytesCodec::new()).fuse();
+
     install_policies(
         handle.clone(),
         &config.local_ts,
@@ -541,18 +552,9 @@ async fn main() -> Result<()> {
         Protocol::ESP,
         config.mode.into(),
         config.if_id,
+        ike_port,
     )
     .await?;
-
-    let incoming_socket = StdUdpSocket::bind((config.address, 500))?;
-    incoming_socket.set_nonblocking(true)?;
-    let incoming_socket = UdpSocket::from_std(incoming_socket)?;
-    let mut incoming_framed = UdpFramed::new(incoming_socket, BytesCodec::new()).fuse();
-
-    let outgoing_socket = StdUdpSocket::bind((config.address, 0))?;
-    outgoing_socket.set_nonblocking(true)?;
-    let outgoing_socket = UdpSocket::from_std(outgoing_socket)?;
-    let mut outgoing_framed = UdpFramed::new(outgoing_socket, BytesCodec::new()).fuse();
 
     let ike_sa_config = create_ike_sa_config(&config);
 
@@ -605,7 +607,7 @@ async fn main() -> Result<()> {
                     ControlMessage::IkeMessage(message) => {
                         let message: Bytes = message.into();
                         let peer_address: std::net::SocketAddr = (config.peer_address, 500).into();
-                        outgoing_framed.send((message, peer_address)).await?;
+                        framed.send((message, peer_address)).await?;
                     },
                     ControlMessage::CreateChildSa(child_sa) => {
                         create_child_sa(
@@ -631,17 +633,7 @@ async fn main() -> Result<()> {
                     }
                 }
             },
-            result = incoming_framed.select_next_some() => {
-                match result {
-                    Ok((message, _peer_address)) => {
-                        pending_operations.push(ike_sa.handle_message(message.to_vec()).boxed_local());
-                    },
-                    Err(e) => {
-                        debug!(error = %e, "error receiving IKEv2 message");
-                    },
-                }
-            }
-            result = outgoing_framed.select_next_some() => {
+            result = framed.select_next_some() => {
                 match result {
                     Ok((message, _peer_address)) => {
                         pending_operations.push(ike_sa.handle_message(message.to_vec()).boxed_local());
