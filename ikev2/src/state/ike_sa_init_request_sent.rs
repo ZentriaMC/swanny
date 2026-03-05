@@ -144,6 +144,16 @@ fn generate_ike_auth_request(
         ),
         Payload::new(PayloadType::AUTH.into(), payload::Content::Auth(auth), true),
         Payload::new(
+            PayloadType::NOTIFY.into(),
+            payload::Content::Notify(payload::Notify::new(
+                0u8.into(),
+                None,
+                NotifyType::INITIAL_CONTACT.into(),
+                b"",
+            )),
+            true,
+        ),
+        Payload::new(
             PayloadType::TSi.into(),
             payload::Content::Ts(payload::Ts::new(Some(creating_child_sa.ts_i.clone()))),
             true,

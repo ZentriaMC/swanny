@@ -115,9 +115,19 @@ fn handle_ike_auth_request(
     let notifications = notifications
         .map_err(|e| StateError::Protocol(ProtocolError::DeserializeError(e.into())))?;
 
-    let use_transport_mode = notifications
-        .into_iter()
-        .find(|n| matches!(n.ty().assigned(), Some(NotifyType::USE_TRANSPORT_MODE)));
+    let mut use_transport_mode = None;
+    let mut initial_contact = false;
+    for n in &notifications {
+        match n.ty().assigned() {
+            Some(NotifyType::USE_TRANSPORT_MODE) => use_transport_mode = Some(*n),
+            Some(NotifyType::INITIAL_CONTACT) => initial_contact = true,
+            _ => {}
+        }
+    }
+
+    if initial_contact {
+        info!(peer_id = %id_i, "peer sent INITIAL_CONTACT");
+    }
 
     let mode = if use_transport_mode.is_some() {
         ChildSaMode::Transport
