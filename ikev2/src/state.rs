@@ -556,6 +556,7 @@ trait VerifyMessage {
 fn generate_informational_error(
     data: &StateDataCache<'_>,
     error: ProtocolError,
+    message_id: u32,
 ) -> Result<ProtectedMessage, StateError> {
     let spi = Spi::default();
     let mut response = Message::new(
@@ -563,7 +564,7 @@ fn generate_informational_error(
         &data.spi,
         ExchangeType::INFORMATIONAL.into(),
         MessageFlags::R,
-        (*data.received_message_id).unwrap_or(0),
+        message_id,
     );
 
     let notification = match error {

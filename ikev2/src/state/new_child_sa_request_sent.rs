@@ -126,7 +126,7 @@ impl NewChildSaRequestSent {
 
         if response.flags().contains(MessageFlags::I) {
             debug!(exchange = ?response.exchange(), "crossing exchange detected, responding with an error");
-            let response = generate_informational_error(data, ProtocolError::TemporaryFailure)?;
+            let response = generate_informational_error(data, ProtocolError::TemporaryFailure, response.id())?;
             Self::send_message(sender.clone(), data, response)?;
             return Ok(());
         }
