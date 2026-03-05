@@ -115,7 +115,7 @@ fn handle_create_child_sa_response(
     *data.chosen_proposal.to_mut() = Some(chosen_proposal);
     *data.keys.to_mut() = Some(keys);
     *data.message_id.to_mut() = 0;
-    *data.received_message_id.to_mut() = 0;
+    *data.received_message_id.to_mut() = None;
     *data.ike_sa_init_request.to_mut() = None;
     *data.ike_sa_init_response.to_mut() = None;
     *data.last_request.to_mut() = None;

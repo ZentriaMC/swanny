@@ -142,7 +142,7 @@ fn handle_ike_auth_request(
     )?;
 
     *data.created_child_sa.to_mut() = Some(Box::new(child_sa));
-    *data.received_message_id.to_mut() = request.id();
+    *data.received_message_id.to_mut() = Some(request.id());
 
     Ok(())
 }
@@ -235,7 +235,7 @@ fn generate_error_response(
         &data.spi,
         ExchangeType::IKE_AUTH.into(),
         MessageFlags::R,
-        *data.received_message_id,
+        (*data.received_message_id).unwrap_or(0),
     );
 
     let notification = match error {

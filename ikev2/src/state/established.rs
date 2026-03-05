@@ -742,6 +742,19 @@ impl Established {
 
         Self::verify_message(data, serialized_request)?;
 
+        let expected_id = (*data.received_message_id)
+            .map(|id| id.wrapping_add(1))
+            .unwrap_or(0);
+        if request.id() != expected_id {
+            debug!(
+                expected = expected_id,
+                received = request.id(),
+                "dropping request with unexpected message ID"
+            );
+            return Ok(());
+        }
+        *data.received_message_id.to_mut() = Some(request.id());
+
         match request.exchange().assigned() {
             Some(ExchangeType::INFORMATIONAL) => {
                 handle_informational_request(data, &request)?;
@@ -779,7 +792,7 @@ impl Established {
                     *data.chosen_proposal.to_mut() = Some(rekey.chosen_proposal);
                     *data.keys.to_mut() = Some(rekey.keys);
                     *data.message_id.to_mut() = 0;
-                    *data.received_message_id.to_mut() = 0;
+                    *data.received_message_id.to_mut() = None;
                     *data.ike_sa_init_request.to_mut() = None;
                     *data.ike_sa_init_response.to_mut() = None;
                     *data.last_request.to_mut() = None;
@@ -806,7 +819,7 @@ fn generate_error_response(
         &data.spi,
         ExchangeType::INFORMATIONAL.into(),
         MessageFlags::R,
-        *data.received_message_id,
+        (*data.received_message_id).unwrap_or(0),
     );
 
     response.add_payloads([Payload::new(

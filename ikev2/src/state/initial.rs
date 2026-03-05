@@ -142,7 +142,7 @@ fn handle_ike_sa_init_request(
     *data.nonce_i.to_mut() = Some(nonce_i.nonce().clone());
     *data.nonce_r.to_mut() = Some(nonce);
     *data.peer_spi.to_mut() = Some(request.spi_i().to_owned());
-    *data.received_message_id.to_mut() = request.id();
+    *data.received_message_id.to_mut() = Some(request.id());
 
     Ok(())
 }
@@ -162,7 +162,7 @@ fn generate_ike_sa_init_response(data: &StateDataCache<'_>) -> Result<Message, S
         &data.spi,
         ExchangeType::IKE_SA_INIT.into(),
         MessageFlags::R,
-        *data.received_message_id,
+        (*data.received_message_id).unwrap_or(0),
     );
 
     response.add_payloads([
@@ -204,7 +204,7 @@ fn generate_error_response(data: &StateDataCache<'_>, error: ProtocolError) -> M
         &data.spi,
         ExchangeType::IKE_SA_INIT.into(),
         MessageFlags::R,
-        *data.received_message_id,
+        (*data.received_message_id).unwrap_or(0),
     );
 
     let notification = match error {
