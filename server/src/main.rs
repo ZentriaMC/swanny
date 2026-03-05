@@ -282,12 +282,13 @@ async fn install_policies(
 }
 
 fn integ_to_xfrm(integ: &Integ) -> (&'static str, usize) {
+    // Truncation length is in bits for the XFRM netlink API
     match integ.id() {
-        IntegId::AUTH_HMAC_MD5_96 => ("hmac(md5)", 12),
-        IntegId::AUTH_HMAC_SHA1_96 => ("hmac(sha1)", 12),
-        IntegId::AUTH_HMAC_SHA2_256_128 => ("hmac(sha256)", 16),
-        IntegId::AUTH_HMAC_SHA2_384_192 => ("hmac(sha384)", 24),
-        IntegId::AUTH_HMAC_SHA2_512_256 => ("hmac(sha512)", 32),
+        IntegId::AUTH_HMAC_MD5_96 => ("hmac(md5)", 96),
+        IntegId::AUTH_HMAC_SHA1_96 => ("hmac(sha1)", 96),
+        IntegId::AUTH_HMAC_SHA2_256_128 => ("hmac(sha256)", 128),
+        IntegId::AUTH_HMAC_SHA2_384_192 => ("hmac(sha384)", 192),
+        IntegId::AUTH_HMAC_SHA2_512_256 => ("hmac(sha512)", 256),
         _ => unreachable!("unsupported integrity checking algorithm"),
     }
 }

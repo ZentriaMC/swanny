@@ -618,27 +618,32 @@ impl ChosenProposal {
             .prfplus(d.key(), &buf, encryption_key_size * 2 + integ_key_size * 2)?;
         let mut buf = buf.as_slice();
 
-        let (ai, ar) = if let Some(integ) = &self.integ() {
-            let mut ai = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ai).expect("buffer too short");
-
-            let mut ar = vec![0; integ_key_size];
-            buf.try_copy_to_slice(&mut ar).expect("buffer too short");
-            (
-                Some(AuthenticationKey::new(integ, ai)),
-                Some(AuthenticationKey::new(integ, ar)),
-            )
-        } else {
-            (None, None)
-        };
-
+        // RFC 7296 §2.17: KEYMAT = SK_ei | SK_ai | SK_er | SK_ar
+        // Encryption keys before integrity keys within each direction,
+        // initiator direction before responder direction.
         let mut ei = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut ei).expect("buffer too short");
         let ei = EncryptionKey::new(&self.cipher, ei);
 
+        let ai = if let Some(integ) = &self.integ() {
+            let mut ai = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ai).expect("buffer too short");
+            Some(AuthenticationKey::new(integ, ai))
+        } else {
+            None
+        };
+
         let mut er = vec![0; encryption_key_size];
         buf.try_copy_to_slice(&mut er).expect("buffer too short");
         let er = EncryptionKey::new(&self.cipher, er);
+
+        let ar = if let Some(integ) = &self.integ() {
+            let mut ar = vec![0; integ_key_size];
+            buf.try_copy_to_slice(&mut ar).expect("buffer too short");
+            Some(AuthenticationKey::new(integ, ar))
+        } else {
+            None
+        };
 
         Ok((ProtectionKeys { ei, er, ai, ar }, public_key))
     }
