@@ -39,14 +39,13 @@ async fn run(mut client: TunnelServiceClient<Channel>) -> Result<()> {
             "reconciling tunnel from snapshot"
         );
         for child in &tunnel.children {
-            if let Some(keying) = &child.keying {
-                if let Err(err) = xfrm::install_child_sa(&tunnel.id, keying).await {
+            if let Some(keying) = &child.keying
+                && let Err(err) = xfrm::install_child_sa(&tunnel.id, keying).await {
                     warn!(?err, tunnel_id = %tunnel.id, "failed to reconcile child SA");
                 }
-            }
         }
-        if !tunnel.children.is_empty() {
-            if let Some(first_child) = tunnel.children.first() {
+        if !tunnel.children.is_empty()
+            && let Some(first_child) = tunnel.children.first() {
                 let child_up = api::ChildUp {
                     tunnel_id: tunnel.id.clone(),
                     peer_address: tunnel.peer_address.clone(),
@@ -60,7 +59,6 @@ async fn run(mut client: TunnelServiceClient<Channel>) -> Result<()> {
                     policies_installed.insert(tunnel.id.clone());
                 }
             }
-        }
     }
 
     // Subscribe to the event stream.
@@ -100,11 +98,10 @@ async fn run(mut client: TunnelServiceClient<Channel>) -> Result<()> {
             }
             Some(api::event::Event::ChildRekeyed(rekeyed)) => {
                 info!(tunnel_id = %rekeyed.tunnel_id, "child SA rekeyed");
-                if let Some(keying) = &rekeyed.keying {
-                    if let Err(err) = xfrm::install_child_sa(&rekeyed.tunnel_id, keying).await {
+                if let Some(keying) = &rekeyed.keying
+                    && let Err(err) = xfrm::install_child_sa(&rekeyed.tunnel_id, keying).await {
                         error!(?err, tunnel_id = %rekeyed.tunnel_id, "failed to install rekeyed child SA");
                     }
-                }
             }
             Some(api::event::Event::TunnelUp(up)) => {
                 info!(tunnel_id = %up.tunnel_id, peer = %up.peer_address, "tunnel up");

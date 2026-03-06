@@ -352,14 +352,13 @@ async fn main() -> Result<()> {
                             &mut sa_table,
                             &ike_sa_config,
                             &shared_tx,
-                        )? {
-                            if let Some(sa) = sa_table.get(&spi).cloned() {
+                        )?
+                            && let Some(sa) = sa_table.get(&spi).cloned() {
                                 let message = message.to_vec();
                                 pending_operations.push(async move {
                                     sa.handle_message(message).await
                                 }.boxed_local());
                             }
-                        }
                         dpd_timer = sleep(dpd_interval).boxed().fuse();
                     },
                     Err(err) => {
@@ -368,25 +367,23 @@ async fn main() -> Result<()> {
                 }
             }
             _ = &mut ike_rekey_timer => {
-                if let Some(spi) = primary_spi {
-                    if let Some(sa) = sa_table.get(&spi).cloned() {
+                if let Some(spi) = primary_spi
+                    && let Some(sa) = sa_table.get(&spi).cloned() {
                         info!("IKE SA lifetime expired, initiating rekey");
                         pending_operations.push(async move {
                             sa.handle_rekey_ike_sa().await
                         }.boxed_local());
                     }
-                }
                 ike_rekey_timer = sleep(ike_lifetime_duration).boxed().fuse();
             }
             _ = &mut dpd_timer => {
-                if let Some(spi) = primary_spi {
-                    if let Some(sa) = sa_table.get(&spi).cloned() {
+                if let Some(spi) = primary_spi
+                    && let Some(sa) = sa_table.get(&spi).cloned() {
                         debug!("DPD interval expired, sending probe");
                         pending_operations.push(async move {
                             sa.handle_dpd().await
                         }.boxed_local());
                     }
-                }
                 dpd_timer = sleep(dpd_interval).boxed().fuse();
             }
             result = pending_operations.select_next_some() => {

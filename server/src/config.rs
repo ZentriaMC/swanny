@@ -322,10 +322,9 @@ impl Config {
         let expires = matches.try_get_one::<u64>("expires")?.copied();
         let ike_lifetime = matches.try_get_one::<u64>("ike-lifetime")?.copied();
         let dpd_interval = matches.try_get_one::<u64>("dpd-interval")?.copied();
-        let mode = matches
+        let mode = *matches
             .try_get_one::<Mode>("mode")?
-            .unwrap_or(&Mode::default())
-            .clone();
+            .unwrap_or(&Mode::default());
         let tunnel_id = matches.try_get_one::<String>("tunnel-id")?.unwrap().clone();
         let grpc_listen = *matches.try_get_one::<SocketAddr>("grpc-listen")?.unwrap();
         let initiate = matches.get_flag("initiate");
