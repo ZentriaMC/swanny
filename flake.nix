@@ -31,6 +31,7 @@
             pkgs.jq
             pkgs.openssl
             pkgs.pkg-config
+            pkgs.protobuf
             pkgs.qemu
             pkgs.zig
             fcos-harness.packages.${system}.default

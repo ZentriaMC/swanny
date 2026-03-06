@@ -19,14 +19,13 @@ bytes.workspace = true
 cidr.workspace = true
 clap = { workspace = true, features = ["cargo", "derive"] }
 futures.workspace = true
-libc.workspace = true
-netlink-packet-core.workspace = true
-netlink-packet-xfrm.workspace = true
-netlink-proto.workspace = true
+prost-types.workspace = true
 swanny-ikev2.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "time"] }
+swanny-proto.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "time", "sync"] }
+tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true, features = ["codec", "net"] }
 toml.workspace = true
+tonic.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-xfrmnetlink.workspace = true

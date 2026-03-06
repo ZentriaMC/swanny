@@ -1,0 +1,24 @@
+[package]
+name = "swanny-dataplane-linux"
+description = "Linux XFRM dataplane daemon for swanny"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license = "GPL-3.0-or-later"
+
+[[bin]]
+name = "swanny-dataplane"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+blake2.workspace = true
+clap = { workspace = true, features = ["cargo", "derive"] }
+libc.workspace = true
+netlink-packet-xfrm.workspace = true
+swanny-proto.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tonic.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+xfrmnetlink.workspace = true

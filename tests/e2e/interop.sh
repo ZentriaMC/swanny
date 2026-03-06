@@ -91,9 +91,11 @@ test_interop_swanny_initiator() {
 
     echo ">>> [interop] Starting swanny initiator in sw1..."
     swanny_start sw1 \
+        --tunnel-id interop-sw1 --initiate \
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
         --mode transport --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
         --local-identity keyid:swannywashere --remote-identity ipv4:192.168.1.2
+    dataplane_start sw1
 
     echo ">>> [interop] Verifying IPsec SA with ping..."
     if ! swanny_ping sw1 192.168.1.2 10 10; then
@@ -118,9 +120,11 @@ test_interop_strongswan_initiator() {
 
     echo ">>> [interop] Starting swanny responder in sw2..."
     swanny_start sw2 \
+        --tunnel-id interop-sw2 \
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
         --mode transport --local-ts 192.168.1.2/32 --remote-ts 192.168.1.1/32 \
         --local-identity keyid:swannywashere --remote-identity ipv4:192.168.1.1
+    dataplane_start sw2
 
     sleep 1
 

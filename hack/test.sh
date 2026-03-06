@@ -52,14 +52,21 @@ make -C "${root}/hack/init" config.ign
 ign="${root}/hack/init/config.ign"
 
 # ---------------------------------------------------------------------------
-# Cross-compile swanny server
+# Cross-compile swanny server and dataplane daemon
 # ---------------------------------------------------------------------------
-echo ">>> Building swanny for ${cargo_target}..."
-cargo zigbuild --release --target "${cargo_target}" -p swanny-server --features vendored-openssl 2>&1
+echo ">>> Building swanny + dataplane for ${cargo_target}..."
+cargo zigbuild --release --target "${cargo_target}" \
+    -p swanny-server --features vendored-openssl \
+    -p swanny-dataplane-linux 2>&1
 
 swanny_bin="${root}/target/${cargo_target}/release/swanny"
+dataplane_bin="${root}/target/${cargo_target}/release/swanny-dataplane"
 if ! [ -f "${swanny_bin}" ]; then
     echo >&2 ">>> Build failed: swanny binary not found at ${swanny_bin}"
+    exit 1
+fi
+if ! [ -f "${dataplane_bin}" ]; then
+    echo >&2 ">>> Build failed: swanny-dataplane binary not found at ${dataplane_bin}"
     exit 1
 fi
 
@@ -175,12 +182,13 @@ source "${root}/tests/e2e/interop.sh"
 # ---------------------------------------------------------------------------
 # Deploy swanny binary and test scripts
 # ---------------------------------------------------------------------------
-echo ">>> Deploying swanny and test scripts..."
+echo ">>> Deploying swanny, dataplane, and test scripts..."
 scp "${scp_opts[@]}" "${swanny_bin}" core@127.0.0.1:/tmp/swanny
+scp "${scp_opts[@]}" "${dataplane_bin}" core@127.0.0.1:/tmp/swanny-dataplane
 scp "${scp_opts[@]}" "${root}/tests/setup-netns.sh" core@127.0.0.1:/tmp/setup-netns.sh
 scp "${scp_opts[@]}" "${root}/tests/setup-tunnel-netns.sh" core@127.0.0.1:/tmp/setup-tunnel-netns.sh
 
-fh_ssh -- "chmod +x /tmp/swanny /tmp/setup-netns.sh /tmp/setup-tunnel-netns.sh"
+fh_ssh -- "chmod +x /tmp/swanny /tmp/swanny-dataplane /tmp/setup-netns.sh /tmp/setup-tunnel-netns.sh"
 
 # ---------------------------------------------------------------------------
 # Run tests

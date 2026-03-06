@@ -10,21 +10,21 @@
 # Traffic from 10.0.1.0/24 → 10.0.2.0/24 is routed through xfrm0,
 # which triggers XFRM policy lookup (by if_id) and IPsec encapsulation.
 #
-# Each namespace gets its own if_id: NS1 uses IF_ID, NS2 uses IF_ID+1.
+# Each namespace gets its own if_id.
 #
-# Usage: setup-tunnel-netns.sh NS1 NS2 IF_ID
+# Usage: setup-tunnel-netns.sh NS1 NS2 IF_ID1 IF_ID2
 
 set -xe
 
-if test $# -lt 3; then
-    echo "Usage: $0 NS1 NS2 IF_ID" 1>&2
+if test $# -lt 4; then
+    echo "Usage: $0 NS1 NS2 IF_ID1 IF_ID2" 1>&2
     exit 1
 fi
 
 NS1="$1"
 NS2="$2"
 IF_ID1="$3"
-IF_ID2=$(( IF_ID1 + 1 ))
+IF_ID2="$4"
 
 VETH1="$NS1-veth"
 VETH2="$NS2-veth"

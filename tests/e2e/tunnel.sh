@@ -6,24 +6,34 @@ test_tunnel() {
     echo ">>> [tunnel] Stopping previous swanny instances..."
     swanny_stop
 
+    echo ">>> [tunnel] Computing XFRM if_ids from tunnel IDs..."
+    local if_id1 if_id2
+    if_id1=$(fh_ssh -- "/tmp/swanny-dataplane print-if-id tunnel-tun1")
+    if_id2=$(fh_ssh -- "/tmp/swanny-dataplane print-if-id tunnel-tun2")
+    echo ">>> [tunnel] if_ids: tun1=${if_id1} tun2=${if_id2}"
+
     echo ">>> [tunnel] Setting up tunnel-mode network namespaces..."
-    fh_ssh -- "sudo /tmp/setup-tunnel-netns.sh tun1 tun2 1337"
+    fh_ssh -- "sudo /tmp/setup-tunnel-netns.sh tun1 tun2 ${if_id1} ${if_id2}"
 
     echo ">>> [tunnel] Starting swanny responder in tun2..."
     swanny_start tun2 \
+        --tunnel-id tunnel-tun2 \
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
-        --mode tunnel --if-id 1338 \
+        --mode tunnel \
         --local-ts 10.0.2.0/24 --remote-ts 10.0.1.0/24 \
         --local-identity fqdn:tun2.swanny.test --remote-identity fqdn:tun1.swanny.test
+    dataplane_start tun2
 
     sleep 1
 
     echo ">>> [tunnel] Starting swanny initiator in tun1..."
     swanny_start tun1 \
+        --tunnel-id tunnel-tun1 --initiate \
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
-        --mode tunnel --if-id 1337 \
+        --mode tunnel \
         --local-ts 10.0.1.0/24 --remote-ts 10.0.2.0/24 \
         --local-identity fqdn:tun1.swanny.test --remote-identity fqdn:tun2.swanny.test
+    dataplane_start tun1
 
     echo ">>> [tunnel] Verifying 10.0.1.1 → 10.0.2.1..."
     if ! swanny_ping tun1 10.0.2.1 10 10; then

@@ -1,0 +1,255 @@
+syntax = "proto3";
+package zentria.swanny.v0;
+
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Core types
+// ---------------------------------------------------------------------------
+
+message IpPrefix {
+  string cidr = 1;
+}
+
+message Identity {
+  string value = 1; // "fqdn:vpn.example.com", "keyid:device-01"
+}
+
+message Proposal {
+  string encryption = 1;
+  string integrity = 2;
+  string prf = 3;
+  string dh_group = 4;
+}
+
+message AuthConfig {
+  oneof method {
+    string psk = 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tunnel service — management + events
+// ---------------------------------------------------------------------------
+
+service TunnelService {
+  // CRUD
+  rpc Create(CreateTunnelRequest) returns (Tunnel);
+  rpc Delete(DeleteTunnelRequest) returns (DeleteTunnelResponse);
+  rpc Get(GetTunnelRequest) returns (Tunnel);
+  rpc List(ListTunnelsRequest) returns (ListTunnelsResponse);
+
+  // Control
+  rpc Up(TunnelUpRequest) returns (TunnelUpResponse);
+  rpc Down(TunnelDownRequest) returns (TunnelDownResponse);
+
+  // Lifecycle events
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Tunnel configuration
+// ---------------------------------------------------------------------------
+
+message Tunnel {
+  // User-assigned, unique. "energycorp-site-north"
+  // Platform mapping is deterministic:
+  //   Linux XFRM if_id = blake2s(id) truncated to non-zero u32
+  string id = 1;
+
+  string local_address = 2;
+  string peer_address = 3;
+
+  repeated IpPrefix local_ts = 4;
+  repeated IpPrefix remote_ts = 5;
+
+  Identity local_identity = 6;
+  Identity remote_identity = 7;
+
+  AuthConfig auth = 8;
+
+  enum Mode {
+    TUNNEL = 0;
+    TRANSPORT = 1;
+  }
+  Mode mode = 9;
+
+  uint64 ike_lifetime = 10; // seconds, 0 = no rekey
+  uint64 dpd_interval = 11; // seconds, 0 = disabled
+  uint64 child_expires = 12;
+
+  repeated Proposal ike_proposals = 13;
+  repeated Proposal ipsec_proposals = 14;
+
+  TunnelStatus status = 15;
+}
+
+enum TunnelStatus {
+  DOWN = 0;
+  CONNECTING = 1;
+  ESTABLISHED = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Request/response messages
+// ---------------------------------------------------------------------------
+
+message CreateTunnelRequest {
+  Tunnel tunnel = 1;
+}
+message DeleteTunnelRequest {
+  string id = 1;
+}
+message DeleteTunnelResponse {}
+message GetTunnelRequest {
+  string id = 1;
+}
+message ListTunnelsRequest {}
+message ListTunnelsResponse {
+  repeated Tunnel tunnels = 1;
+}
+message TunnelUpRequest {
+  string id = 1;
+}
+message TunnelUpResponse {}
+message TunnelDownRequest {
+  string id = 1;
+}
+message TunnelDownResponse {}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+message SubscribeRequest {
+  string tunnel_id = 1; // empty = all
+}
+
+message Event {
+  google.protobuf.Timestamp timestamp = 1;
+
+  oneof event {
+    TunnelUp tunnel_up = 2;
+    TunnelDown tunnel_down = 3;
+    ChildUp child_up = 4;
+    ChildDown child_down = 5;
+    ChildRekeyed child_rekeyed = 6;
+    PeerReachable peer_reachable = 7;
+  }
+}
+
+message TunnelUp {
+  string tunnel_id = 1;
+  string peer_address = 2;
+  Identity peer_identity = 3;
+}
+
+message TunnelDown {
+  string tunnel_id = 1;
+  enum Reason {
+    ADMIN = 0;
+    PEER = 1;
+    DPD = 2;
+    AUTH_FAIL = 3;
+    ERROR = 4;
+  }
+  Reason reason = 2;
+  string detail = 3;
+}
+
+// IPsec SA keying material. Shipped over the event stream so dataplane
+// backends can program platform-specific SA state (XFRM, PF_KEY, etc.).
+message SaKeying {
+  // ESP SPIs
+  bytes spi_inbound = 1;
+  bytes spi_outbound = 2;
+
+  // Negotiated algorithms (IANA names)
+  string encryption_algorithm = 3;
+  string integrity_algorithm = 4; // empty for AEAD
+
+  // Raw key bytes
+  bytes encryption_key_inbound = 5;
+  bytes encryption_key_outbound = 6;
+  bytes integrity_key_inbound = 7; // empty for AEAD
+  bytes integrity_key_outbound = 8; // empty for AEAD
+
+  // SA endpoints (outer tunnel addresses for tunnel mode,
+  // TS addresses for transport mode)
+  string sa_src = 9;
+  string sa_dst = 10;
+
+  enum Mode {
+    TUNNEL = 0;
+    TRANSPORT = 1;
+  }
+  Mode mode = 11;
+
+  uint64 expires = 12; // seconds, 0 = no expiry
+}
+
+message ChildUp {
+  string tunnel_id = 1;
+  string peer_address = 2;
+  repeated IpPrefix local_prefixes = 3;
+  repeated IpPrefix remote_prefixes = 4;
+  SaKeying keying = 5;
+}
+
+message ChildDown {
+  string tunnel_id = 1;
+  string peer_address = 2;
+  repeated IpPrefix local_prefixes = 3;
+  repeated IpPrefix remote_prefixes = 4;
+  // SPIs for teardown — dataplane needs these to identify which SAs to remove
+  bytes spi_inbound = 5;
+  bytes spi_outbound = 6;
+  string sa_src = 7;
+  string sa_dst = 8;
+  enum Reason {
+    ADMIN = 0;
+    PEER = 1;
+    EXPIRE = 2;
+    REKEY = 3;
+    ERROR = 4;
+  }
+  Reason reason = 9;
+}
+
+message ChildRekeyed {
+  string tunnel_id = 1;
+  SaKeying keying = 2; // new SA keys
+}
+
+message PeerReachable {
+  string tunnel_id = 1;
+  bool alive = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot — cold-start reconciliation
+// ---------------------------------------------------------------------------
+
+message SnapshotRequest {
+  string tunnel_id = 1; // empty = all
+}
+
+message SnapshotResponse {
+  repeated TunnelSnapshot tunnels = 1;
+}
+
+message TunnelSnapshot {
+  string id = 1;
+  TunnelStatus status = 2;
+  string peer_address = 3;
+
+  repeated ChildSnapshot children = 4;
+}
+
+message ChildSnapshot {
+  repeated IpPrefix local_prefixes = 1;
+  repeated IpPrefix remote_prefixes = 2;
+  Proposal negotiated = 3;
+  SaKeying keying = 4;
+}

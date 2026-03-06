@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result, anyhow};
 use cidr::IpCidr;
 use clap::{ArgMatches, ValueEnum, arg, command, value_parser};
 use std::fs;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use swanny_ikev2::message::payload::Id;
@@ -36,7 +36,9 @@ pub struct Config {
     pub ike_lifetime: Option<u64>,
     pub dpd_interval: Option<u64>,
     pub mode: Mode,
-    pub if_id: Option<u32>,
+    pub tunnel_id: String,
+    pub grpc_listen: SocketAddr,
+    pub initiate: bool,
     pub strict_ts: bool,
     pub local_identity: Option<Id>,
     pub remote_identity: Option<Id>,
@@ -118,10 +120,24 @@ impl Config {
             )
             .arg(
                 arg!(
-                    --"if-id" <ID> "XFRM interface ID"
+                    --"tunnel-id" <NAME> "Tunnel identifier"
+                )
+                .required(true),
+            )
+            .arg(
+                arg!(
+                    --"grpc-listen" <ADDRESS> "gRPC listen address"
                 )
                 .required(false)
-                .value_parser(value_parser!(u32)),
+                .default_value("[::1]:50051")
+                .value_parser(value_parser!(SocketAddr)),
+            )
+            .arg(
+                arg!(
+                    --initiate "Auto-initiate IKE negotiation on startup"
+                )
+                .required(false)
+                .action(clap::ArgAction::SetTrue),
             )
             .arg(
                 arg!(
@@ -147,18 +163,20 @@ impl Config {
             .get_matches();
 
         if let Some(file) = matches.get_one::<PathBuf>("config") {
-            Self::from_file(file)
+            Self::from_file(file, &matches)
         } else {
             Self::from_matches(&matches)
         }
     }
 
-    fn from_file(file: impl AsRef<Path>) -> Result<Self> {
+    fn from_file(file: impl AsRef<Path>, matches: &ArgMatches) -> Result<Self> {
         let s = fs::read_to_string(file.as_ref())
             .with_context(|| format!("unable to read config file `{}`", file.as_ref().display()))?;
         let config = Table::from_str(&s).with_context(|| {
             format!("unable to parse config file `{}`", file.as_ref().display())
         })?;
+
+        let tunnel_id = matches.try_get_one::<String>("tunnel-id")?.unwrap().clone();
 
         let address = config
             .get("address")
@@ -219,16 +237,23 @@ impl Config {
             Some(mode) => return Err(anyhow!("unknown Child SA mode: {}", mode)),
         };
 
-        let if_id: Option<u32> = config
-            .get("if_id")
-            .map(|if_id| {
-                if_id
-                    .as_integer()
-                    .ok_or_else(|| anyhow!("value must be integer"))
+        let grpc_listen: SocketAddr = config
+            .get("grpc_listen")
+            .map(|v| {
+                let s = v
+                    .as_str()
+                    .ok_or_else(|| anyhow!("grpc_listen must be a string"))?;
+                s.parse::<SocketAddr>()
+                    .map_err(|err| anyhow!("invalid grpc_listen: {err}"))
             })
             .transpose()?
-            .map(|if_id| if_id.try_into())
-            .transpose()?;
+            .unwrap_or_else(|| "[::1]:50051".parse().unwrap());
+
+        let initiate = config
+            .get("initiate")
+            .map(|v| v.as_bool().ok_or_else(|| anyhow!("value must be boolean")))
+            .transpose()?
+            .unwrap_or(false);
 
         let strict_ts = config
             .get("strict_ts")
@@ -273,7 +298,9 @@ impl Config {
             ike_lifetime,
             dpd_interval,
             mode,
-            if_id,
+            tunnel_id,
+            grpc_listen,
+            initiate,
             strict_ts,
             local_identity,
             remote_identity,
@@ -299,7 +326,9 @@ impl Config {
             .try_get_one::<Mode>("mode")?
             .unwrap_or(&Mode::default())
             .clone();
-        let if_id = matches.try_get_one::<u32>("if-id")?.copied();
+        let tunnel_id = matches.try_get_one::<String>("tunnel-id")?.unwrap().clone();
+        let grpc_listen = *matches.try_get_one::<SocketAddr>("grpc-listen")?.unwrap();
+        let initiate = matches.get_flag("initiate");
         let strict_ts = matches.get_flag("strict-ts");
         let local_identity = matches.try_get_one::<Id>("local-identity")?.cloned();
         let remote_identity = matches.try_get_one::<Id>("remote-identity")?.cloned();
@@ -313,7 +342,9 @@ impl Config {
             ike_lifetime,
             dpd_interval,
             mode,
-            if_id,
+            tunnel_id,
+            grpc_listen,
+            initiate,
             strict_ts,
             local_identity,
             remote_identity,

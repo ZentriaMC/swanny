@@ -11,6 +11,8 @@ swanny_fail() {
     for ns in "${namespaces[@]}"; do
         echo ">>> --- ${ns} swanny log ---"
         fh_ssh -- "cat /tmp/swanny-${ns}.log" || true
+        echo ">>> --- ${ns} dataplane log ---"
+        fh_ssh -- "cat /tmp/dataplane-${ns}.log" || true
         echo ">>> --- XFRM state (${ns}) ---"
         fh_ssh -- "sudo ip netns exec ${ns} ip xfrm state" || true
         echo ">>> --- XFRM policy (${ns}) ---"
@@ -26,8 +28,14 @@ swanny_start() {
         </dev/null >/tmp/swanny-${ns}.log 2>&1 &"
 }
 
+dataplane_start() {
+    local ns="$1"
+    fh_ssh -- "sudo RUST_LOG=info ip netns exec ${ns} /tmp/swanny-dataplane \
+        </dev/null >/tmp/dataplane-${ns}.log 2>&1 &"
+}
+
 swanny_stop() {
-    fh_ssh -- "sudo killall swanny" || true
+    fh_ssh -- "sudo killall swanny swanny-dataplane" || true
     sleep 1
 }
 

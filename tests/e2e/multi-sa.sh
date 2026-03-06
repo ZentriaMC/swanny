@@ -12,19 +12,22 @@ test_multi_sa() {
     fh_ssh -- "sudo /tmp/setup-netns.sh ms1 ms2"
 
     echo ">>> [multi-sa] Starting swanny responder in ms2..."
-    fh_ssh -- "sudo RUST_LOG=info ip netns exec ms2 /tmp/swanny \
+    swanny_start ms2 \
+        --tunnel-id multi-ms2 \
         --address 192.168.1.2 --peer-address 192.168.1.1 --psk secret \
         --mode transport --local-ts 192.168.1.2/32 --remote-ts 192.168.1.1/32 \
-        --local-identity fqdn:ms2.swanny.test --remote-identity fqdn:ms1.swanny.test \
-        </dev/null >/tmp/swanny-ms2.log 2>&1 &"
+        --local-identity fqdn:ms2.swanny.test --remote-identity fqdn:ms1.swanny.test
+    dataplane_start ms2
 
     sleep 1
 
     echo ">>> [multi-sa] Starting swanny initiator in ms1 (first SA)..."
     swanny_start ms1 \
+        --tunnel-id multi-ms1 --initiate \
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
         --mode transport --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
         --local-identity fqdn:ms1.swanny.test --remote-identity fqdn:ms2.swanny.test
+    dataplane_start ms1
 
     echo ">>> [multi-sa] Verifying first SA with ping..."
     if ! swanny_ping ms1 192.168.1.2 10 10; then
@@ -41,12 +44,12 @@ test_multi_sa() {
     fh_ssh -- "sudo ip netns exec ms1 ip xfrm policy flush" || true
 
     echo ">>> [multi-sa] Starting new swanny initiator in ms1 (second SA)..."
-    # Append to a separate log so we can distinguish
-    fh_ssh -- "sudo RUST_LOG=info ip netns exec ms1 /tmp/swanny \
+    swanny_start ms1 \
+        --tunnel-id multi-ms1 --initiate \
         --address 192.168.1.1 --peer-address 192.168.1.2 --psk secret \
         --mode transport --local-ts 192.168.1.1/32 --remote-ts 192.168.1.2/32 \
-        --local-identity fqdn:ms1.swanny.test --remote-identity fqdn:ms2.swanny.test \
-        </dev/null >/tmp/swanny-ms1.log 2>&1 &"
+        --local-identity fqdn:ms1.swanny.test --remote-identity fqdn:ms2.swanny.test
+    dataplane_start ms1
 
     echo ">>> [multi-sa] Verifying second SA with ping..."
     if ! swanny_ping ms1 192.168.1.2 10 10; then
