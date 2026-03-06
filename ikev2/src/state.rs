@@ -414,7 +414,10 @@ impl StateDataCache<'_> {
     }
 
     /// Signs a message as if it were from the peer (for fragment reassembly)
-    pub(crate) fn message_sign_as_peer(&self, message: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, StateError> {
+    pub(crate) fn message_sign_as_peer(
+        &self,
+        message: impl AsRef<[u8]>,
+    ) -> Result<Option<Vec<u8>>, StateError> {
         if self.chosen_proposal()?.integ().is_none() {
             return Ok(None);
         }
@@ -582,8 +585,7 @@ trait SendProtectedMessage {
 
         let key = data.encrypting_key()?;
         let integ = data.chosen_proposal()?.integ();
-        let fragments =
-            inner_message.protect_fragmented(key, integ, FRAGMENT_MAX_MESSAGE_SIZE)?;
+        let fragments = inner_message.protect_fragmented(key, integ, FRAGMENT_MAX_MESSAGE_SIZE)?;
 
         debug!(
             total_fragments = fragments.len(),

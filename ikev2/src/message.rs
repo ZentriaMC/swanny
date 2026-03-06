@@ -240,9 +240,19 @@ impl Message {
         for (i, chunk) in chunks.iter().enumerate() {
             let fragment_number = (i as u16) + 1;
             // Only fragment 1 carries the inner payload type; others use 0
-            let frag_inner = if fragment_number == 1 { inner } else { 0.into() };
-            let skf =
-                payload::Skf::encrypt(key, fragment_number, total_fragments, chunk, frag_inner, integ)?;
+            let frag_inner = if fragment_number == 1 {
+                inner
+            } else {
+                0.into()
+            };
+            let skf = payload::Skf::encrypt(
+                key,
+                fragment_number,
+                total_fragments,
+                chunk,
+                frag_inner,
+                integ,
+            )?;
             fragments.push(ProtectedMessage {
                 header: self.header.clone(),
                 payloads: vec![payload::Payload::new(
@@ -519,8 +529,7 @@ mod tests {
             let mut buf = BytesMut::with_capacity(frag_size);
             frag.serialize(&mut buf).expect("serialize fragment");
 
-            let deserialized =
-                ProtectedMessage::deserialize(&mut &buf[..]).expect("deserialize");
+            let deserialized = ProtectedMessage::deserialize(&mut &buf[..]).expect("deserialize");
             let skf_payload = deserialized.payloads.first().expect("should have payload");
             let skf: &payload::Skf = skf_payload.try_into().expect("should be SKF");
             let chunk = skf.decrypt_raw(&key, None).expect("decrypt fragment");

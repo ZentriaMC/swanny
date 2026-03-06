@@ -54,10 +54,13 @@ fn traffic_selector_from_cidr(cidr: &IpCidr) -> TrafficSelector {
 }
 
 fn create_ike_sa_config(config: &config::Config) -> swanny_ikev2::config::Config {
-    let id = config.local_identity.clone().unwrap_or_else(|| match &config.address {
-        IpAddr::V4(v4) => Id::new(IdType::ID_IPV4_ADDR.into(), &v4.octets()[..]),
-        IpAddr::V6(v6) => Id::new(IdType::ID_IPV6_ADDR.into(), &v6.octets()[..]),
-    });
+    let id = config
+        .local_identity
+        .clone()
+        .unwrap_or_else(|| match &config.address {
+            IpAddr::V4(v4) => Id::new(IdType::ID_IPV4_ADDR.into(), &v4.octets()[..]),
+            IpAddr::V6(v6) => Id::new(IdType::ID_IPV6_ADDR.into(), &v6.octets()[..]),
+        });
     info!(identity = %id, "using local IKE identity");
     let mut builder = ConfigBuilder::default()
         .ike_proposal(|pc| {
@@ -224,8 +227,9 @@ async fn main() -> Result<()> {
     let mut sa_table: HashMap<Spi, IkeSa> = HashMap::new();
     let (shared_tx, mut shared_rx) = unbounded::<(Spi, ControlMessage)>();
 
-    let mut pending_operations: FuturesUnordered<Pin<Box<dyn Future<Output = Result<(), StateError>>>>> =
-        FuturesUnordered::new();
+    let mut pending_operations: FuturesUnordered<
+        Pin<Box<dyn Future<Output = Result<(), StateError>>>>,
+    > = FuturesUnordered::new();
 
     // Track the primary (most recently established) SA for DPD and rekey.
     let mut primary_spi: Option<Spi> = None;
@@ -251,9 +255,7 @@ async fn main() -> Result<()> {
         register_sa(&mut sa_table, spi, sa.clone(), rx, shared_tx.clone());
         primary_spi = Some(spi);
 
-        pending_operations.push(async move {
-            sa.handle_acquire(ts_i, ts_r).await
-        }.boxed_local());
+        pending_operations.push(async move { sa.handle_acquire(ts_i, ts_r).await }.boxed_local());
 
         info!("auto-initiating IKE negotiation");
     }

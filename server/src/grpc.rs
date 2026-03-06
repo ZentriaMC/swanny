@@ -6,8 +6,8 @@ use std::time::SystemTime;
 use prost_types::Timestamp;
 use swanny_proto::api::{self, tunnel_service_server::TunnelService};
 use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
+use tokio_stream::wrappers::BroadcastStream;
 use tonic::{Request, Response, Status};
 
 /// Tracks active child SAs per tunnel for snapshot reconciliation.
@@ -27,10 +27,12 @@ struct TunnelEntry {
 impl TunnelState {
     pub fn child_up(&self, tunnel_id: &str, child_up: &api::ChildUp) {
         let mut map = self.inner.lock().unwrap();
-        let entry = map.entry(tunnel_id.to_string()).or_insert_with(|| TunnelEntry {
-            peer_address: child_up.peer_address.clone(),
-            children: Vec::new(),
-        });
+        let entry = map
+            .entry(tunnel_id.to_string())
+            .or_insert_with(|| TunnelEntry {
+                peer_address: child_up.peer_address.clone(),
+                children: Vec::new(),
+            });
         entry.children.push(api::ChildSnapshot {
             local_prefixes: child_up.local_prefixes.clone(),
             remote_prefixes: child_up.remote_prefixes.clone(),

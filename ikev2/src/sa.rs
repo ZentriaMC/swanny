@@ -39,6 +39,8 @@
 //!
 //! [`IkeSa`]: crate::sa::IkeSa
 //!
+#[cfg(test)]
+use crate::message::{Message, ProtectedMessage};
 use crate::{
     config::Config,
     crypto::{
@@ -59,8 +61,6 @@ use crate::{
     },
     state::{self, State, StateData, StateDataCache, StateError},
 };
-#[cfg(test)]
-use crate::message::{Message, ProtectedMessage};
 use bytes::Buf;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::sync::Arc;
@@ -326,7 +326,9 @@ impl IkeSa {
             frag_buf.inner = inner_payload_type.into();
         }
 
-        frag_buf.fragments.insert(fragment_number, encrypted_content);
+        frag_buf
+            .fragments
+            .insert(fragment_number, encrypted_content);
 
         info!(
             fragment_number,
@@ -342,7 +344,12 @@ impl IkeSa {
         // All fragments collected — reassemble
         let inner = frag_buf.inner;
         let fragments: Vec<_> = (1..=total_fragments)
-            .map(|i| frag_buf.fragments.remove(&i).expect("fragment should exist"))
+            .map(|i| {
+                frag_buf
+                    .fragments
+                    .remove(&i)
+                    .expect("fragment should exist")
+            })
             .collect();
         frag_buf.reset();
         drop(frag_buf);
@@ -356,7 +363,8 @@ impl IkeSa {
         let mut plaintext = Vec::new();
         for fragment_data in &fragments {
             let skf = payload::Skf::new(0, 0, &fragment_data[..], inner, None);
-            let chunk = skf.decrypt_raw(decrypt_key, integ)
+            let chunk = skf
+                .decrypt_raw(decrypt_key, integ)
                 .map_err(|err| StateError::Protocol(err.into()))?;
             plaintext.extend_from_slice(&chunk);
         }
@@ -487,11 +495,7 @@ impl IkeSa {
             let old_state_name = old_state.to_string();
 
             let new_state = old_state
-                .handle_rekey_ike_sa(
-                    &self.config,
-                    self.sender.clone(),
-                    self.data.clone(),
-                )
+                .handle_rekey_ike_sa(&self.config, self.sender.clone(), self.data.clone())
                 .await?;
 
             let new_state_name = new_state.to_string();
@@ -511,11 +515,7 @@ impl IkeSa {
             let old_state_name = old_state.to_string();
 
             let new_state = old_state
-                .handle_dpd(
-                    &self.config,
-                    self.sender.clone(),
-                    self.data.clone(),
-                )
+                .handle_dpd(&self.config, self.sender.clone(), self.data.clone())
                 .await?;
 
             let new_state_name = new_state.to_string();
@@ -1008,18 +1008,22 @@ impl ChildSa {
         if self.on_initiator {
             &self.spi
         } else {
-            self.chosen_proposal.spi.as_slice().try_into().expect(
-                "SPI length validated in ChosenProposal::new",
-            )
+            self.chosen_proposal
+                .spi
+                .as_slice()
+                .try_into()
+                .expect("SPI length validated in ChosenProposal::new")
         }
     }
 
     /// Returns the responder SPI
     pub fn spi_r(&self) -> &EspSpi {
         if self.on_initiator {
-            self.chosen_proposal.spi.as_slice().try_into().expect(
-                "SPI length validated in ChosenProposal::new",
-            )
+            self.chosen_proposal
+                .spi
+                .as_slice()
+                .try_into()
+                .expect("SPI length validated in ChosenProposal::new")
         } else {
             &self.spi
         }

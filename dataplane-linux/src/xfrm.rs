@@ -2,8 +2,8 @@ use std::net::IpAddr;
 
 use anyhow::{Result, bail};
 use netlink_packet_xfrm::{
-    UserTemplate, XFRM_MODE_TRANSPORT, XFRM_MODE_TUNNEL,
-    XFRM_POLICY_FWD, XFRM_POLICY_IN, XFRM_POLICY_OUT,
+    UserTemplate, XFRM_MODE_TRANSPORT, XFRM_MODE_TUNNEL, XFRM_POLICY_FWD, XFRM_POLICY_IN,
+    XFRM_POLICY_OUT,
 };
 use swanny_proto::api;
 use tracing::debug;
@@ -17,12 +17,15 @@ fn encryption_alg_name(name: &str) -> Result<(&'static str, bool)> {
         "ENCR_AES_CBC_128" | "ENCR_AES_CBC_192" | "ENCR_AES_CBC_256" | "ENCR_AES_CBC" => {
             Ok(("cbc(aes)", false))
         }
-        "ENCR_AES_GCM_8" | "ENCR_AES_GCM_12" | "ENCR_AES_GCM_16"
-        | "ENCR_AES_GCM_8_128" | "ENCR_AES_GCM_8_256"
-        | "ENCR_AES_GCM_12_128" | "ENCR_AES_GCM_12_256"
-        | "ENCR_AES_GCM_16_128" | "ENCR_AES_GCM_16_256" => {
-            Ok(("rfc4106(gcm(aes))", true))
-        }
+        "ENCR_AES_GCM_8"
+        | "ENCR_AES_GCM_12"
+        | "ENCR_AES_GCM_16"
+        | "ENCR_AES_GCM_8_128"
+        | "ENCR_AES_GCM_8_256"
+        | "ENCR_AES_GCM_12_128"
+        | "ENCR_AES_GCM_12_256"
+        | "ENCR_AES_GCM_16_128"
+        | "ENCR_AES_GCM_16_256" => Ok(("rfc4106(gcm(aes))", true)),
         _ => bail!("unsupported encryption algorithm: {name}"),
     }
 }
@@ -91,7 +94,9 @@ async fn add_sa(
         .mode(mode);
 
     if mode == XFRM_MODE_TRANSPORT {
-        req = req.selector_protocol(0).selector_addresses(src, 32, dst, 32);
+        req = req
+            .selector_protocol(0)
+            .selector_addresses(src, 32, dst, 32);
     }
 
     if expires > 0 {
@@ -105,7 +110,8 @@ async fn add_sa(
         req = req.encryption(alg_name, &enc_key.to_vec())?;
         if !integ_alg.is_empty() {
             let (integ_name, trunc_len) = integrity_alg(integ_alg)?;
-            req = req.authentication_trunc(integ_name, &integ_key.to_vec(), trunc_len.try_into()?)?;
+            req =
+                req.authentication_trunc(integ_name, &integ_key.to_vec(), trunc_len.try_into()?)?;
         }
     }
 
@@ -117,12 +123,7 @@ async fn add_sa(
     Ok(())
 }
 
-async fn del_sa(
-    handle: &Handle,
-    src: IpAddr,
-    dst: IpAddr,
-    spi_bytes: &[u8],
-) -> Result<()> {
+async fn del_sa(handle: &Handle, src: IpAddr, dst: IpAddr, spi_bytes: &[u8]) -> Result<()> {
     let spi = u32::from_be_bytes(spi_bytes.try_into()?);
     handle
         .state()
@@ -234,12 +235,7 @@ async fn add_policy(
     Ok(())
 }
 
-async fn add_ike_bypass(
-    handle: &Handle,
-    src: IpAddr,
-    dst: IpAddr,
-    direction: u8,
-) -> Result<()> {
+async fn add_ike_bypass(handle: &Handle, src: IpAddr, dst: IpAddr, direction: u8) -> Result<()> {
     let prefix = if src.is_ipv4() { 32 } else { 128 };
     handle
         .policy()
@@ -285,18 +281,42 @@ pub async fn install_policies(tunnel_id: &str, child_up: &api::ChildUp) -> Resul
             let (remote_addr, remote_prefix) = parse_cidr(&remote.cidr)?;
 
             add_policy(
-                &handle, local_addr, local_prefix, remote_addr, remote_prefix,
-                sa_src, sa_dst, XFRM_POLICY_OUT, mode_val, if_id,
+                &handle,
+                local_addr,
+                local_prefix,
+                remote_addr,
+                remote_prefix,
+                sa_src,
+                sa_dst,
+                XFRM_POLICY_OUT,
+                mode_val,
+                if_id,
             )
             .await?;
             add_policy(
-                &handle, remote_addr, remote_prefix, local_addr, local_prefix,
-                sa_dst, sa_src, XFRM_POLICY_IN, mode_val, if_id,
+                &handle,
+                remote_addr,
+                remote_prefix,
+                local_addr,
+                local_prefix,
+                sa_dst,
+                sa_src,
+                XFRM_POLICY_IN,
+                mode_val,
+                if_id,
             )
             .await?;
             add_policy(
-                &handle, remote_addr, remote_prefix, local_addr, local_prefix,
-                sa_dst, sa_src, XFRM_POLICY_FWD, mode_val, if_id,
+                &handle,
+                remote_addr,
+                remote_prefix,
+                local_addr,
+                local_prefix,
+                sa_dst,
+                sa_src,
+                XFRM_POLICY_FWD,
+                mode_val,
+                if_id,
             )
             .await?;
         }

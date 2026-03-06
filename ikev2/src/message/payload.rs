@@ -1104,7 +1104,10 @@ pub(crate) fn deserialize_payloads(
     while buf.has_remaining() {
         let (payload, next_type) = Payload::deserialize(payload_type, buf)?;
         payloads.push(payload);
-        if matches!(payload_type.assigned(), Some(PayloadType::SK | PayloadType::SKF)) {
+        if matches!(
+            payload_type.assigned(),
+            Some(PayloadType::SK | PayloadType::SKF)
+        ) {
             break;
         }
         payload_type = next_type;

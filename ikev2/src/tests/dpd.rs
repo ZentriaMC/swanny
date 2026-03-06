@@ -21,10 +21,7 @@ async fn test_dpd() {
     let initiator2 = initiator.clone();
 
     let handle = tokio::spawn(async move {
-        initiator2
-            .handle_dpd()
-            .await
-            .expect("unable to handle DPD");
+        initiator2.handle_dpd().await.expect("unable to handle DPD");
     });
 
     let message = match messages_i.next().await {

@@ -74,9 +74,15 @@ fn build_sa_keying(
     let (sa_src, sa_dst) = match mode {
         ChildSaMode::Transport => {
             if we_are_initiator {
-                (child.ts_i().start_address().to_string(), child.ts_r().start_address().to_string())
+                (
+                    child.ts_i().start_address().to_string(),
+                    child.ts_r().start_address().to_string(),
+                )
             } else {
-                (child.ts_r().start_address().to_string(), child.ts_i().start_address().to_string())
+                (
+                    child.ts_r().start_address().to_string(),
+                    child.ts_i().start_address().to_string(),
+                )
             }
         }
         // In tunnel mode, src/dst_address are always from the local perspective
@@ -93,8 +99,18 @@ fn build_sa_keying(
                 child.spi_r().to_vec(),
                 child.keys().er.key().as_ref().to_vec(),
                 child.keys().ei.key().as_ref().to_vec(),
-                child.keys().ar.as_ref().map(|k| k.key().as_ref().to_vec()).unwrap_or_default(),
-                child.keys().ai.as_ref().map(|k| k.key().as_ref().to_vec()).unwrap_or_default(),
+                child
+                    .keys()
+                    .ar
+                    .as_ref()
+                    .map(|k| k.key().as_ref().to_vec())
+                    .unwrap_or_default(),
+                child
+                    .keys()
+                    .ai
+                    .as_ref()
+                    .map(|k| k.key().as_ref().to_vec())
+                    .unwrap_or_default(),
             )
         } else {
             (
@@ -102,8 +118,18 @@ fn build_sa_keying(
                 child.spi_i().to_vec(),
                 child.keys().ei.key().as_ref().to_vec(),
                 child.keys().er.key().as_ref().to_vec(),
-                child.keys().ai.as_ref().map(|k| k.key().as_ref().to_vec()).unwrap_or_default(),
-                child.keys().ar.as_ref().map(|k| k.key().as_ref().to_vec()).unwrap_or_default(),
+                child
+                    .keys()
+                    .ai
+                    .as_ref()
+                    .map(|k| k.key().as_ref().to_vec())
+                    .unwrap_or_default(),
+                child
+                    .keys()
+                    .ar
+                    .as_ref()
+                    .map(|k| k.key().as_ref().to_vec())
+                    .unwrap_or_default(),
             )
         };
 
@@ -171,9 +197,15 @@ pub fn child_down_event(
     let (sa_src, sa_dst) = match mode {
         ChildSaMode::Transport => {
             if we_are_initiator {
-                (child.ts_i().start_address().to_string(), child.ts_r().start_address().to_string())
+                (
+                    child.ts_i().start_address().to_string(),
+                    child.ts_r().start_address().to_string(),
+                )
             } else {
-                (child.ts_r().start_address().to_string(), child.ts_i().start_address().to_string())
+                (
+                    child.ts_r().start_address().to_string(),
+                    child.ts_i().start_address().to_string(),
+                )
             }
         }
         ChildSaMode::Tunnel => (src_address.to_string(), dst_address.to_string()),

@@ -228,8 +228,8 @@ fn handle_rekey_ike_sa_request(
         return Err(ConfigError::NoProposalsSet.into());
     }
 
-    let proposal = Proposal::negotiate(&proposals, sa.proposals())
-        .ok_or(ProtocolError::NoProposalChosen)?;
+    let proposal =
+        Proposal::negotiate(&proposals, sa.proposals()).ok_or(ProtocolError::NoProposalChosen)?;
     info!(proposal = ?&proposal, "negotiated IKE SA rekey proposal");
     let chosen_proposal = ChosenProposal::new(&proposal)?;
 
@@ -262,8 +262,7 @@ fn handle_rekey_ike_sa_request(
     debug!(skeyseed = ?&skeyseed, "generated rekey SKEYSEED");
 
     // Derive new keys (SPI order follows original initiator/responder roles)
-    let is_initiator = (*data.is_initiator)
-        .ok_or(InvalidStateError::InitiatorNotDetermined)?;
+    let is_initiator = (*data.is_initiator).ok_or(InvalidStateError::InitiatorNotDetermined)?;
     let (spi_i, spi_r) = if is_initiator {
         (&new_spi, &peer_new_spi)
     } else {
@@ -294,15 +293,11 @@ fn generate_rekey_ike_sa_response(
         request.id(),
     );
 
-    let proposal =
-        rekey
-            .chosen_proposal
-            .proposal(1, Protocol::IKE.into(), &rekey.new_spi[..]);
-
-    let group = rekey
+    let proposal = rekey
         .chosen_proposal
-        .group()
-        .expect("group must be set");
+        .proposal(1, Protocol::IKE.into(), &rekey.new_spi[..]);
+
+    let group = rekey.chosen_proposal.group().expect("group must be set");
 
     response.add_payloads([
         Payload::new(
@@ -405,8 +400,7 @@ fn handle_create_child_sa_request(
         let ke: &payload::Ke = request
             .get(PayloadType::KE)
             .ok_or(ProtocolError::MissingPayload(PayloadType::KE))?;
-        let result =
-            handle_rekey_ike_sa_request(config, data, sa, nonce_i.nonce(), &nonce, ke)?;
+        let result = handle_rekey_ike_sa_request(config, data, sa, nonce_i.nonce(), &nonce, ke)?;
         *data.nonce_r.to_mut() = Some(nonce);
         return Ok(Some(result));
     }

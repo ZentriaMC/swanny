@@ -269,11 +269,7 @@ async fn test_all_good() {
 
     handle.await.expect("handle should be awaited");
 
-    assert!(
-        initiator
-            .in_state(&state::RekeyIkeSaRequestSent {})
-            .await
-    );
+    assert!(initiator.in_state(&state::RekeyIkeSaRequestSent {}).await);
 
     let responder2 = responder.clone();
 

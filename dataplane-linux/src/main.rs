@@ -3,11 +3,8 @@ use std::num::NonZeroU32;
 
 use anyhow::Result;
 use blake2::{Blake2s256, Digest};
-use clap::{arg, command, Command};
-use swanny_proto::api::{
-    self,
-    tunnel_service_client::TunnelServiceClient,
-};
+use clap::{Command, arg, command};
+use swanny_proto::api::{self, tunnel_service_client::TunnelServiceClient};
 use tonic::transport::Channel;
 use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -137,10 +134,7 @@ async fn main() -> Result<()> {
         .map_err(|err| anyhow::anyhow!(err))?;
 
     let matches = command!()
-        .arg(
-            arg!(--endpoint <URI> "swanny gRPC endpoint")
-                .default_value("http://[::1]:50051"),
-        )
+        .arg(arg!(--endpoint <URI> "swanny gRPC endpoint").default_value("http://[::1]:50051"))
         .subcommand(
             Command::new("print-if-id")
                 .about("Print the XFRM if_id for a tunnel ID and exit")

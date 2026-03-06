@@ -59,10 +59,7 @@ fn handle_create_child_sa_response(
             .get(PayloadType::TSi)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSi))?;
         if config.strict_ts() {
-            TrafficSelector::exact_match(
-                Some(&creating_child_sa.ts_i),
-                ts_i.traffic_selectors(),
-            )
+            TrafficSelector::exact_match(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
         } else {
             TrafficSelector::negotiate(Some(&creating_child_sa.ts_i), ts_i.traffic_selectors())
         }
@@ -72,10 +69,7 @@ fn handle_create_child_sa_response(
             .get(PayloadType::TSr)
             .ok_or(ProtocolError::MissingPayload(PayloadType::TSr))?;
         if config.strict_ts() {
-            TrafficSelector::exact_match(
-                Some(&creating_child_sa.ts_r),
-                ts_r.traffic_selectors(),
-            )
+            TrafficSelector::exact_match(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
         } else {
             TrafficSelector::negotiate(Some(&creating_child_sa.ts_r), ts_r.traffic_selectors())
         }
@@ -126,7 +120,8 @@ impl NewChildSaRequestSent {
 
         if response.flags().contains(MessageFlags::I) {
             debug!(exchange = ?response.exchange(), "crossing exchange detected, responding with an error");
-            let response = generate_informational_error(data, ProtocolError::TemporaryFailure, response.id())?;
+            let response =
+                generate_informational_error(data, ProtocolError::TemporaryFailure, response.id())?;
             Self::send_message(sender.clone(), data, response)?;
             return Ok(());
         }

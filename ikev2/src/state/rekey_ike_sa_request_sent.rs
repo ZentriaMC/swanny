@@ -72,7 +72,11 @@ fn handle_create_child_sa_response(
 
     // Negotiate proposal
     let proposals: Vec<_> = vec![peer_proposal.clone()];
-    let config_proposals = [data.chosen_proposal()?.proposal(1, crate::message::num::Protocol::IKE.into(), &our_new_spi[..])];
+    let config_proposals = [data.chosen_proposal()?.proposal(
+        1,
+        crate::message::num::Protocol::IKE.into(),
+        &our_new_spi[..],
+    )];
     let proposal = Proposal::negotiate(&config_proposals, proposals.iter())
         .ok_or(ProtocolError::NoProposalChosen)?;
     info!(proposal = ?&proposal, "negotiated IKE SA rekey proposal");
@@ -98,8 +102,7 @@ fn handle_create_child_sa_response(
     debug!(skeyseed = ?&skeyseed, "generated rekey SKEYSEED");
 
     // Derive new keys (SPI order follows original initiator/responder roles)
-    let is_initiator = (*data.is_initiator)
-        .ok_or(InvalidStateError::InitiatorNotDetermined)?;
+    let is_initiator = (*data.is_initiator).ok_or(InvalidStateError::InitiatorNotDetermined)?;
     let (spi_i, spi_r) = if is_initiator {
         (&our_new_spi, &peer_new_spi)
     } else {
@@ -148,7 +151,8 @@ impl RekeyIkeSaRequestSent {
 
         if response.flags().contains(MessageFlags::I) {
             debug!(exchange = ?response.exchange(), "crossing exchange detected, responding with an error");
-            let response = generate_informational_error(data, ProtocolError::TemporaryFailure, response.id())?;
+            let response =
+                generate_informational_error(data, ProtocolError::TemporaryFailure, response.id())?;
             Self::send_message(sender.clone(), data, response)?;
             return Ok(());
         }
@@ -184,7 +188,10 @@ impl State for RekeyIkeSaRequestSent {
             if let Err(err) =
                 Self::handle_response(config, sender.clone(), &mut data, message).await
             {
-                debug!(?err, "error processing CREATE_CHILD_SA response for rekeying IKE SA");
+                debug!(
+                    ?err,
+                    "error processing CREATE_CHILD_SA response for rekeying IKE SA"
+                );
                 return Ok(Box::new(Established {}));
             }
 
