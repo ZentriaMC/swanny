@@ -4,6 +4,7 @@ description = "Experimental IKEv2 server"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+# TODO: clarify intended license with Daiki Ueno (GPL-2.0-or-later vs GPL-3.0-or-later)
 license = "GPL-2.0-or-later"
 
 [features]
